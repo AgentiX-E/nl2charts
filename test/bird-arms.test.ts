@@ -674,6 +674,49 @@ describe('a prompt that is not ours', () => {
     expect(() => promptFor(contradictory, question, { definitions: '- orders: one row per order.' })).toThrow(/no slot for definitions/);
     expect(() => promptFor({ ...templateArm, decompose: true }, question, {})).toThrow(/no slot for decompose/);
   });
+
+  it('puts the template in the pool as one slot, not as a fourth candidate', () => {
+    // The third condition of the pre-registration is about the pool, and a fourth candidate would
+    // answer a different question at a different price: four draws against three, on a bill where
+    // the template's own prompt is 5.5 times the size of the slot it would sit beside.
+    const pool = ARMS.find((arm) => arm.name === 'select-mixed-rule-template') as Arm;
+    const shipped = ARMS.find((arm) => arm.name === 'select-mixed-rule') as Arm;
+    expect(pool.mixed).toEqual(['inline+evidence', 'metadata+evidence', 'macsql-prompt']);
+    expect(shipped.mixed).toEqual(['inline+evidence', 'metadata+evidence', 'values']);
+    expect(pool.vote).toBe(shipped.vote);
+    expect(pool.selectRule).toBe(shipped.selectRule);
+    // One slot differs, and it is the one whose source is byte-identical to another on 474 of 591
+    // questions — the cheapest thing in the trio to lose if anything is.
+    expect(pool.mixed?.filter((source, index) => source !== shipped.mixed?.[index])).toEqual(['macsql-prompt']);
+  });
+
+  it('leaves the template source without a hint, because its prompt has no slot for one', () => {
+    // The pool declares `linking: true` for its own sake. A source keeps its own setting unless the
+    // arm overrides it, and an override here would ask for a column hint that `renderMacSqlBirdPrompt`
+    // has nowhere to put — the same declared-but-unread defect the template arm exists to refuse.
+    const pool = ARMS.find((arm) => arm.name === 'select-mixed-rule-template') as Arm;
+    expect(pool.linking).toBe(true);
+    expect(pool.sourceLinking).toBeUndefined();
+    expect(templateArm.linking).toBe(false);
+  });
+
+  it('sends three prompts that differ where the pool needs them to', () => {
+    // A source that restates another source is the failure mode the pool's feasibility guard exists
+    // for, and the template is the one source whose difference is structural: it is not a variant of
+    // `buildSqlPrompt`'s skeleton at all.
+    //
+    // The definitions block is supplied because without it `inline+evidence` and `metadata+evidence`
+    // are the same prompt: the first gets its descriptions from the dataset's DDL and the second
+    // from the curated notes, and a block nobody loaded is a card the two arms share.
+    const blocks = { definitions: '- orders: one row per order.' };
+    const pool = ARMS.find((arm) => arm.name === 'select-mixed-rule-template') as Arm;
+    const prompts = (pool.mixed ?? []).map((name) => {
+      const source = ARMS.find((arm) => arm.name === name) as Arm;
+      return buildSqlPrompt(question.question, card, promptFor(source, question, blocks));
+    });
+    expect(new Set(prompts).size).toBe(3);
+    expect(prompts.filter((text) => text.includes('【Constraints】'))).toHaveLength(1);
+  });
 });
 
 describe('A/A pairs', () => {
@@ -1243,7 +1286,7 @@ describe('mixed arms declare their own sources', () => {
   const mixed = ARMS.filter((arm) => arm.mixed !== undefined);
 
   it('has at least the two arms under test', () => {
-    expect(mixed.map((arm) => arm.name).sort()).toEqual(['askdata-shape', 'select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-diverse', 'select-cross-diverse-pooled-vote', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-tie', 'select-cross-pooled-vote', 'select-cross-pooled-wider', 'select-cross-pooled-wider-tie', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-tie', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-intent', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed+values', 'select-mixed-cold', 'select-mixed-gated', 'select-mixed-gated-evidence', 'select-mixed-gated-pair', 'select-mixed-gated-reconcile', 'select-mixed-gated-reconcile-novel', 'select-mixed-hot', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-mixed-rule', 'select-mixed-rule-intent', 'select-mixed-rule-narrow', 'select-mixed-rule-rows', 'select-mixed-rule-spread2', 'select-mixed-rule-spread3', 'select-mixed-spread2', 'select-mixed-spread3', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
+    expect(mixed.map((arm) => arm.name).sort()).toEqual(['askdata-shape', 'select-balanced', 'select-cross', 'select-cross-agree', 'select-cross-canon', 'select-cross-diverse', 'select-cross-diverse-pooled-vote', 'select-cross-empty', 'select-cross-judge', 'select-cross-judge-canon', 'select-cross-judge-reasoning', 'select-cross-pooled', 'select-cross-pooled-agree', 'select-cross-pooled-dissent', 'select-cross-pooled-dissent-pair', 'select-cross-pooled-judge-reasoning', 'select-cross-pooled-reconcile', 'select-cross-pooled-reconcile-novel', 'select-cross-pooled-tie', 'select-cross-pooled-vote', 'select-cross-pooled-wider', 'select-cross-pooled-wider-tie', 'select-cross-repair-all', 'select-cross-repair-second', 'select-cross-shuffled', 'select-cross-tie', 'select-cross-unhinted', 'select-dc', 'select-duo', 'select-intent', 'select-mixed', 'select-mixed+agree', 'select-mixed+dc', 'select-mixed+empty', 'select-mixed+empty-blind', 'select-mixed+values', 'select-mixed-cold', 'select-mixed-gated', 'select-mixed-gated-evidence', 'select-mixed-gated-pair', 'select-mixed-gated-reconcile', 'select-mixed-gated-reconcile-novel', 'select-mixed-hot', 'select-mixed-pooled', 'select-mixed-pooled-vote', 'select-mixed-rule', 'select-mixed-rule-intent', 'select-mixed-rule-narrow', 'select-mixed-rule-rows', 'select-mixed-rule-spread2', 'select-mixed-rule-spread3', 'select-mixed-rule-template', 'select-mixed-spread2', 'select-mixed-spread3', 'select-samples', 'select-tagged', 'vote-cross', 'vote-mixed']);
   });
 
   it.each(mixed.map((arm) => [arm.name, arm] as const))('%s: candidates are a whole number of passes over the sources', (name, arm) => {

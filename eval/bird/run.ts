@@ -918,6 +918,20 @@ export function assertSamplesLoaded(
 export const MIXED_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'values'];
 
 /**
+ * The shipped trio with the third slot given to the template instead of the value index.
+ *
+ * One slot, not a fourth candidate: the pre-registration asks whether their prompt survives the
+ * pool, and a fourth candidate answers a different question at a different price. The slot that
+ * goes is `values` — the source that is byte-identical to `metadata+evidence` on 474 of 591
+ * questions and sole-correct on 11, so it is the cheapest thing in the trio to lose if anything is.
+ *
+ * The three prompts stay distinct (the template's is 12,728 characters against the trio's 2,600-odd,
+ * and its card is theirs), which is what the mixed feasibility guard checks: a pool of paraphrases
+ * is the failure this arm exists to avoid, and `distinctShare` reads it off the prompts themselves.
+ */
+export const TEMPLATE_SOURCES: readonly string[] = ['inline+evidence', 'metadata+evidence', 'macsql-prompt'];
+
+/**
  * The shipped trio plus the one candidate whose statement is rendered rather than written.
  *
  * `values` was kept in the third slot on the third slot's own verdict (round 44: swapping it for
@@ -1427,6 +1441,27 @@ export const ARMS: readonly Arm[] = [
   // one run — the score, the recorded candidates, and `bench:bird:consensus` over those
   // candidates — and the identity between the last two is exact or something is wrong.
   { name: 'select-mixed-rule', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: MIXED_SOURCES },
+  // The registered third condition of the template's pre-registration: the pool, with their prompt
+  // in the third slot.
+  //
+  // The bar was written before the template existed — "the three-candidate pool ≥ 387 with the
+  // template in the third slot ... the pool is the product; a source that wins alone and loses in
+  // the pool is a source that restates what the others say" — and the single-candidate half of it
+  // is now measured on the split the leaderboard reports: 1,004 of 1,532 against the shipped
+  // prompt's 947, +3.72pp, paired 134:77, p = 0.0001, one call a case. A source that wins alone
+  // earns this reading rather than the other way round, so the pool is dispatched before anything
+  // is shipped on the strength of the arm.
+  //
+  // It is `select-mixed-rule` with one slot swapped: `values` out, `macsql-prompt` in, same count,
+  // same free rule, same judge, same two other sources. The template source keeps its own
+  // `linking: false` (no `sourceLinking` override), because their prompt has no slot for a column
+  // hint — the same reason the arm is read against `inline+evidence-nolink` and not against the
+  // shipped prompt when the question is *which mechanism* moved.
+  //
+  // The cost is not one lever and cannot be: the template candidate is 3,694 prompt tokens against
+  // 646 for the source it replaces, so this arm's bill is the pool's bill plus 3,048 tokens a case.
+  // That is why the reading has to be the pool's own bar and not the delta against 387 alone.
+  { name: 'select-mixed-rule-template', notes: false, evidence: 'dataset', repairs: 0, linking: true, definitions: 'inline', vote: 3, select: true, selectRule: 'shortest', mixed: TEMPLATE_SOURCES },
   // The leader's linker, on this repository's shipped candidate set and free rule.
   //
   // `AskData` is the top BIRD row this repository compares itself to (78.49% dev, 83.40% test) and
@@ -2081,6 +2116,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'select-mixed': 'three decompositions instead of three samples: within its MDE of a single call on this split, and the decomposition question needs the dev split to be answered',
   'select-mixed-rule': "the parent's own candidates chosen by `shortest` instead of by the model: three calls instead of four, and the offline device already priced the rule at 63.64% against the selector's 62.79% on 1,532 dev questions (63.71% against 61.42% on the strong pool, +2.29pp, p = 0.0030) — this arm is the derivation becoming a measurement, and its artifact is what `bench:bird:consensus` must reproduce exactly",
   'select-mixed-rule-rows': "the shipped arm plus a fourth candidate drawn from three stored rows per table: the pool read apart offline says the missing statements are `values` failures (71.3% of the 168 questions whose pool held no correct candidate) and that seven filter sites in ten aim at a column that has never held the value, which is a fact about rows rather than about columns — the arm that asks whether a fourth candidate differing in knowledge converts under a rule instead of under a selector",
+  'select-mixed-rule-template': "the shipped pool with their prompt in the third slot instead of the value index: the third condition of the template's pre-registration, written before the arm existed and dispatched only after the single-candidate reading cleared its own bar (1,004 of 1,532 against 947, +3.72pp, 134:77, p = 0.0001, one call a case). The bar stays what it was — at least 387 of 600, the pool is the product — and the bill is not one lever: 3,694 prompt tokens a case on one of the three candidates against 646 for the slot it replaces",
   'select-mixed-rule-narrow': "the shipping arm with the narrowed value block on all three candidate cards: the block cleared its single-prompt bar at +1.50pp for +9.17% tokens (`43591209696`), and this arm is the one that says whether it survives being paid once per candidate on a pool that already holds three chances to be right — one field (`sourceSamples`), same sources, same chooser, three calls",
   'askdata-shape': "the leader's five-variant alignment linker on this repository's own pool: it is the only arm that can price the 8.2pp between this split's hint-carrying full-schema 63.0% and the 71.2% the paper reports for the same cell, and it costs eight calls a case — five to decide what to show, one rewrite per variant whose statement leaves a literal in a field that cannot hold it, and three candidates. Dispatched once, against `select-mixed-rule` on the same 496 questions, against a criterion registered in `docs/benchmarks.md` before the run: at or above +4.0pp the pipeline explains the gap, +1.5 to +4.0pp the linker is worth copying and the rest is the model, below +1.5pp the gap belongs to the author's model and demonstrations and the next lever is a stronger model rather than a longer pipeline. The five-call cost is why it is not in the chain: a lever that triples the bill of every push has to earn its place with one reading, not with a weekly one",
   'select-mixed-rule-intent': 'the same fourth call spent on a candidate rendered from a query intent: same pool size, same free rule, same price as `select-mixed-rule-rows`, so the two arms together say which kind of difference a fourth candidate has to be — and the delta against `select-mixed-rule` is the conversion test `select-intent` could not give, because that arm read four candidates with the paid selector and lost 3.50pp doing it',
@@ -2471,6 +2507,10 @@ export const PAIRS: readonly (readonly [string, string])[] = [
   // Same three candidates, same cost, one source swapped: which prompt earns the third slot
   // when the value block is empty on 61% of the split.
   ['select-mixed', 'select-dc'],
+  // One slot: the value index out, their prompt in, same count, same rule, same judge. The cost
+  // is not one lever and the arm says so — that is why the pool's own bar decides it and the delta
+  // against 387 is reported beside the token column rather than on its own.
+  ['select-mixed-rule', 'select-mixed-rule-template'],
   ['definitions', 'definitions+evidence'],
   ['synth-definitions', 'synth-definitions+evidence'],
   ['names', 'metadata'],
