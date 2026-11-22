@@ -20104,3 +20104,55 @@ base:
 4. **If `timeouts` is non-zero, judge the apparatus first.** `S1-b` forfeited 94 of 1,532 cases to
    a ceiling and reported it as a model result; that mistake is not going to be repeated on the
    same instrument.
+
+### The reading: both arms rise, the gap does not move, and the mode is not the lever
+
+`45040430602` answered both arms on the second base at 1,532 dev questions, concurrency 8, the
+primary leg's 120 s ceiling. Two runs, four cells, one prompt pair:
+
+| base | mode | `macsql-prompt` | `macsql-bird-os` | gap | paired | exact McNemar |
+| --- | --- | --- | --- | --- | --- | --- |
+| primary (`deepseek-chat`) | non-thinking | 997 = **65.08%** | 1,007 = **65.73%** | +0.65pp | 56:66 | p = 0.4153 |
+| second (`deepseek-flash`) | thinking, 95.2% of cases | 1,018 = **66.45%** | 1,020 = **66.58%** | +0.13pp | 49:51 | p = 0.9204 |
+
+**The registered criterion fires on its first branch.** The gap is +0.65pp on one base and +0.13pp
+on the other; the difference in differences is **−0.52pp** with a 95% bootstrap interval of
+**[−2.48, +1.50]** over the same 1,532 questions, and 185 cases moved differently in a table where
+125 discordant cells decide everything. That is noise. **The procedure line stays closed**, and the
+remaining levers are the selector and the backbone — not another prompt.
+
+Two readings come out of the same table, and the second one is the interesting one.
+
+**Both arms rise when the model is allowed to think, and neither rise is detectable.** Pairing the
+same arm across the two bases — identical questions, identical prompt, one variable:
+
+| arm | non-thinking | thinking | paired | exact McNemar |
+| --- | --- | --- | --- | --- |
+| `macsql-prompt` | 997 = 65.08% | 1,018 = 66.45% | 69:90 | **p = 0.112** |
+| `macsql-bird-os` | 1,007 = 65.73% | 1,020 = 66.58% | 73:86 | **p = 0.341** |
+
+So thinking buys **+1.37pp** on one arm and **+0.85pp** on the other, and 1,532 questions cannot
+separate either from zero at 0.05. This is the mirror of `S1`, where a genuinely wider base
+(`deepseek-v4-pro`, 5.6× the width) bought **+3.13pp at p = 0.0004** on the same split. **Width
+bought a reading; decoding mode bought a direction.** For a system that cannot fine-tune, that is
+the useful half of the CHASE-SQL result: its +10.27 came from a trained generator and a pool of
+candidates, not from letting the model deliberate longer.
+
+**The cost was over-estimated by a third, and the reason is the probe's sample.** The 24-question
+probe measured 1,569 completion tokens a case and the full split measures **1,250**: the first 24
+questions of dev are harder than the split as a whole, so a cost extrapolated from them is an upper
+bound rather than an estimate. At the price row:
+
+| arm | prompt miss / hit | completion | measured cost |
+| --- | --- | --- | --- |
+| `macsql-prompt` | 260 × 1,532 @2; 3,454 × 1,532 @0.04 | 1,250 × 1,532 @8 | ≈ ¥16.3 |
+| `macsql-bird-os` | 294 × 1,532 @2; 3,678 × 1,532 @0.04 | 1,285 × 1,532 @8 | ≈ ¥16.9 |
+
+**≈ ¥33.2**, against the ≈¥45 extrapolated from the probe and ≈¥7.8 for the three-arm non-thinking
+round. Thinking mode costs about four times the non-thinking leg on this split and buys +1.37pp at
+p = 0.11 — a price that no product decision should accept on this evidence.
+
+**One field disagrees with itself and is recorded rather than smoothed.** The prompt arm reports
+`servedModels: {"deepseek-flash": 1530}` for 1,532 cases: two answers carry no serving name, which
+is the same fact as its `llmFailureShare: 0.001`. The examples arm reports 1,532 of 1,532. Neither
+number is adjusted; the row says what the endpoint said.
