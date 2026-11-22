@@ -86,6 +86,19 @@ cannot be argued with.
   one is outside both columns rather than a free point for the count.
 
 ### Added
+- **The paid selector reads 387 of 600 and the whole selection line closes.** `select-mixed-template`
+  is `select-mixed-rule-template` with one field changed — the free rule out, the model in — dispatched
+  on dev's first 600 questions beside its two references (`45003945244`). The criterion was registered
+  before the run: **at least 405**, the midpoint of the free family's 401 and the 409 an earlier round
+  wrote down. The reading is **387** (64.5%), against the free rule's 388 and the single source's
+  **389**, with all three pairs inside noise (42:43 p = 1.0000, 37:39 p = 0.9088, 34:35 p = 1.0000).
+  The paid selector's own call is 427 prompt tokens — 374 of them uncached — and **one** completion
+  token: it does not read the statements in any sense that changes an answer. So three claims close
+  together: the free family (ceiling 401), the paid selector (387, *below* no selection at all), and
+  the pool itself (389 single against 388 pooled, for three times the calls). The registered
+  conclusion stands unmodified: **the next candidate has to differ in knowledge rather than in
+  wording**, because 8pp of `recall@3` headroom (72.7% against 64.7%) is headroom no chooser can
+  reach when all three prompts wrote the same wrong statement.
 - **The shipped prompt is one object in the package, and an instrument proves the product sends it.**
   The adoption reading decided that the shipped SQL prompt is `macsql-prompt` — MAC-SQL's skeleton on
   this project's card, the dataset's evidence, no column hint, one call — and that decision had

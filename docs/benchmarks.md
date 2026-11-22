@@ -19465,3 +19465,51 @@ as a failure and re-run with another prompt.
 The run also carries `select-mixed-rule-template` and `macsql-prompt`, so the free ceiling and the
 single source are measured on the same case set in the same hour rather than inherited from an
 earlier artifact.
+
+### The reading: 387, and the selection line closes
+
+Run `45003945244`, dev's first 600 questions, three arms on one endpoint in one hour:
+
+| arm | selected | calls a case | prompt tokens | of which cached | uncached | completion |
+| --- | --- | --- | --- | --- | --- | --- |
+| `macsql-prompt` (single source) | **389** (64.8%) | 1.00 | 3,705 | 3,522 | 183 | 128 |
+| `select-mixed-rule-template` (free rule) | 388 (64.7%) | 3.00 | 6,176 | 5,608 | 568 | 229 |
+| `select-mixed-template` (paid selector) | **387** (64.5%) | 4.00 | 6,603 | 5,661 | 942 | 226 |
+
+Paired, inside the run:
+
+| pair | only left | only right | exact McNemar |
+| --- | --- | --- | --- |
+| single → free rule | 42 | 43 | p = 1.0000 |
+| single → paid selector | 37 | 39 | p = 0.9088 |
+| free rule → paid selector | 34 | 35 | p = 1.0000 |
+
+**Criterion: ≥405. Reading: 387. The bar is missed by 18 cases, and the registered middle branch did
+not happen either** — the paid selector is not "just short of 405", it is the *lowest* of the three
+numbers in its own run, by two cases against a source that costs a quarter of the calls.
+
+The decision is the one written down before the dispatch, and it is not "try another selector
+prompt":
+
+> **≤401: a call that reads the three statements is worth nothing here, and the pool work stops until
+> a candidate source differs in *knowledge* rather than in wording.**
+
+Three things are now closed on this pool, and they close together:
+
+1. **The free family is closed** — twenty zero-call strategies, ceiling 401, and the reason is
+   countable: 485 of 600 questions have every candidate shaped the same (`bench:bird:rules`).
+2. **The paid selector is closed** — one call that reads all three statements, and it moves the answer
+   *backwards* by one case against choosing by rule. The selector's own call is 427 prompt tokens (374
+   uncached) and **one** completion token: it is not reading the statements in any sense that changes
+   an answer.
+3. **The pool itself is closed** — a single source reads 389 while the three-candidate pool reads 388
+   for three times the calls. The pool's value was always the *ceiling* (an answer existed on 437 of
+   600), and a ceiling is only worth what a chooser can convert. Nothing here can convert it.
+
+That is why the next candidate has to differ in knowledge rather than in wording: three prompts that
+disagree about phrasing give a chooser nothing to decide on, which is exactly what
+`recall@3 72.7%` against `64.7%` says — **8pp of headroom that a chooser cannot reach** because the
+cases it would need are the ones where all three prompts wrote the same wrong statement.
+
+`select-mixed-template` stays in the arm table as an on-demand ablation reference, not as a
+candidate: it is the measurement that closes the line, and re-running it would only re-buy it.
