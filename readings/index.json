@@ -3,96 +3,24 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "105abba2ab6677bca164b62609a7d6accb82512f",
+   "commit": "032cae00070e9b100bf0e97101a9bea0577eedd0",
    "workflow": "bird-dev",
-   "runId": "44917562527",
+   "runId": "44974188185",
    "split": "dev",
    "dataset": "bird-dev",
-   "model": "deepseek-chat",
-   "secondModel": "deepseek-reasoner",
-   "generatedAt": "2026-11-21T15:15:38.694Z",
+   "model": null,
+   "secondModel": null,
+   "generatedAt": "2026-11-22T02:06:36.915Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
     "questions": 1534
    },
    "selection": {
-    "requested": 600,
-    "scored": 600
+    "requested": 1534,
+    "scored": 1532
    },
-   "arms": [
-    {
-     "arm": "select-cross",
-     "passed": 379,
-     "total": 600,
-     "accuracy": 0.6316666666666667,
-     "candidateRecall": 432,
-     "selectionLoss": 53,
-     "calls": 4,
-     "promptTokens": 3610,
-     "completionTokens": 534,
-     "strictPassed": 366,
-     "spend": {
-      "asked": 600,
-      "priced": 600
-     }
-    },
-    {
-     "arm": "select-cross-pooled-vote",
-     "passed": 390,
-     "total": 600,
-     "accuracy": 0.65,
-     "candidateRecall": 432,
-     "selectionLoss": 42,
-     "calls": 0,
-     "promptTokens": 0,
-     "completionTokens": 0,
-     "strictPassed": 369,
-     "poolRead": {
-      "shared": 600,
-      "unrecorded": 0,
-      "cases": 600
-     }
-    },
-    {
-     "arm": "select-cross-diverse",
-     "passed": 371,
-     "total": 600,
-     "accuracy": 0.6183333333333333,
-     "candidateRecall": 432,
-     "selectionLoss": 61,
-     "calls": 4,
-     "promptTokens": 3753,
-     "completionTokens": 625,
-     "strictPassed": 355,
-     "spend": {
-      "asked": 600,
-      "priced": 600
-     }
-    },
-    {
-     "arm": "select-cross-diverse-pooled-vote",
-     "passed": 386,
-     "total": 600,
-     "accuracy": 0.6433333333333333,
-     "candidateRecall": 432,
-     "selectionLoss": 46,
-     "calls": 0,
-     "promptTokens": 0,
-     "completionTokens": 0,
-     "strictPassed": 371,
-     "poolRead": {
-      "shared": 600,
-      "unrecorded": 0,
-      "cases": 600
-     }
-    }
-   ],
-   "rves": {
-    "rves": 0.5620833333333334,
-    "repeats": 5,
-    "floor": 0.5954166666666667
-   }
+   "arms": []
   }
  }
 }
