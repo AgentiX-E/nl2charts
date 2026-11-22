@@ -56,6 +56,13 @@ describe('reading the identifiers of one condition', () => {
     ]);
   });
 
+  it('reads no identifier out of a condition that names none', () => {
+    // `where 1 = 1` is a real atom in the corpus: the splitter sees a predicate, and the reader has
+    // to say it names no column rather than fall over. An empty list is also why `missingGaps` can
+    // file a condition as missing without a column behind it.
+    expect(atomIdentifiers('1 = 1')).toEqual([]);
+  });
+
   it('treats a column named like a keyword as a column', () => {
     // `date` is not in the keyword list, `end` is: a column called `end` is spelled by its
     // table instead, which is why the qualifier is what this function keeps.

@@ -22,8 +22,10 @@ import {
   filterCue,
   gateCases,
   gateInputs,
+  jsonBody,
   main,
   namedColumns,
+  reading,
   reportLines,
   resolveSettings,
   schemasFor,
@@ -208,6 +210,21 @@ describe('joining the artifact to the split', () => {
     expect(joined.cases[0]?.stated).toBe(1);
   });
 
+  it('does not treat a non-string database or evidence note as one', () => {
+    // An artifact written by a version that recorded `db` as a number, or by a tool that filled the
+    // key with something else: reading it would put a number in `fold` and make the per-database
+    // ranking a ranking of numbers.
+    const joined = gateCases(
+      { cases: [{ arm: 'names', id: '1', sql: 'select 1', asked: { db: 7, question: 'q', evidence: 5 } }] },
+      'names',
+      gold,
+    );
+    expect(joined.cases[0]?.db).toBe('shop');
+    // The evidence falls back to the split's copy, which is what the arm was shown; a `5` in the
+    // record is a recording bug, not a note the model saw.
+    expect(joined.cases[0]?.evidence).toBe('e');
+  });
+
   it('falls back to the split\'s database when the case did not record one', () => {
     const joined = gateCases(
       { cases: [{ arm: 'names', id: '1', sql: 'select 1', asked: { question: 'q' } }] },
@@ -235,17 +252,89 @@ describe('joining the artifact to the split', () => {
   });
 
   it('prints the reading as JSON when asked, so another tool can read it without parsing a table', () => {
-    const lines: string[] = [];
-    const code = main(
-      ['--artifact', '/workspace/tmp/diverse/bird-eval.json', '--arm', 'select-cross', '--json'],
-      '/workspace/nl2charts',
-      (line) => lines.push(line),
+    // The body is built from what `main` already computed, so this test does not need a split on
+    // disk: the first version of it pointed at a sandbox artifact and failed on CI, which is the
+    // one place a test may never be environment-dependent.
+    const artifact = { split: 'dev', model: 'm', cases: [] };
+    const outcome = reading(
+      { ...artifact, cases: [{ arm: 'names', id: '1', sql: 'select 1', asked: { db: 'shop', question: 'q' } }] },
+      'names',
+      gold,
+      new Map([['shop', schema]]),
     );
-    expect(code).toBe(0);
-    const parsed = JSON.parse(lines.join('\n')) as { cases: number; scores: { name: string }[]; lines: string[] };
-    expect(parsed.cases).toBe(600);
+    const parsed = JSON.parse(jsonBody(artifact, 'names', outcome)) as {
+      split: string;
+      model: string;
+      cases: number;
+      scores: { name: string }[];
+      lines: string[];
+    };
+    expect(parsed.split).toBe('dev');
+    expect(parsed.model).toBe('m');
+    // ...and an artifact that named neither prints two nulls, which is a cell a reader can see is
+    // missing rather than a `"undefined"` string that looks like a value.
+    const bare = JSON.parse(jsonBody({}, 'names', outcome)) as { split: string | null; model: string | null };
+    expect(bare.split).toBeNull();
+    expect(bare.model).toBeNull();
+    expect(parsed.cases).toBe(1);
     expect(parsed.scores).toHaveLength(6);
     expect(parsed.lines[0]).toContain('gating the condition audit');
+  });
+
+  it('says nothing was measured rather than printing a zero table, from the reading itself', () => {
+    expect(() => reading({ cases: [] }, 'names', gold, new Map())).toThrow(/nothing to gate/);
+  });
+
+  it('runs end to end on a two-row corpus and prints the table', () => {
+    // A miniature split on disk rather than the real one: `main` was uncovered until this test
+    // existed, and a tool whose entry point has no caller is a tool whose file handling nobody has
+    // run. `BIRD_DATA` is the lever the real runner uses, so the fixture lives where the code looks.
+    const dir = mkdtempSync(join(tmpdir(), 'gate-main-'));
+    try {
+      writeFileSync(
+        join(dir, 'mini_dev_sqlite.json'),
+        JSON.stringify([
+          { question_id: 1, db_id: 'shop', question: 'how many schools at least 10', evidence: '', SQL: 'select count(*) from school where county = \'x\'', difficulty: 'simple' },
+        ]),
+      );
+      writeFileSync(
+        join(dir, 'dev_tables.json'),
+        JSON.stringify([{ db_id: 'shop', table_names: ['school'], column_names: [[-1, '*'], [0, 'county']] }]),
+      );
+      const artifact = join(dir, 'bird-eval.json');
+      writeFileSync(
+        artifact,
+        JSON.stringify({
+          split: 'minidev',
+          model: 'm',
+          cases: [{ arm: 'names', id: '1', sql: 'select count(*) from school', asked: { db: 'shop', question: 'how many schools at least 10' } }],
+        }),
+      );
+      const lines: string[] = [];
+      expect(main(['--artifact', artifact, '--arm', 'names'], dir, (line) => lines.push(line), { BIRD_DATA: dir })).toBe(0);
+      expect(lines[0]).toContain('gating the condition audit for names on 1 cases');
+      expect(lines.join('\n')).toContain('verdict:');
+      // A second artifact that names no split: the environment's default is used, and the reading
+      // says so rather than borrowing a split name from somewhere.
+      const unnamed = join(dir, 'unnamed.json');
+      writeFileSync(
+        unnamed,
+        JSON.stringify({ cases: [{ arm: 'names', id: '1', sql: 'select count(*) from school', asked: { db: 'shop', question: 'how many schools at least 10' } }] }),
+      );
+      const unnamedLines: string[] = [];
+      expect(main(['--artifact', unnamed, '--arm', 'names'], dir, (line) => unnamedLines.push(line), { BIRD_DATA: dir })).toBe(0);
+      // The layout fell back to the environment's split, and the line says `unknown` because the
+      // artifact is what the reading is about: it named no split, and borrowing the layout's name
+      // would attribute the numbers to a split the file never claimed.
+      expect(unnamedLines[0]).toContain('(unknown, unknown)');
+
+      // ...and the same run in JSON, so the two modes cannot drift.
+      const json: string[] = [];
+      expect(main(['--artifact', artifact, '--arm', 'names', '--json'], dir, (line) => json.push(line), { BIRD_DATA: dir })).toBe(0);
+      expect((JSON.parse(json.join('\n')) as { cases: number }).cases).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('reads nothing, rather than failing, from an artifact with no cases key', () => {
@@ -350,15 +439,27 @@ describe('the harness around the reading', () => {
     expect(errors).toEqual(['the artifact is a directory']);
   });
 
+  it('prints an Error\'s message, not its stack, when the run throws one', () => {
+    const errors: string[] = [];
+    const code = dispatch(
+      '/eval/bird/condition-gate.ts',
+      'file:///eval/bird/condition-gate.ts',
+      [],
+      '/repo',
+      () => undefined,
+      (line) => errors.push(line),
+      () => {
+        throw new Error('the split holds no question for case 1');
+      },
+    );
+    expect(code).toBe(1);
+    expect(errors).toEqual(['the split holds no question for case 1']);
+  });
+
   it('does nothing when it is imported rather than run', () => {
     expect(dispatch(undefined, 'file:///eval/bird/condition-gate.ts', [], '/repo')).toBeUndefined();
     expect(dispatch('/other.ts', 'file:///eval/bird/condition-gate.ts', [], '/repo')).toBeUndefined();
   });
 
-  it('refuses a run whose artifact holds no case for the arm, instead of printing a zero table', () => {
-    const lines: string[] = [];
-    expect(() =>
-      main(['--artifact', '/workspace/tmp/diverse/bird-eval.json', '--arm', 'no-such-arm'], '/workspace/nl2charts', (line) => lines.push(line)),
-    ).toThrow(/nothing to gate/);
-  });
+
 });

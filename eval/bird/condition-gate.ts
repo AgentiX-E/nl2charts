@@ -411,14 +411,59 @@ export function schemasFor(layout: BirdLayout): Map<string, GateSchema> {
   return out;
 }
 
-export function main(argv: readonly string[], root: string, log: (line: string) => void = console.log): number {
+/**
+ * The reading itself, from three inputs that are already in memory.
+ *
+ * Split out of `main` because `main`'s first act is to read a corpus: a test that wants to check
+ * what an empty artifact prints should not need a split on disk to find out. This function is the
+ * whole reading — join, score, report — and `main` is the file handling around it.
+ */
+export function reading(
+  artifact: ArtifactShape,
+  arm: string,
+  gold: ReadonlyMap<string, { readonly SQL: string; readonly db: string; readonly question: string; readonly evidence: string }>,
+  schemas: ReadonlyMap<string, GateSchema>,
+): { cases: GateCase[]; scores: GateScore[]; lines: string[]; dropped: { missingSql: number; missingAsked: number; unknownQuestion: number } } {
+  const { cases, missingSql, missingAsked, unknownQuestion } = gateCases(artifact, arm, gold);
+  if (cases.length === 0) {
+    throw new Error(`no case in the artifact carries both sql and asked for ${arm}, so there is nothing to gate`);
+  }
+  const dropped = { missingSql, missingAsked, unknownQuestion };
+  const scores = GATES.map((gate) => scoreGate(gate, cases, schemas));
+  return { cases, scores, lines: reportLines(cases, scores, artifact, arm, dropped), dropped };
+}
+
+/** The JSON body, so a caller that reads this tool's output gets the same table the text mode prints. */
+export function jsonBody(artifact: ArtifactShape, arm: string, readingOutcome: ReturnType<typeof reading>): string {
+  return JSON.stringify(
+    {
+      // The split and the model are what make two readings comparable: an AUC-shaped number without
+      // them is a cell from an unnamed table.
+      split: typeof artifact.split === 'string' ? artifact.split : null,
+      model: typeof artifact.model === 'string' ? artifact.model : null,
+      cases: readingOutcome.cases.length,
+      arm,
+      scores: readingOutcome.scores,
+      lines: readingOutcome.lines,
+    },
+    null,
+    2,
+  );
+}
+
+export function main(
+  argv: readonly string[],
+  root: string,
+  log: (line: string) => void = console.log,
+  env: Readonly<Record<string, string | undefined>> = {},
+): number {
   const settings = resolveSettings(argv, root);
   const artifact = JSON.parse(readFileSync(settings.artifact, 'utf8')) as ArtifactShape;
   // The base layout comes from the environment, and `layoutForSplit` only changes the split when the
   // artifact names one — the artifact decides what it scored, the environment decides where files
   // live, and mixing the two silently scores one split's answers against another's questions.
   const named = typeof artifact.split === 'string' ? artifact.split : undefined;
-  const layout = layoutForSplit(named, resolveLayout({}, settings.root), settings.root);
+  const layout = layoutForSplit(named, resolveLayout(env, settings.root), settings.root);
   const questions = loadQuestions(layout.questionsFile);
   const gold = new Map(
     questions.map((question) => [
@@ -426,17 +471,9 @@ export function main(argv: readonly string[], root: string, log: (line: string) 
       { SQL: question.SQL, db: question.db_id, question: question.question, evidence: question.evidence },
     ]),
   );
-  const { cases, missingSql, missingAsked, unknownQuestion } = gateCases(artifact, settings.arm, gold);
-  if (cases.length === 0) {
-    throw new Error(`no case in ${settings.artifact} carries both sql and asked for ${settings.arm}, so there is nothing to gate`);
-  }
-  const schemas = schemasFor(layout);
-  const scores = GATES.map((gate) => scoreGate(gate, cases, schemas));
-  if (settings.json) {
-    log(JSON.stringify({ cases: cases.length, arm: settings.arm, scores, lines: reportLines(cases, scores, artifact, settings.arm, { missingSql, missingAsked, unknownQuestion }) }, null, 2));
-  } else {
-    for (const line of reportLines(cases, scores, artifact, settings.arm, { missingSql, missingAsked, unknownQuestion })) log(line);
-  }
+  const outcome = reading(artifact, settings.arm, gold, schemasFor(layout));
+  if (settings.json) log(jsonBody(artifact, settings.arm, outcome));
+  else for (const line of outcome.lines) log(line);
   return 0;
 }
 
