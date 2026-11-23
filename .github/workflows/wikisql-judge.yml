@@ -1,0 +1,57 @@
+name: wikisql-judge
+
+# WikiSQL's judge, checked against the corpus it judges.
+#
+# The split is 8,421 single-table questions over 2,630 tables in one SQLite file, and the judge is a
+# port of `salesforce/WikiSQL`'s own `lib/dbengine.py`. A port is worth exactly what its agreement
+# with the reference is worth, so this workflow runs both sides over the whole split and compares a
+# digest: `eval/wikisql/reference-digest.json` was produced by the reference, and the test recomputes
+# it with the port.
+#
+# Dispatch-only and not on push, because it downloads 26 MB and executes 16,842 statements. The
+# judge's own unit suite runs on every commit; this is the check that the suite is measuring the
+# right thing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      split:
+        description: Split to validate (dev carries the public labels)
+        required: false
+        default: dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wikisql-judge
+  cancel-in-progress: true
+
+jobs:
+  judge:
+    name: judge
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      WIKISQL_SPLIT: ${{ inputs.split }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The archive is pinned by size and sha256, so a mirror that serves something else fails here
+      # rather than producing a split whose counts happen to match.
+      - name: Fetch the split
+        run: node eval/wikisql/fetch.mjs --split "$WIKISQL_SPLIT"
+      # Every gold executed twice: a gold that fails is a question nobody can be credited for, and a
+      # gold that answers differently on the second pass is a judge that cannot reproduce itself.
+      - name: Execute every gold twice
+        run: pnpm bench:wikisql --split "$WIKISQL_SPLIT"
+      # The port against the reference, over all 8,421 questions.
+      - name: Compare the port with the reference judge
+        run: pnpm exec vitest run test/wikisql-reference.test.ts --reporter=dot

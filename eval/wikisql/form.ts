@@ -44,13 +44,17 @@ export type CondOp = (typeof COND_OPS)[number];
 /**
  * One annotation, as `{split}.jsonl` stores it.
  *
- * `conds` is a list of `[column_index, operator_index, value]`. The value is always text in the
- * file, including the ones that will be compared against a `real` column.
+ * `conds` is a list of `[column_index, operator_index, value]`. The value is **usually** text, and
+ * that word is doing work: 8,592 of the dev split's 11,545 condition values are strings and **2,953
+ * are JSON numbers** (2,714 integers, 239 floats) — `[4, 0, 6]` for "the minimum ties played for 6
+ * years". This file claimed the value was always text until a full-split run crashed on question
+ * one with `value.toLowerCase is not a function`, which is what an invariant no data supports costs
+ * when it is written in a comment instead of a type.
  */
 export interface LogicForm {
   readonly sel: number;
   readonly agg: number;
-  readonly conds: readonly (readonly [number, number, string])[];
+  readonly conds: readonly (readonly [number, number, string | number])[];
 }
 
 /** What a table's columns are called and what SQLite says their types are. */
@@ -87,8 +91,18 @@ export class LogicFormError extends Error {
  * `type` is SQLite's declared type for the column, because the reference reads it from
  * `sqlite_master` rather than from the corpus's own `tables.jsonl` — the two agree today and the
  * database is the one that decides how the comparison will actually behave.
+ *
+ * A numeric value is written as a numeric literal, not as text. The reference binds it as a
+ * parameter, so `col0 = ?` receives an integer; quoting it would hand the same comparison to column
+ * affinity, and affinity converts a *literal* to the column's type while leaving a bound parameter's
+ * type alone — the two agree on `6` against a `text` column and stop agreeing where a float's
+ * shortest representation is not the text stored in the row.
  */
-export function literalOf(value: string, type: string): string {
+export function literalOf(value: string | number, type: string): string {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new LogicFormError(`condition value ${String(value)} is not a finite number`);
+    return String(value);
+  }
   if (type.toLowerCase() !== 'real') return `'${value.replace(/'/g, "''")}'`;
   // `parse_decimal` in the reference accepts a leading sign and thousands separators; `num_re`
   // accepts the first decimal run anywhere in the string. Both are reproduced in that order, so a
@@ -124,7 +138,9 @@ export function statementOf(form: LogicForm, table: TableShape, options?: { lowe
     if (!Number.isInteger(column) || column < 0 || column >= table.types.length) {
       throw new LogicFormError(`condition column ${String(column)} is outside ${table.name} (${String(table.types.length)} columns)`);
     }
-    const text = lower ? value.toLowerCase() : value;
+    // `if lower and isinstance(val, str)` in the reference. A number has no case, and calling
+    // `toLowerCase` on the 2,953 numeric values is how this port stopped on question one.
+    const text = lower && typeof value === 'string' ? value.toLowerCase() : value;
     return `col${String(column)} ${op} ${literalOf(text, table.types[column] as string)}`;
   });
   const where = clauses.length === 0 ? '' : ` WHERE ${clauses.join(' AND ')}`;

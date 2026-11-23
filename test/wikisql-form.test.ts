@@ -159,3 +159,26 @@ describe('two result sets are the same answer when the reference says they are',
     expect(sameResults([['a']], [['a', 'b']])).toBe(false);
   });
 });
+
+describe('a condition value the annotation stored as a number', () => {
+  // 2,953 of the dev split's 11,545 condition values are JSON numbers — `[4, 0, 6]` for "the
+  // minimum ties played for 6 years". This file asserted that the value is always text until a run
+  // over the whole split stopped on question one with `value.toLowerCase is not a function`.
+
+  it('is written as a numeric literal, which is what the reference binds', () => {
+    expect(literalOf(6, 'text')).toBe('6');
+    expect(literalOf(150_817.6878461314, 'real')).toBe('150817.6878461314');
+  });
+
+  it('refuses a value that is not a finite number', () => {
+    expect(() => literalOf(Number.NaN, 'text')).toThrow(LogicFormError);
+    expect(() => literalOf(Number.POSITIVE_INFINITY, 'real')).toThrow(/finite/);
+  });
+
+  it('survives the statement builder without being lower-cased', () => {
+    const table = { name: 'table_1_2_3', types: ['text', 'real'] };
+    expect(statementOf({ sel: 0, agg: 0, conds: [[1, 0, 6]] }, table)).toBe(
+      'SELECT col0 AS result FROM table_1_2_3 WHERE col1 = 6',
+    );
+  });
+});

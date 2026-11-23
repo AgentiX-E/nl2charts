@@ -60,15 +60,19 @@ class Oracle:
         # installed for the first.
         self.deadline = [0.0]
 
-    def connect(self, db_id: str) -> sqlite3.Connection:
-        if db_id not in self.connections:
-            path = os.path.join(self.root, db_id, f"{db_id}.sqlite")
+    def connect(self, db_id: str, path: str | None = None) -> sqlite3.Connection:
+        # BIRD and Spider keep one file per database, `root/<id>/<id>.sqlite`. WikiSQL ships a single
+        # file holding every table, so a request may name it: the layout is a property of the corpus,
+        # and a second oracle for the second layout would be a second execution semantics.
+        key = db_id if path is None else path
+        if key not in self.connections:
+            path = os.path.join(self.root, path) if path is not None else os.path.join(self.root, db_id, f"{db_id}.sqlite")
             if not os.path.exists(path):
                 raise FileNotFoundError(f"database not found: {path}")
             connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
             connection.set_progress_handler(self._guard(), 100_000)
-            self.connections[db_id] = connection
-        return self.connections[db_id]
+            self.connections[key] = connection
+        return self.connections[key]
 
     def _guard(self):
         def handler() -> int:
@@ -76,10 +80,10 @@ class Oracle:
 
         return handler
 
-    def execute(self, db_id: str, sql: str) -> dict:
+    def execute(self, db_id: str, sql: str, path: str | None = None) -> dict:
         started = time.monotonic()
         try:
-            connection = self.connect(db_id)
+            connection = self.connect(db_id, path)
             # The clock starts when the statement starts, not when the request was
             # read: requests queue behind each other in one process, and counting
             # queue time against a 30 s budget made later statements look like
@@ -122,7 +126,7 @@ def main() -> int:
         if request.get("op") == "ping":
             print(json.dumps({"id": request.get("id", "ping"), "ok": True, "rows": [], "columns": []}), flush=True)
             continue
-        result = oracle.execute(request["db"], request["sql"])
+        result = oracle.execute(request["db"], request["sql"], request.get("path"))
         result["id"] = request["id"]
         print(json.dumps(result), flush=True)
     return 0

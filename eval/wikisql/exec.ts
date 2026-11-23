@@ -1,0 +1,260 @@
+/**
+ * WikiSQL's judge: what a gold logical form returns, and whether a prediction returns the same.
+ *
+ * The corpus ships one SQLite file per split (`dev.db`, 12 MB) holding every table the split asks
+ * about, so a table is looked up by name rather than by file. The types used to build a statement
+ * come from `sqlite_master`, not from `dev.tables.jsonl`, because that is what the reference reads:
+ * `DBEngine.execute` fetches `SELECT sql from sqlite_master WHERE tbl_name = :name`, takes the text
+ * inside the outermost parentheses, splits it on `', '` and then on whitespace. Reproducing that
+ * parse — rather than trusting the JSON — is what makes a disagreement between the two a finding
+ * instead of a coincidence.
+ *
+ * Execution goes through `eval/bird/oracle.py`, the same process the BIRD harness uses. A second
+ * driver for the second corpus would be a second dialect under test, and the comparison this file
+ * makes is between two *statements*, so both sides have to reach the same engine.
+ *
+ * Two comparisons are computed and only one of them is the leaderboard's:
+ *
+ * - `ordered` is the reference's. `cursor.fetchall()` returns rows in scan order, the reference
+ *   compares those tuples with `==`, and every published WikiSQL number was produced that way. A
+ *   statement and its `ORDER BY` twin can disagree here.
+ * - `bag` is the same multiset of rows with order erased. It is reported as a diagnostic, because
+ *   the gap between the two is the size of a judging artefact that a reader would otherwise attribute
+ *   to the model: a prediction that is logically right and sorted differently shows up as `bag`
+ *   minus `ordered`.
+ */
+import { createHash } from 'node:crypto';
+import type { Hash } from 'node:crypto';
+import type { Oracle, OracleResult } from '../bird/oracle.js';
+import { LogicFormError, sameResults, statementOf, tableNameOf } from './form.js';
+import type { LogicForm, TableShape } from './form.js';
+
+/** One question of a split, as `{split}.jsonl` stores it. */
+export interface SplitRow {
+  /** Position in the file. Predictions name this, not the question text. */
+  readonly index: number;
+  readonly tableId: string;
+  readonly question: string;
+  readonly form: LogicForm;
+}
+
+/** What a statement answered: rows, or the reason there are none. */
+export type Answer =
+  | { readonly ok: true; readonly rows: readonly (readonly unknown[])[] }
+  | { readonly ok: false; readonly error: string };
+
+/** A prediction, as the scorer reads it. */
+export interface Prediction {
+  readonly index: number;
+  readonly sql: string;
+}
+
+/**
+ * Parse `{split}.jsonl`.
+ *
+ * A line that is not a question is an error rather than a skip: the split's count is asserted by
+ * the fetcher, so an unparseable line inside a correctly-counted file is corruption, and a judge
+ * that dropped it would report a rate over a corpus it silently shortened.
+ */
+export function parseSplit(text: string): SplitRow[] {
+  const rows: SplitRow[] = [];
+  for (const [offset, line] of text.split('\n').entries()) {
+    if (line.trim().length === 0) continue;
+    const parsed = JSON.parse(line) as { table_id: string; question: string; sql: LogicForm };
+    rows.push({
+      index: rows.length,
+      tableId: parsed.table_id,
+      question: parsed.question,
+      form: { sel: parsed.sql.sel, agg: parsed.sql.agg, conds: parsed.sql.conds },
+    });
+    if (rows.length - 1 !== offset) {
+      // Only reachable if a blank line sits inside the file, which the count already rejects; the
+      // check stays because an index that drifts from the line it came from makes every prediction
+      // score against the wrong question.
+      throw new Error(`blank line at ${String(offset)} shifted the question index`);
+    }
+  }
+  return rows;
+}
+
+/** Parse a predictions file: one `{"index": 0, "sql": "SELECT …"}` per line. */
+export function parsePredictions(text: string): Map<number, string> {
+  const predictions = new Map<number, string>();
+  for (const line of text.split('\n')) {
+    if (line.trim().length === 0) continue;
+    const parsed = JSON.parse(line) as { index: number; sql: string };
+    if (!Number.isInteger(parsed.index) || typeof parsed.sql !== 'string') {
+      throw new Error(`prediction line is not {index, sql}: ${line.slice(0, 120)}`);
+    }
+    if (predictions.has(parsed.index)) throw new Error(`two predictions for question ${String(parsed.index)}`);
+    predictions.set(parsed.index, parsed.sql);
+  }
+  return predictions;
+}
+
+const SCHEMA_RE = /\((.+)\)/su;
+
+/**
+ * The columns of a table, parsed out of the `CREATE TABLE` the database stores.
+ *
+ * `schema_re.findall(table_info)[0]` in the reference takes the *first* parenthesised run and
+ * splits the whole thing on `', '` — a statement written without that exact separator yields one
+ * column whose name contains a comma. That is reproduced rather than repaired: the corpus is
+ * generated by one writer, and a parser that accepted more than the reference would compute types
+ * the reference cannot.
+ */
+export function schemaOf(createSql: string, tableId: string): TableShape {
+  const inside = SCHEMA_RE.exec(createSql);
+  if (inside === null) throw new Error(`no column list in ${createSql.slice(0, 120)}`);
+  const types: string[] = [];
+  for (const column of (inside[1] as string).split(', ')) {
+    const parts = column.split(/\s+/u);
+    if (parts.length !== 2) throw new Error(`column ${JSON.stringify(column)} is not "<name> <type>"`);
+    types.push(parts[1] as string);
+  }
+  return { name: tableNameOf(tableId), types };
+}
+
+/**
+ * The rows a statement returned, or the reason it did not.
+ *
+ * Bytes arrive as `{"$b64": "…"}` from the oracle; nothing in WikiSQL returns one, and the wrapper
+ * is left intact so both sides of a comparison would carry the same shape.
+ */
+export function answerOf(result: OracleResult): Answer {
+  return result.ok ? { ok: true, rows: result.rows } : { ok: false, error: result.error ?? 'no error text' };
+}
+
+/** The same rows, order erased, with duplicates counted: `[1,1,2]` is not `[1,2]`. */
+export function sameBag(
+  gold: readonly (readonly unknown[])[],
+  pred: readonly (readonly unknown[])[],
+): boolean {
+  if (gold.length !== pred.length) return false;
+  const canonical = (rows: readonly (readonly unknown[])[]): string[] =>
+    rows.map((row) => JSON.stringify(row.map((cell) => (cell === null ? null : cell)))).sort();
+  const left = canonical(gold);
+  const right = canonical(pred);
+  return left.every((row, index) => row === right[index]);
+}
+
+/** What one question scored, and what the two comparisons saw. */
+export interface CaseReading {
+  readonly index: number;
+  readonly gold: Answer;
+  readonly pred: Answer;
+  /** The reference's comparison: same rows in the same order. */
+  readonly ordered: boolean;
+  /** The same rows as a multiset. `ordered` false with this true is a judging artefact. */
+  readonly bag: boolean;
+}
+
+/**
+ * The judge, holding one oracle connection per file and one schema cache.
+ *
+ * `path` is the split's database file, relative to the oracle's root — `dev.db` for the corpus this
+ * repository scores, and a parameter because a test builds its own.
+ */
+export class Judge {
+  readonly #oracle: Oracle;
+  readonly #path: string;
+  readonly #schemas = new Map<string, TableShape>();
+
+  constructor(oracle: Oracle, path: string) {
+    this.#oracle = oracle;
+    this.#path = path;
+  }
+
+  /** The table's columns, read from the database the first time a question names it. */
+  async tableOf(tableId: string): Promise<TableShape> {
+    const cached = this.#schemas.get(tableId);
+    if (cached !== undefined) return cached;
+    const name = tableNameOf(tableId);
+    const found = await this.#oracle.run(
+      tableId,
+      `SELECT sql FROM sqlite_master WHERE tbl_name = '${name.replace(/'/g, "''")}' LIMIT 1`,
+      this.#path,
+    );
+    if (!found.ok) throw new Error(`schema lookup for ${tableId} failed: ${found.error ?? ''}`);
+    const row = found.rows[0];
+    if (row === undefined) throw new Error(`database has no table named ${name}`);
+    const shape = schemaOf(String(row[0]), tableId);
+    this.#schemas.set(tableId, shape);
+    return shape;
+  }
+
+  /** What the gold logical form answers. A form the statement builder refuses is an error, not a 0. */
+  async goldOf(row: SplitRow): Promise<Answer> {
+    const table = await this.tableOf(row.tableId);
+    let statement: string;
+    try {
+      statement = statementOf(row.form, table);
+    } catch (error) {
+      if (error instanceof LogicFormError) return { ok: false, error: error.message };
+      throw error;
+    }
+    return answerOf(await this.#oracle.run(row.tableId, statement, this.#path));
+  }
+
+  /** What a predicted statement answers. Refused SQL is a miss with a reason, never an exception. */
+  async predictOf(tableId: string, sql: string): Promise<Answer> {
+    return answerOf(await this.#oracle.run(tableId, sql, this.#path));
+  }
+
+  /** Score one question's prediction against its gold answer. */
+  static compare(index: number, gold: Answer, pred: Answer): CaseReading {
+    if (!gold.ok || !pred.ok) return { index, gold, pred, ordered: false, bag: false };
+    return { index, gold, pred, ordered: sameResults(gold.rows, pred.rows), bag: sameBag(gold.rows, pred.rows) };
+  }
+}
+
+/** A rate over a corpus, with the denominators a reader needs to trust it. */
+export interface Reading {
+  readonly cases: number;
+  readonly scored: number;
+  readonly exact: number;
+  readonly bag: number;
+  readonly goldErrors: number;
+  readonly goldEmpty: number;
+  readonly predErrors: number;
+}
+
+/** Fold case readings into one reading. */
+export function readingOf(readings: readonly CaseReading[], cases: number): Reading {
+  let exact = 0;
+  let bag = 0;
+  let goldErrors = 0;
+  let goldEmpty = 0;
+  let predErrors = 0;
+  for (const reading of readings) {
+    if (!reading.gold.ok) goldErrors += 1;
+    else if (reading.gold.rows.length === 0) goldEmpty += 1;
+    if (!reading.pred.ok) predErrors += 1;
+    if (reading.ordered) exact += 1;
+    if (reading.bag) bag += 1;
+  }
+  return { cases, scored: readings.length, exact, bag, goldErrors, goldEmpty, predErrors };
+}
+
+/** Percentage points, two decimals, from two counts. */
+export function percent(part: number, whole: number): number {
+  if (whole === 0) return 0;
+  return Math.round((part / whole) * 10_000) / 100;
+}
+
+/**
+ * A digest of every gold answer, in question order.
+ *
+ * The reference judge can be run against the same split and its answers compared wholesale; a
+ * digest is the form that comparison takes when the comparison has to live in a repository. The
+ * canonical text is deliberately the same on both sides — `index`, a newline, the rows as compact
+ * JSON, a newline — and a failed gold contributes the literal `null` rather than being skipped,
+ * because a skipped question would let the two sides disagree about which questions they covered.
+ */
+export function digestOf(answers: readonly Answer[], hash: Hash = createHash('sha256')): string {
+  for (const [index, answer] of answers.entries()) {
+    const rows = answer.ok ? JSON.stringify(answer.rows) : 'null';
+    hash.update(`${String(index)}\n${rows}\n`);
+  }
+  return hash.digest('hex');
+}

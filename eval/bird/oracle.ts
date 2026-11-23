@@ -44,7 +44,15 @@ interface Pending {
 export interface Oracle {
   /** Where the SQLite files live, so a caller can stat the file it is reading. */
   readonly databaseRoot: string;
-  run(db: string, sql: string): Promise<OracleResult>;
+  /**
+   * Execute one statement against one database.
+   *
+   * `db` is the corpus's own id — BIRD's `superhero`, Spider's `concert_singer` — and resolves to
+   * `root/<db>/<db>.sqlite`. `path`, when given, names the file relative to the root instead, which
+   * is what WikiSQL needs: its corpus is one file holding every table, and the layout is a property
+   * of the corpus rather than a parameter of the engine.
+   */
+  run(db: string, sql: string, path?: string): Promise<OracleResult>;
   close(): Promise<void>;
 }
 
@@ -91,13 +99,13 @@ export function createOracle(script: string, databaseRoot: string): Oracle {
 
   return {
     databaseRoot,
-    run(db, sql) {
+    run(db, sql, path) {
       if (closed) return Promise.reject(new Error(`oracle is closed: ${stderr.trim().slice(0, 200)}`));
       const id = String(nextId);
       nextId += 1;
       return new Promise<OracleResult>((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        child.stdin.write(`${JSON.stringify({ id, db, sql })}\n`);
+        child.stdin.write(`${JSON.stringify({ id, db, sql, ...(path === undefined ? {} : { path }) })}\n`);
       });
     },
     async close() {

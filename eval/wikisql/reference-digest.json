@@ -1,0 +1,2188 @@
+{
+  "split": "dev",
+  "questions": 8421,
+  "errors": 0,
+  "sha256": "c8b26e9be6da21e27812964cc9833d817b9b963531aae6df1c545c7677ad0572",
+  "sampleEvery": 32,
+  "sample": [
+    {
+      "index": 0,
+      "rows": [
+        [
+          "guard-forward"
+        ]
+      ]
+    },
+    {
+      "index": 32,
+      "rows": [
+        [
+          "conference semifinals"
+        ]
+      ]
+    },
+    {
+      "index": 64,
+      "rows": [
+        [
+          "zell freibach"
+        ]
+      ]
+    },
+    {
+      "index": 96,
+      "rows": [
+        [
+          "william allen young"
+        ]
+      ]
+    },
+    {
+      "index": 128,
+      "rows": [
+        [
+          "\" a good opportunity \""
+        ]
+      ]
+    },
+    {
+      "index": 160,
+      "rows": [
+        [
+          "13"
+        ]
+      ]
+    },
+    {
+      "index": 192,
+      "rows": [
+        [
+          2007.0
+        ]
+      ]
+    },
+    {
+      "index": 224,
+      "rows": [
+        [
+          13.0
+        ]
+      ]
+    },
+    {
+      "index": 256,
+      "rows": [
+        [
+          "6-1"
+        ]
+      ]
+    },
+    {
+      "index": 288,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 320,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 352,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 384,
+      "rows": [
+        [
+          "na"
+        ]
+      ]
+    },
+    {
+      "index": 416,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 448,
+      "rows": [
+        [
+          "cancelled no time"
+        ]
+      ]
+    },
+    {
+      "index": 480,
+      "rows": [
+        [
+          "4:00pm"
+        ]
+      ]
+    },
+    {
+      "index": 512,
+      "rows": [
+        [
+          "defence"
+        ]
+      ]
+    },
+    {
+      "index": 544,
+      "rows": [
+        [
+          "kim nam je, bae sung book ju soong weo"
+        ]
+      ]
+    },
+    {
+      "index": 576,
+      "rows": [
+        [
+          "bob may"
+        ]
+      ]
+    },
+    {
+      "index": 608,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 640,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 672,
+      "rows": [
+        [
+          "estelle ( american boy )"
+        ]
+      ]
+    },
+    {
+      "index": 704,
+      "rows": [
+        [
+          "16-2"
+        ]
+      ]
+    },
+    {
+      "index": 736,
+      "rows": [
+        [
+          316.0
+        ]
+      ]
+    },
+    {
+      "index": 768,
+      "rows": [
+        [
+          6.0
+        ]
+      ]
+    },
+    {
+      "index": 800,
+      "rows": [
+        [
+          "vitor meira"
+        ]
+      ]
+    },
+    {
+      "index": 832,
+      "rows": [
+        [
+          "ernest dickerson"
+        ]
+      ]
+    },
+    {
+      "index": 864,
+      "rows": [
+        [
+          "mm (in)"
+        ]
+      ]
+    },
+    {
+      "index": 896,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "index": 928,
+      "rows": [
+        [
+          "unmistaken"
+        ]
+      ]
+    },
+    {
+      "index": 960,
+      "rows": [
+        [
+          "engine"
+        ]
+      ]
+    },
+    {
+      "index": 992,
+      "rows": [
+        [
+          "1933–34 (b2 and b3 grades) 1947–48 (1st grade)"
+        ]
+      ]
+    },
+    {
+      "index": 1024,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1056,
+      "rows": [
+        [
+          "persida sidoarjo"
+        ]
+      ]
+    },
+    {
+      "index": 1088,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1120,
+      "rows": [
+        [
+          "victory over persepolis"
+        ]
+      ]
+    },
+    {
+      "index": 1152,
+      "rows": [
+        [
+          13234000.0
+        ]
+      ]
+    },
+    {
+      "index": 1184,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1216,
+      "rows": [
+        [
+          "angela lutin"
+        ]
+      ]
+    },
+    {
+      "index": 1248,
+      "rows": [
+        [
+          "coaticook"
+        ]
+      ]
+    },
+    {
+      "index": 1280,
+      "rows": [
+        [
+          7348.0
+        ]
+      ]
+    },
+    {
+      "index": 1312,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1344,
+      "rows": [
+        [
+          "joseph m. hernández"
+        ]
+      ]
+    },
+    {
+      "index": 1376,
+      "rows": [
+        [
+          "7-1"
+        ]
+      ]
+    },
+    {
+      "index": 1408,
+      "rows": [
+        [
+          26.0
+        ]
+      ]
+    },
+    {
+      "index": 1440,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1472,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1504,
+      "rows": [
+        [
+          "brazil"
+        ]
+      ]
+    },
+    {
+      "index": 1536,
+      "rows": [
+        [
+          1983.0
+        ]
+      ]
+    },
+    {
+      "index": 1568,
+      "rows": [
+        [
+          "hillsboro, ohio"
+        ]
+      ]
+    },
+    {
+      "index": 1600,
+      "rows": [
+        [
+          "n/a"
+        ],
+        [
+          "n/a"
+        ]
+      ]
+    },
+    {
+      "index": 1632,
+      "rows": [
+        [
+          194.0
+        ]
+      ]
+    },
+    {
+      "index": 1664,
+      "rows": [
+        [
+          "brett lancaster"
+        ]
+      ]
+    },
+    {
+      "index": 1696,
+      "rows": [
+        [
+          "karina bacchi"
+        ]
+      ]
+    },
+    {
+      "index": 1728,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1760,
+      "rows": [
+        [
+          "рабе ( hungarian : rábé )"
+        ]
+      ]
+    },
+    {
+      "index": 1792,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "index": 1824,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1856,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1888,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 1920,
+      "rows": [
+        [
+          "1,023,000"
+        ]
+      ]
+    },
+    {
+      "index": 1952,
+      "rows": [
+        [
+          "democratic-republican"
+        ]
+      ]
+    },
+    {
+      "index": 1984,
+      "rows": [
+        [
+          "£6,105"
+        ]
+      ]
+    },
+    {
+      "index": 2016,
+      "rows": [
+        [
+          "51.4%"
+        ]
+      ]
+    },
+    {
+      "index": 2048,
+      "rows": [
+        [
+          18.0
+        ]
+      ]
+    },
+    {
+      "index": 2080,
+      "rows": [
+        [
+          "4-9-1"
+        ]
+      ]
+    },
+    {
+      "index": 2112,
+      "rows": [
+        [
+          "chauncey billups (9)"
+        ]
+      ]
+    },
+    {
+      "index": 2144,
+      "rows": [
+        [
+          "eric dean seaton"
+        ]
+      ]
+    },
+    {
+      "index": 2176,
+      "rows": [
+        [
+          "little shop of horrors"
+        ]
+      ]
+    },
+    {
+      "index": 2208,
+      "rows": [
+        [
+          5.0
+        ]
+      ]
+    },
+    {
+      "index": 2240,
+      "rows": [
+        [
+          "29.72"
+        ]
+      ]
+    },
+    {
+      "index": 2272,
+      "rows": [
+        [
+          "fedexfield"
+        ]
+      ]
+    },
+    {
+      "index": 2304,
+      "rows": [
+        [
+          "hard"
+        ]
+      ]
+    },
+    {
+      "index": 2336,
+      "rows": [
+        [
+          "29 september 2011"
+        ]
+      ]
+    },
+    {
+      "index": 2368,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 2400,
+      "rows": [
+        [
+          "argentine"
+        ]
+      ]
+    },
+    {
+      "index": 2432,
+      "rows": [
+        [
+          "11–6"
+        ]
+      ]
+    },
+    {
+      "index": 2464,
+      "rows": [
+        [
+          "carolyne mcwilliams"
+        ]
+      ]
+    },
+    {
+      "index": 2496,
+      "rows": [
+        [
+          "won 2-0"
+        ]
+      ]
+    },
+    {
+      "index": 2528,
+      "rows": [
+        [
+          23.0
+        ]
+      ]
+    },
+    {
+      "index": 2560,
+      "rows": [
+        [
+          "morehead"
+        ]
+      ]
+    },
+    {
+      "index": 2592,
+      "rows": [
+        [
+          "warren booth"
+        ]
+      ]
+    },
+    {
+      "index": 2624,
+      "rows": [
+        [
+          "geelong"
+        ]
+      ]
+    },
+    {
+      "index": 2656,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 2688,
+      "rows": [
+        [
+          "tony jefferies"
+        ]
+      ]
+    },
+    {
+      "index": 2720,
+      "rows": [
+        [
+          "august 26, 1972"
+        ]
+      ]
+    },
+    {
+      "index": 2752,
+      "rows": [
+        [
+          "jeff gordon"
+        ]
+      ]
+    },
+    {
+      "index": 2784,
+      "rows": [
+        [
+          "united states"
+        ]
+      ]
+    },
+    {
+      "index": 2816,
+      "rows": [
+        [
+          "hong kong"
+        ]
+      ]
+    },
+    {
+      "index": 2848,
+      "rows": [
+        [
+          "best variety show host"
+        ],
+        [
+          "most favourite onscreen partner (variety)"
+        ],
+        [
+          "best variety show host"
+        ],
+        [
+          "best info-ed programme host"
+        ],
+        [
+          "best variety show host"
+        ],
+        [
+          "best info-ed programme host"
+        ],
+        [
+          "best info-ed programme host"
+        ],
+        [
+          "best variety show host"
+        ]
+      ]
+    },
+    {
+      "index": 2880,
+      "rows": [
+        [
+          "audi sport team abt"
+        ]
+      ]
+    },
+    {
+      "index": 2912,
+      "rows": [
+        [
+          "decreased or unaffected"
+        ]
+      ]
+    },
+    {
+      "index": 2944,
+      "rows": [
+        [
+          1974.0
+        ]
+      ]
+    },
+    {
+      "index": 2976,
+      "rows": [
+        [
+          "k16hy-ld"
+        ]
+      ]
+    },
+    {
+      "index": 3008,
+      "rows": [
+        [
+          "april 12"
+        ]
+      ]
+    },
+    {
+      "index": 3040,
+      "rows": [
+        [
+          "9 - 5"
+        ]
+      ]
+    },
+    {
+      "index": 3072,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 3104,
+      "rows": [
+        [
+          "maryland"
+        ]
+      ]
+    },
+    {
+      "index": 3136,
+      "rows": [
+        [
+          "phil"
+        ]
+      ]
+    },
+    {
+      "index": 3168,
+      "rows": [
+        [
+          "3–1"
+        ]
+      ]
+    },
+    {
+      "index": 3200,
+      "rows": [
+        [
+          "april 17"
+        ]
+      ]
+    },
+    {
+      "index": 3232,
+      "rows": [
+        [
+          "s01e01"
+        ]
+      ]
+    },
+    {
+      "index": 3264,
+      "rows": [
+        [
+          "23 september 1961"
+        ]
+      ]
+    },
+    {
+      "index": 3296,
+      "rows": [
+        [
+          "244.5 m"
+        ]
+      ]
+    },
+    {
+      "index": 3328,
+      "rows": [
+        [
+          "30%"
+        ]
+      ]
+    },
+    {
+      "index": 3360,
+      "rows": [
+        [
+          1.0
+        ]
+      ]
+    },
+    {
+      "index": 3392,
+      "rows": [
+        [
+          "comedian, journalist and star of trigger happy tv"
+        ]
+      ]
+    },
+    {
+      "index": 3424,
+      "rows": [
+        [
+          "4–1–0"
+        ]
+      ]
+    },
+    {
+      "index": 3456,
+      "rows": [
+        [
+          1989.0
+        ]
+      ]
+    },
+    {
+      "index": 3488,
+      "rows": [
+        [
+          "apr 5"
+        ]
+      ]
+    },
+    {
+      "index": 3520,
+      "rows": [
+        [
+          "aron lofton"
+        ]
+      ]
+    },
+    {
+      "index": 3552,
+      "rows": [
+        [
+          "august 3"
+        ]
+      ]
+    },
+    {
+      "index": 3584,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 3616,
+      "rows": [
+        [
+          "david villa category:articles with hcards"
+        ]
+      ]
+    },
+    {
+      "index": 3648,
+      "rows": [
+        [
+          0
+        ]
+      ]
+    },
+    {
+      "index": 3680,
+      "rows": [
+        [
+          "florida"
+        ]
+      ]
+    },
+    {
+      "index": 3712,
+      "rows": [
+        [
+          "5 strokes"
+        ]
+      ]
+    },
+    {
+      "index": 3744,
+      "rows": [
+        [
+          "no ( ftv )"
+        ]
+      ]
+    },
+    {
+      "index": 3776,
+      "rows": [
+        [
+          "27-25"
+        ]
+      ]
+    },
+    {
+      "index": 3808,
+      "rows": [
+        [
+          "toronto rebels"
+        ]
+      ]
+    },
+    {
+      "index": 3840,
+      "rows": [
+        [
+          "no"
+        ]
+      ]
+    },
+    {
+      "index": 3872,
+      "rows": [
+        [
+          "universal music japan"
+        ]
+      ]
+    },
+    {
+      "index": 3904,
+      "rows": [
+        [
+          "1r"
+        ]
+      ]
+    },
+    {
+      "index": 3936,
+      "rows": [
+        [
+          "adt championship"
+        ]
+      ]
+    },
+    {
+      "index": 3968,
+      "rows": [
+        [
+          "jennifer smith"
+        ]
+      ]
+    },
+    {
+      "index": 4000,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 4032,
+      "rows": [
+        [
+          1962.0
+        ]
+      ]
+    },
+    {
+      "index": 4064,
+      "rows": [
+        [
+          "0–1"
+        ]
+      ]
+    },
+    {
+      "index": 4096,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 4128,
+      "rows": [
+        [
+          "jay don blake"
+        ],
+        [
+          "lennie clements"
+        ],
+        [
+          "john cook"
+        ],
+        [
+          "dale douglass"
+        ],
+        [
+          "jack nicklaus"
+        ],
+        [
+          "jim thorpe"
+        ],
+        [
+          "bob tway"
+        ],
+        [
+          "mark wiebe"
+        ]
+      ]
+    },
+    {
+      "index": 4160,
+      "rows": [
+        [
+          "darling"
+        ]
+      ]
+    },
+    {
+      "index": 4192,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 4224,
+      "rows": [
+        [
+          48.0
+        ]
+      ]
+    },
+    {
+      "index": 4256,
+      "rows": [
+        [
+          1.0
+        ]
+      ]
+    },
+    {
+      "index": 4288,
+      "rows": [
+        [
+          "september 13, 1967"
+        ]
+      ]
+    },
+    {
+      "index": 4320,
+      "rows": [
+        [
+          "public opinion"
+        ]
+      ]
+    },
+    {
+      "index": 4352,
+      "rows": [
+        [
+          "road horse"
+        ]
+      ]
+    },
+    {
+      "index": 4384,
+      "rows": [
+        [
+          "04 september 2006"
+        ]
+      ]
+    },
+    {
+      "index": 4416,
+      "rows": [
+        [
+          "portland trail blazers"
+        ]
+      ]
+    },
+    {
+      "index": 4448,
+      "rows": [
+        [
+          "13 july 1994"
+        ]
+      ]
+    },
+    {
+      "index": 4480,
+      "rows": [
+        [
+          "@ sacramento"
+        ]
+      ]
+    },
+    {
+      "index": 4512,
+      "rows": [
+        [
+          "lost 6-4 (lost 9-7 on agg)"
+        ]
+      ]
+    },
+    {
+      "index": 4544,
+      "rows": [
+        [
+          7.0
+        ]
+      ]
+    },
+    {
+      "index": 4576,
+      "rows": [
+        [
+          "ronald jhun"
+        ]
+      ]
+    },
+    {
+      "index": 4608,
+      "rows": [
+        [
+          23.0
+        ]
+      ]
+    },
+    {
+      "index": 4640,
+      "rows": [
+        [
+          "george washington"
+        ]
+      ]
+    },
+    {
+      "index": 4672,
+      "rows": [
+        [
+          "sana'a"
+        ]
+      ]
+    },
+    {
+      "index": 4704,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 4736,
+      "rows": [
+        [
+          3.0
+        ]
+      ]
+    },
+    {
+      "index": 4768,
+      "rows": [
+        [
+          "2.0"
+        ]
+      ]
+    },
+    {
+      "index": 4800,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "index": 4832,
+      "rows": [
+        [
+          "1925, 1926"
+        ]
+      ]
+    },
+    {
+      "index": 4864,
+      "rows": [
+        [
+          2.0
+        ]
+      ]
+    },
+    {
+      "index": 4896,
+      "rows": [
+        [
+          "5–7, 6–8, 6–3, 1–6"
+        ]
+      ]
+    },
+    {
+      "index": 4928,
+      "rows": [
+        [
+          "3"
+        ]
+      ]
+    },
+    {
+      "index": 4960,
+      "rows": [
+        [
+          "september 22–26, 2010"
+        ]
+      ]
+    },
+    {
+      "index": 4992,
+      "rows": [
+        [
+          4.0
+        ]
+      ]
+    },
+    {
+      "index": 5024,
+      "rows": [
+        [
+          "george patton"
+        ]
+      ]
+    },
+    {
+      "index": 5056,
+      "rows": [
+        [
+          "0–1"
+        ]
+      ]
+    },
+    {
+      "index": 5088,
+      "rows": [
+        [
+          "19 november 1955"
+        ]
+      ]
+    },
+    {
+      "index": 5120,
+      "rows": [
+        [
+          "game 2"
+        ]
+      ]
+    },
+    {
+      "index": 5152,
+      "rows": [
+        [
+          1997.0
+        ]
+      ]
+    },
+    {
+      "index": 5184,
+      "rows": [
+        [
+          357.0
+        ]
+      ]
+    },
+    {
+      "index": 5216,
+      "rows": [
+        [
+          12.105
+        ]
+      ]
+    },
+    {
+      "index": 5248,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 5280,
+      "rows": [
+        [
+          "john shuster"
+        ]
+      ]
+    },
+    {
+      "index": 5312,
+      "rows": [
+        [
+          "31 august 1412"
+        ]
+      ]
+    },
+    {
+      "index": 5344,
+      "rows": [
+        [
+          "blanca peak"
+        ]
+      ]
+    },
+    {
+      "index": 5376,
+      "rows": [
+        [
+          "iceland"
+        ]
+      ]
+    },
+    {
+      "index": 5408,
+      "rows": [
+        [
+          "new york"
+        ]
+      ]
+    },
+    {
+      "index": 5440,
+      "rows": [
+        [
+          "viktor tsymbal"
+        ]
+      ]
+    },
+    {
+      "index": 5472,
+      "rows": [
+        [
+          5.0
+        ]
+      ]
+    },
+    {
+      "index": 5504,
+      "rows": [
+        [
+          "2 – 4"
+        ]
+      ]
+    },
+    {
+      "index": 5536,
+      "rows": [
+        [
+          "m"
+        ]
+      ]
+    },
+    {
+      "index": 5568,
+      "rows": [
+        [
+          "w295ap"
+        ]
+      ]
+    },
+    {
+      "index": 5600,
+      "rows": [
+        [
+          "2 – 4"
+        ]
+      ]
+    },
+    {
+      "index": 5632,
+      "rows": [
+        [
+          "jaguar - cosworth"
+        ]
+      ]
+    },
+    {
+      "index": 5664,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 5696,
+      "rows": [
+        [
+          "michael schumacher"
+        ]
+      ]
+    },
+    {
+      "index": 5728,
+      "rows": [
+        [
+          "9.9 (63)"
+        ]
+      ]
+    },
+    {
+      "index": 5760,
+      "rows": [
+        [
+          "argyll & bute"
+        ],
+        [
+          "midlothian south, tweeddale & lauderdale"
+        ]
+      ]
+    },
+    {
+      "index": 5792,
+      "rows": [
+        [
+          "canada"
+        ]
+      ]
+    },
+    {
+      "index": 5824,
+      "rows": [
+        [
+          3.0
+        ]
+      ]
+    },
+    {
+      "index": 5856,
+      "rows": [
+        [
+          9.0
+        ]
+      ]
+    },
+    {
+      "index": 5888,
+      "rows": [
+        [
+          "xiv international gold cup"
+        ]
+      ]
+    },
+    {
+      "index": 5920,
+      "rows": [
+        [
+          3.0
+        ]
+      ]
+    },
+    {
+      "index": 5952,
+      "rows": [
+        [
+          "3"
+        ]
+      ]
+    },
+    {
+      "index": 5984,
+      "rows": [
+        [
+          "8.8 (56)"
+        ]
+      ]
+    },
+    {
+      "index": 6016,
+      "rows": [
+        [
+          "2:38"
+        ]
+      ]
+    },
+    {
+      "index": 6048,
+      "rows": [
+        [
+          "44,401"
+        ]
+      ]
+    },
+    {
+      "index": 6080,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 6112,
+      "rows": [
+        [
+          "20 - 27 jul"
+        ]
+      ]
+    },
+    {
+      "index": 6144,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "index": 6176,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 6208,
+      "rows": [
+        [
+          "6 - 7 aug"
+        ]
+      ]
+    },
+    {
+      "index": 6240,
+      "rows": [
+        [
+          "united states"
+        ]
+      ]
+    },
+    {
+      "index": 6272,
+      "rows": [
+        [
+          34.0
+        ]
+      ]
+    },
+    {
+      "index": 6304,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 6336,
+      "rows": [
+        [
+          "warwickshire, kent, surrey"
+        ]
+      ]
+    },
+    {
+      "index": 6368,
+      "rows": [
+        [
+          "melbourne"
+        ]
+      ]
+    },
+    {
+      "index": 6400,
+      "rows": [
+        [
+          "the corelli school"
+        ]
+      ]
+    },
+    {
+      "index": 6432,
+      "rows": [
+        [
+          13.0
+        ]
+      ]
+    },
+    {
+      "index": 6464,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 6496,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 6528,
+      "rows": [
+        [
+          "the lone ranger"
+        ]
+      ]
+    },
+    {
+      "index": 6560,
+      "rows": [
+        [
+          "shaun murphy"
+        ]
+      ]
+    },
+    {
+      "index": 6592,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 6624,
+      "rows": [
+        [
+          "816"
+        ]
+      ]
+    },
+    {
+      "index": 6656,
+      "rows": [
+        [
+          "–3"
+        ]
+      ]
+    },
+    {
+      "index": 6688,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 6720,
+      "rows": [
+        [
+          "scotland"
+        ]
+      ]
+    },
+    {
+      "index": 6752,
+      "rows": [
+        [
+          "april 22"
+        ]
+      ]
+    },
+    {
+      "index": 6784,
+      "rows": [
+        [
+          "http://www.annauniv.edu"
+        ]
+      ]
+    },
+    {
+      "index": 6816,
+      "rows": [
+        [
+          4.0
+        ]
+      ]
+    },
+    {
+      "index": 6848,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 6880,
+      "rows": [
+        [
+          "five nations"
+        ]
+      ]
+    },
+    {
+      "index": 6912,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 6944,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 6976,
+      "rows": [
+        [
+          "t9"
+        ]
+      ]
+    },
+    {
+      "index": 7008,
+      "rows": [
+        [
+          0
+        ]
+      ]
+    },
+    {
+      "index": 7040,
+      "rows": [
+        [
+          "21"
+        ]
+      ]
+    },
+    {
+      "index": 7072,
+      "rows": [
+        [
+          "2"
+        ]
+      ]
+    },
+    {
+      "index": 7104,
+      "rows": [
+        [
+          "49-33"
+        ]
+      ]
+    },
+    {
+      "index": 7136,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 7168,
+      "rows": [
+        [
+          "dimitrios mougios , vasileios polymeros"
+        ]
+      ]
+    },
+    {
+      "index": 7200,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 7232,
+      "rows": [
+        [
+          "1952–1960"
+        ]
+      ]
+    },
+    {
+      "index": 7264,
+      "rows": [
+        [
+          7.0
+        ]
+      ]
+    },
+    {
+      "index": 7296,
+      "rows": [
+        [
+          "4th"
+        ]
+      ]
+    },
+    {
+      "index": 7328,
+      "rows": [
+        [
+          "eliminated week 12 - the walk"
+        ]
+      ]
+    },
+    {
+      "index": 7360,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 7392,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 7424,
+      "rows": [
+        [
+          9.0
+        ]
+      ]
+    },
+    {
+      "index": 7456,
+      "rows": [
+        [
+          "jessé de lima"
+        ]
+      ]
+    },
+    {
+      "index": 7488,
+      "rows": [
+        [
+          "14.3%"
+        ]
+      ]
+    },
+    {
+      "index": 7520,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "index": 7552,
+      "rows": [
+        [
+          "le vieux molen"
+        ],
+        [
+          "moulin bertrand"
+        ],
+        [
+          "moulin de fexhe"
+        ],
+        [
+          "moulin du château"
+        ],
+        [
+          "moulin de pousset"
+        ]
+      ]
+    },
+    {
+      "index": 7584,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "index": 7616,
+      "rows": [
+        [
+          21.0
+        ]
+      ]
+    },
+    {
+      "index": 7648,
+      "rows": [
+        [
+          75.0
+        ]
+      ]
+    },
+    {
+      "index": 7680,
+      "rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "index": 7712,
+      "rows": [
+        [
+          "october 8"
+        ]
+      ]
+    },
+    {
+      "index": 7744,
+      "rows": [
+        [
+          "may 28"
+        ]
+      ]
+    },
+    {
+      "index": 7776,
+      "rows": [
+        [
+          "sd 480i"
+        ]
+      ]
+    },
+    {
+      "index": 7808,
+      "rows": [
+        [
+          0
+        ]
+      ]
+    },
+    {
+      "index": 7840,
+      "rows": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "index": 7872,
+      "rows": [
+        [
+          0.0
+        ]
+      ]
+    },
+    {
+      "index": 7904,
+      "rows": [
+        [
+          "the grosvenor world masters"
+        ]
+      ]
+    },
+    {
+      "index": 7936,
+      "rows": [
+        [
+          6.0
+        ]
+      ]
+    },
+    {
+      "index": 7968,
+      "rows": [
+        [
+          "1–8"
+        ]
+      ]
+    },
+    {
+      "index": 8000,
+      "rows": [
+        [
+          "rachel elnaugh"
+        ]
+      ]
+    },
+    {
+      "index": 8032,
+      "rows": [
+        [
+          "denny kantono antonius ariantho"
+        ]
+      ]
+    },
+    {
+      "index": 8064,
+      "rows": [
+        [
+          "ferrari 625"
+        ]
+      ]
+    },
+    {
+      "index": 8096,
+      "rows": [
+        [
+          "2004"
+        ],
+        [
+          "2006"
+        ],
+        [
+          "2009 2010"
+        ]
+      ]
+    },
+    {
+      "index": 8128,
+      "rows": [
+        [
+          "1927"
+        ]
+      ]
+    },
+    {
+      "index": 8160,
+      "rows": [
+        [
+          "draw"
+        ]
+      ]
+    },
+    {
+      "index": 8192,
+      "rows": [
+        [
+          "19"
+        ]
+      ]
+    },
+    {
+      "index": 8224,
+      "rows": [
+        [
+          "usa"
+        ]
+      ]
+    },
+    {
+      "index": 8256,
+      "rows": [
+        [
+          "#1"
+        ]
+      ]
+    },
+    {
+      "index": 8288,
+      "rows": [
+        [
+          "september 27"
+        ]
+      ]
+    },
+    {
+      "index": 8320,
+      "rows": [
+        [
+          "1r"
+        ]
+      ]
+    },
+    {
+      "index": 8352,
+      "rows": [
+        [
+          "schmidt (6-6)"
+        ]
+      ]
+    },
+    {
+      "index": 8384,
+      "rows": [
+        [
+          "3 - 1"
+        ]
+      ]
+    },
+    {
+      "index": 8416,
+      "rows": [
+        [
+          "wells (1-3)"
+        ]
+      ]
+    }
+  ],
+  "source": "salesforce/WikiSQL@master lib/dbengine.py, unmodified"
+}

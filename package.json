@@ -116,7 +116,10 @@
     "bench:bill": "tsx eval/bill.ts",
     "bench:spend": "tsx eval/bird/spend.ts",
     "bench:coverage": "tsx eval/benchmarks.ts",
-    "bench:bird:ves": "tsx eval/bird/ves.ts"
+    "bench:bird:ves": "tsx eval/bird/ves.ts",
+    "bench:wikisql": "tsx eval/wikisql/run.ts",
+    "bench:wikisql:fetch": "node eval/wikisql/fetch.mjs",
+    "bench:wikisql:digest": "tsx eval/wikisql/run.ts --digest"
   },
   "devDependencies": {
     "@agentix-e/nl2charts-ai": "workspace:*",

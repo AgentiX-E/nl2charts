@@ -302,7 +302,7 @@
       "lines": 98.21,
       "statements": 98.21,
       "functions": 100,
-      "branches": 96.87
+      "branches": 97.05
     },
     "eval/bird/pair.ts": {
       "lines": 100,
@@ -724,11 +724,23 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/wikisql/exec.ts": {
+      "lines": 98.42,
+      "statements": 98.42,
+      "functions": 100,
+      "branches": 97.22
+    },
     "eval/wikisql/form.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
       "branches": 100
+    },
+    "eval/wikisql/run.ts": {
+      "lines": 96.46,
+      "statements": 96.46,
+      "functions": 100,
+      "branches": 96.59
     }
   }
 }

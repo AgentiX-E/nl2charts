@@ -90,20 +90,23 @@ export const BENCHMARKS: readonly Benchmark[] = [
     source: 'https://github.com/salesforce/WikiSQL',
     corpus: '80,654 question/table pairs over 24,241 tables, single-table, one condition per query',
     metrics: ['EX'],
-    status: 'absent',
+    status: 'instrumented',
     gap:
-      'The corpus is not vendored, and the reason is transport rather than design. `data.tar.bz2` is '
-      + '26 MB in one blob, and the sandbox\'s egress proxy ends a GitHub blob download at about 7 MB: '
-      + 'two attempts produced 5,791,744 and 7,324,757 of 26,164,664 bytes, and `bzip2 -t` rejects '
-      + 'both with "file ends unexpectedly". The judgement itself is no longer the obstacle — '
-      + '`eval/wikisql/form.ts` ports the reference template and result comparison '
-      + '(`lib/query.py`, `lib/dbengine.py`) with 25 assertions behind it, including the two choices '
-      + 'that decide whether a number is comparable: string condition values are lower-cased on both '
-      + 'sides, and the comparison is ordered, because the reference compares `fetchall()` tuples. '
-      + 'It is also the benchmark this pipeline is least shaped for: every question is single-table '
-      + 'and single-condition, so the schema card, the join graph and the linker have nothing to do. '
-      + 'The number would measure a capability this product does not sell, which is why the corpus is '
-      + 'worth fetching only when a reading is needed, not before.',
+      'The corpus and the judge are both in place and no arm has been dispatched over them. '
+      + '`data.tar.bz2` is 26 MB in one blob and a GitHub blob download dies at about 7 MB, which is '
+      + 'what this row said for two rounds; jsdelivr serves the same blob in 46 s, and '
+      + '`eval/wikisql/fetch.mjs` pins it by size and sha256, tests the bz2 stream and asserts the row '
+      + 'and table counts before writing anything. `eval/wikisql/exec.ts` is the judge: a port of the '
+      + 'reference `lib/query.py` and `lib/dbengine.py`, ordered because the reference compares '
+      + '`fetchall()` tuples, with string condition values lower-cased on both sides. `eval/wikisql/'
+      + 'run.ts` executes every gold twice on dev — 8,421 questions, 0 errors, 0 empty — so the '
+      + 'denominator is one a score can be divided by. The judge is worth what its agreement is '
+      + 'worth, so the port and the reference both answered all 8,421 questions and the two digests '
+      + 'are the same file, `eval/wikisql/reference-digest.json`. What is missing is a number, and a '
+      + 'number needs a predictions file: one statement per question from an arm, which is a prompt '
+      + 'decision rather than a corpus one. It is not first in the queue because the score would '
+      + 'describe a capability this product does not sell — every question is single-table and '
+      + 'single-condition, so the schema card, the join graph and the linker are idle.',
   },
   {
     id: 'spider-dev',

@@ -18023,7 +18023,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 
 | leaderboard | corpus | metrics | status | number |
 |---|---|---|---|---|
-| WikiSQL (test) | 80,654 question/table pairs, single-table | EX | **absent** | — |
+| WikiSQL (test) | 80,654 question/table pairs, single-table | EX | **instrumented** | — |
 | Spider 1.0 dev | 1,034 questions, 20 databases | EM, EX | **absent** | — |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | 62.5 (floor) |
@@ -18036,8 +18036,10 @@ reader can act on, and a missing row for a leaderboard the plan names.
 Four of nine carry a number over the denominator their leaderboard reports, and two of those four are
 counts rather than accuracies. A fifth — R-VES — carries a number over 600 of its leaderboard's 1,532
 questions, which is a real reading and not that row, so the table states the denominator rather than
-letting the reader assume one. The other four are not a scandal; they are a to-do list with prices,
-which is the only kind of to-do list this document has ever been able to act on.
+letting the reader assume one. A sixth — WikiSQL — has a corpus, a judge and a split that executes
+clean, and no dispatch over it, which is a different absence from a corpus nobody can fetch: the first
+needs a run, the second needs a fetcher. The remaining three are not a scandal; they are a to-do list
+with prices, which is the only kind of to-do list this document has ever been able to act on.
 
 Two things about the `number` column, both learned by watching it be misquoted. A printed line now
 carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 56.63 (600 of 1532)` —
@@ -18511,13 +18513,27 @@ levers were priced this round and both were refused on their own numbers — the
 `select-cross-pooled-tie` stays in `ON_DEMAND_ARMS` as the arm that holds the refutation, and `gate: 'tie'`
 stays configurable because a config with no arm is observable and a deleted enum is not.
 
-### Where each of the four absent rows would have to go
+### Where each of the three absent rows would have to go, and what WikiSQL now has
 
-**WikiSQL** is nearly saturated (SeaD + execution-guided decoding 93.0% test EX, X-SQL + EG 91.8%,
-SQLova 89.6% against a crowd-worker baseline of 88.3%) and it is the benchmark this pipeline is least
-shaped for: every question is single-table and single-condition, so the schema card, the join graph
-and the linker — the three mechanisms this repository has priced — have nothing to do. A number here
-would measure a capability the product does not sell.
+**WikiSQL** was one of them until this round, and the reason it was is worth keeping because it was
+wrong for two rounds. The corpus is 26 MB in one `data.tar.bz2` blob; a GitHub blob download from this
+sandbox ends at about 7 MB and `bzip2 -t` then rejects it as truncated, which the table reported as a
+transport wall. It was a throughput wall: the same blob through jsdelivr arrives in 46 seconds, and
+`eval/wikisql/fetch.mjs` now pins the archive by size and sha256 and asserts the split's row and table
+counts before it writes a file. The judge was ported beside it — `eval/wikisql/exec.ts` is
+`lib/query.py` and `lib/dbengine.py`, ordered because the reference compares `fetchall()` tuples — and
+`eval/wikisql/run.ts` executes every gold twice: dev is **8,421 questions, 0 errors, 0 empty**. A port
+is worth what its agreement is worth, so the reference implementation and the port both answered all
+8,421 questions and produce the same digest, committed as `eval/wikisql/reference-digest.json`. That
+is `instrumented`: the corpus, the judge and a clean split, with no dispatch over them. A number needs
+a predictions file, which is a prompt decision rather than a corpus one.
+
+The corpus is also nearly saturated — SeaD + execution-guided decoding 93.0% test EX, X-SQL + EG
+91.8%, SQLova 89.6% against a crowd-worker baseline of 88.3% — and it is the benchmark this pipeline
+is least shaped for: every question is single-table and single-condition, so the schema card, the join
+graph and the linker, the three mechanisms this repository has priced, have nothing to do. That is why
+the instrument was worth building and the dispatch is not first in the queue: the score would describe
+a capability the product does not sell.
 
 **Spider 1.0** is the opposite problem: it needs EM as well as EX, and this repository has only the
 execution judge. `arms[].exactMatchRate` is a normalised string match over generated statements, not
@@ -20507,3 +20523,61 @@ it. A model with no row stays refused rather than priced at zero; a model added 
 gets a row with its date, which is the only form of price this repository accepts.
 
 **Cost: ¥0.** Reading a page is free; the run that would have been uncosted is the one that is not.
+
+## A judge is worth what its agreement is worth
+
+WikiSQL's row in the coverage table above read *absent* for two rounds, and the reason given was
+transport: 26 MB in one blob, a GitHub download that ends at 7 MB, `bzip2 -t` calling the result
+truncated. The wall was throughput and not the proxy's policy, which is a different bug with a
+different fix. The same blob through jsdelivr arrives in **46 seconds**; the two earlier attempts had
+spent thirty minutes to reach 9.5 of 26.2 MB. `eval/wikisql/fetch.mjs` now downloads by split, tests
+the bz2 stream, and asserts the split's own counts before writing a byte — dev is 8,421 questions over
+2,716 table files, of which 2,630 are asked. A fetcher that trusts a mirror is a fetcher that scores a
+different corpus the day the mirror changes.
+
+Serving the corpus is half of an instrument. The other half is a judge, and WikiSQL's is not a
+percentage of matching strings: `lib/dbengine.py` executes both statements and compares
+`fetchall()` tuples, which is ordered, and lower-cases string condition values on both sides. Both
+choices decide whether a number is comparable to the leaderboard's, and both are in
+`eval/wikisql/exec.ts` with a test that fails if either is "simplified".
+
+Two defects came out of making it run, and neither would have been visible from a score:
+
+| what happened | why | what it cost to find |
+| --- | --- | --- |
+| `value.toLowerCase is not a function` on 25.6% of questions | a condition's value is a JSON **number** in 2,953 of 11,545 dev conditions, and the template lower-cased what it assumed was a string | one execution pass, before any number was produced |
+| the port and the reference disagreed on **1,145** questions | `176.0` and `176` are the same value to SQLite and different strings to a digest; the reference's own dump writes the first, JavaScript's JSON the second | one digest comparison across all 8,421 |
+
+The first is a template bug that would have read as a weak model on a quarter of the split. The
+second is the reason the comparison is a *digest fixture* rather than a paragraph: the port and the
+reference now both answer every gold question and produce the same 8,421-line digest, committed as
+`eval/wikisql/reference-digest.json`, and `test/wikisql-reference.test.ts` recomputes it. Agreement on
+8,421 of 8,421 is the only evidence that makes a later 71% mean 71%.
+
+What dev says about the split itself, from `eval/wikisql/run.ts`:
+
+| quantity | dev |
+| --- | ---: |
+| questions | 8,421 |
+| gold statements that execute | 8,421 |
+| gold statements that answer differently on a second pass | 0 |
+| gold statements that return no rows | 0 |
+
+A gold that fails is a question nobody can be credited for, and a gold that answers differently twice
+is a judge that cannot reproduce itself. Zero on both is what makes a denominator out of 8,421 rather
+than a denominator of "8,421 minus however many were broken".
+
+The row is **instrumented** and not **measured**, and the difference is one artifact: a predictions
+file, one statement per question. That is a prompt-shape decision, and the shape is unpromising for
+this pipeline — every question is single-table and single-condition, so the schema card, the join
+graph, the linker and the corpus layer have nothing to do, and the bill would be a fraction of BIRD's
+for a score about a capability the product does not sell. Building the instrument was still the right
+order: the corpus fetches in under a minute and the judge is now a pinned fixture, so the dispatch is
+a decision that can be taken later at its own price rather than a research project.
+
+**Cost of this reading: ¥0.** It downloads a public archive and executes statements locally; no model
+was called.
+
+**The instrument is in the gate.** `eval/wikisql/{exec,run}.ts` enter `eval/coverage-ledger.json`,
+which now records 122 files with all four dimensions at or above 95%, and the five new test files
+carry 98 assertions between them.
