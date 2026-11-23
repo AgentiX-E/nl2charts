@@ -3,14 +3,14 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "feeb61dd24ba49291d11e6cf7ea32f95f7112119",
+   "commit": "2be03386db9221c13472d463194cde3d07ea06a9",
    "workflow": "bird-dev",
-   "runId": "45021178365",
+   "runId": "45090651019",
    "split": "dev",
    "dataset": "bird-dev",
-   "model": "deepseek-chat",
+   "model": "deepseek-v4-pro",
    "secondModel": null,
-   "generatedAt": "2026-11-22T12:22:02.505Z",
+   "generatedAt": "2026-11-23T00:56:28.827Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
@@ -22,34 +22,14 @@
    },
    "arms": [
     {
-     "arm": "macsql-prompt",
-     "passed": 997,
-     "total": 1532,
-     "accuracy": 0.6507832898172323,
-     "calls": 1,
-     "promptTokens": 3694,
-     "completionTokens": 136,
-     "strictPassed": 908
-    },
-    {
-     "arm": "macsql-bird-qp",
-     "passed": 1001,
-     "total": 1532,
-     "accuracy": 0.6533942558746736,
-     "calls": 1,
-     "promptTokens": 3725,
-     "completionTokens": 105,
-     "strictPassed": 919
-    },
-    {
      "arm": "macsql-bird-os",
-     "passed": 1007,
+     "passed": 975,
      "total": 1532,
-     "accuracy": 0.6573107049608355,
+     "accuracy": 0.6364229765013055,
      "calls": 1,
-     "promptTokens": 3907,
-     "completionTokens": 146,
-     "strictPassed": 920
+     "promptTokens": 4384,
+     "completionTokens": 2536,
+     "strictPassed": 905
     }
    ],
    "rves": {
