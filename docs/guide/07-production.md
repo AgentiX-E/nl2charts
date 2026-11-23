@@ -396,15 +396,19 @@ not looking. `wider` compares the shapes **of two executed results against each 
 a fact about the pool rather than a guess about the question, and it stays silent unless the
 consensus is a single row.
 
-**How many candidates you generate matters more than which rule reads them, and the number has to
-be odd.** Priced on one pool with `pool-replay --compositions`: one call reaches 371 of 600, the best
-pair 374, three candidates 387, with ceilings of 371/410/421. The second call raised the ceiling by 39
-questions and the count by 3, because a two-member pool turns every disagreement into a tie and a tie
-is settled by generation order. Three candidates tie on 45 of 600; the best pair ties on 141. If you
-are generating two, either generate three or publish a tie-break — the count is not a proxy for
-quality, it is what makes a majority exist. On the same pool the third candidate's *information* is
-worth 11 questions: `values` restates `metadata+evidence` on 474 of 591 cases, so check what your
-third call is asked to do before buying a fourth.
+**A wider pool buys headroom, not answers — and the number has to be odd.** Priced on one pool with
+`pool-replay --compositions`: one call reaches 371 of 600, the best pair 374, three candidates 387,
+with ceilings of 371/410/421. The second call raised the ceiling by 39 questions and the count by 3,
+because a two-member pool turns every disagreement into a tie and a tie is settled by generation
+order; three candidates tie on 45 of 600, the best pair ties on 141. If you are generating two,
+either generate three or publish a tie-break.
+
+Do not read that as "more candidates raises the score". On the 1,532-question split the same three
+sources reach a ceiling of 1,022 and a count of 941, against 938 for the best single call:
+`pnpm bench:bird:marginal` pairs them and reports **+3 questions at p = 1.0000**, because 81% of the
+cases have one distinct result across all three candidates and a vote over one opinion cannot be
+better than the opinion. Three sources are worth their calls only if a fourth kind of *statement*
+appears in them; otherwise the third call is a copy of the first two.
 
 Two things the table above does not say. The difference between the selector and the
 shortest statement is **0.85pp on the 1,532-question split and 3.17pp on the strong 600** —

@@ -20277,3 +20277,88 @@ column that cannot vary. When a chart decision acquires a price it can be priced
 **Cost of the gate: ¥0.** It reads committed counts, makes no calls, and takes about forty
 milliseconds, which is why it can run on every dispatch instead of in a report somebody remembers to
 write.
+
+## The third call did not pay, and the 600-question reading that said it would
+
+Every pool reading in this file has been a table, and every decision taken from one has been a
+sentence written by a person. The table on 600 questions read `371` for one call and `387` for three;
+the sentence that followed it — in `docs/guide/07-production.md`, in this file, and in the round that
+priced the tie gate — was that **the number of candidates matters more than the rule that reads
+them**. This round put that sentence in front of a test, on the split whose resolution can decide it.
+
+`eval/bird/marginal.ts` (`pnpm bench:bird:marginal`) answers one question: *does the k-th candidate
+pay for itself?* It takes the best subset of each size, pairs it with the best subset one call
+smaller over the questions both decided, and applies the split's own resolution — 2.30pp at 1,532
+questions — plus the exact McNemar tail and the Wald interval, both from `devkit`. The verdict is
+`pays` or `cannot pay`; a harness that could only say the first would be a harness whose refusal
+nobody had read, so its self-test produces both.
+
+### On 1,532 questions, three calls buy three questions
+
+Run `41808092447`, arm `select-mixed`, 1,524 cases with a pool of three sources:
+
+| calls | best subset | correct | share | increment | p | interval (pp) |
+|---:|---|---:|---:|---|---:|---|
+| 1 | `metadata+evidence` | 938 / 1,517 | 61.83% | — | — | — |
+| 2 | `metadata+evidence` + `inline+evidence` | 940 / 1,521 | 61.80% | **+0.07pp** | 1.0000 | [−1.41, +1.54] |
+| 3 | all three | 941 / 1,524 | 61.75% | **+0.00pp** | 1.0000 | [−0.52, +0.52] |
+
+The ceiling moves and the count does not. On the same artifact `pool-replay --compositions` prices
+the subsets at 935 / 938 / 931 for one call, 1,005 / 961 / 1,012 for two and **1,022 for three**: the
+pool gains 84 questions of headroom over the best single source and the vote converts **three** of
+them. 1,241 of the 1,524 cases (81.4%) have one distinct result across three candidates, so on four
+questions in five there is nothing for a vote to arbitrate, and on the fifth the modal group is
+usually the one the single call already had.
+
+### The same comparison on the artifacts this repository still holds
+
+| artifact | questions | best single | three calls | increment | p |
+|---|---:|---:|---:|---|---:|
+| `44905985381` (as published) | 600 | 371 | 387 | +16 (+2.67pp) | never tested |
+| `44889941650` | 600 | **381** | 386 | **+5 (+0.83pp)** | 0.0807 |
+| `44897147794` (four arms) | 600 | **378** | 391 | **+13 (+2.17pp)** | 0.3409 |
+| `41808092447` | 1,532 | **938** | 941 | **+3 (+0.20pp)** | 1.0000 |
+
+The published `+16` was a count, and a count with no test is the shape this file has caught four
+times in its own numbers. On the two 600-question artifacts whose provenance is still on disk (`44889941650`, `44897147794`) the same comparison is
+`+5` at p = 0.08 and `+13` at p = 0.34 — neither resolves 2.30pp — and at 1,532 the same comparison
+is three questions. **The 600-question optimism this file already recorded for a 65.17% score
+applies to the pool reading as well: the effect fell by a factor of five when the sample grew.**
+
+### What closed, and by which criterion
+
+The criterion was registered before this reading, in appendix AU of the plan: *if the three-candidate
+paired gain is p > 0.05, the selector route is closed and the lever returns to the backbone and the
+corpus.* It is p = 1.0000.
+
+Two consequences, and they are different:
+
+1. **No selector can rescue this pool.** Its ceiling is 1,022 = 67.06% against the shipped
+   single-call arm's 1,007 = 65.73% — 1.33pp of headroom for two extra generation calls, and the best
+   selector ever measured on any pool here converts 92% of a ceiling in this range. A perfect
+   selector would tie the frontier; the measured ones lose 2pp to it.
+2. **What the pool's headroom is made of is candidates, not calls.** 84 questions is 5.5pp of
+   ceiling that three *different* prompts cannot turn into answers, which is a statement about the
+   corpus: the missing statements are not variations of the ones already drawn.
+
+### What this leaves, priced
+
+| lever | reading | status |
+|---|---|---|
+| more candidates (`3 → 6`, `→ 9`) | ceiling rises, conversion does not | **closed** by this reading, and by the 92% conversion it shares with every pool measured here |
+| a better selector | 92–95% of ceiling is where every measured rule and selector lands | **closed** at three rounds of attempts |
+| the base model | `deepseek-v4-pro` +3.13pp at p = 0.0004 on `inline+evidence`, which is 58.2% | **open, dispatched** — the +3.13pp was measured on a prompt the product does not send |
+| the corpus (values, rows, examples) | `macsql-bird-os` +3.2pp is the largest single-call gain this repository has taken | **open** |
+
+The base-model row is the one this round spent money on. `S1` measured its +3.13pp on
+`inline+evidence`, a 58.2% arm; the frontier is `macsql-bird-os` at 65.73%, and a gain measured at
+saturation prices differently at the frontier — the whole subject of the two rounds above. So
+`45090651019` runs `macsql-bird-os` on `deepseek-v4-pro` over the same 1,532 questions, and the
+standing rule for any arm applies unchanged: **≥ 2.30pp against the paired reading with p < 0.05, or
+the base is not the lever.** The paired comparison is against `macsql-bird-os` on `deepseek-flash`
+with thinking on (1,020, run `45040430602`) — a different run, which is the weaker form of pairing
+this file accepts when the alternative is not running the experiment at all, and it is stated here
+rather than assumed.
+
+**Cost of this reading: ¥0.** It reads artifacts already on disk — one of which had to be downloaded
+again, because the composition table was printed for a run whose artifact nobody kept.

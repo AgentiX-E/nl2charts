@@ -7,6 +7,16 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The instrument that decides whether one more candidate pays.** `eval/bird/marginal.ts`
+  (`pnpm bench:bird:marginal`) takes the best subset of each pool size, pairs it with the best subset
+  one call smaller over the questions both decided, and applies the split's own resolution — 2.30pp
+  at 1,532 questions — with the exact McNemar tail and the Wald interval from `devkit`. Its verdict
+  is `pays` or `cannot pay`, and its self-test produces both shapes because a harness that can only
+  say yes is a harness whose refusal nobody has read. On `41808092447` the answer is the second one:
+  one call 938, two 940, three 941 — **+3 questions at p = 1.0000**, against a pool whose ceiling is
+  1,022. Every subset count it computes is cross-checked against `pool-replay --compositions`, so the
+  two producers of one reading cannot drift.
+### Added
 - **The gate that decides whether a better prompt is worth its price.** `packages/ai/src/shipment.ts`
   is the missing owner of a transfer that had none: `recipe.ts` says which prompt ships and the arm
   table says which prompt won, and nothing compared a gain against the bill it is paid on — so the
@@ -62,6 +72,14 @@ cannot be argued with.
   rectangles (nine cells, nine paths), and boxplot's fourteen become eleven for the same reason. The
   empty-drawing assertion and the per-mark geometry counts still hold.
 
+### Fixed
+- **A claim in the production guide that the full split refutes.** `docs/guide/07-production.md` said
+  "how many candidates you generate matters more than which rule reads them", on the strength of a
+  600-question table that read 371 for one call and 387 for three. The +16 was a count and had never
+  been tested; `44889941650` gives +5 at p = 0.08 for the same comparison, `44897147794` gives +13 at
+  p = 0.34, and `41808092447` gives +3 at p = 1.0 on 1,532 questions. The guide now says what the
+  evidence says: a wider pool buys headroom, and 81% of the cases have one distinct result across
+  three candidates, so a vote over one opinion cannot be better than the opinion.
 ### Fixed
 - **The README quoted a symbol count 109 too low, and nothing compared the two.** The gate table said
   "430 symbols snapshotted"; `api-surface.json` held 539, and holds 552 after this round's thirteen
