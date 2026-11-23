@@ -529,6 +529,35 @@ describe('the command line, in process', () => {
     expect(refused.seen.join('\n')).toContain('spend: retired');
   });
 
+  it('reads the arm list off the command line and hands it to the gate', () => {
+    // Without this the flag would be parsed into nothing and a dispatch above the budget would keep
+    // printing "pass --probe" at a workflow that has no way to pass one.
+    const dir = mkdtempSync(join(tmpdir(), 'spend-arms-'));
+    try {
+      const ledgerPath = join(dir, 'per-case.json');
+      writeFileSync(
+        ledgerPath,
+        JSON.stringify({ rows: { 'deepseek-chat': { ...row({ prompt: 10_000, completion: 7_500 }), arm: 'an-arm' } } }),
+      );
+      const missing = lines();
+      expect(main(['--model', 'deepseek-chat', '--limit', '1534', '--ledger', ledgerPath, '--arms', 'a,an-arm,b'], missing.log)).toBe(1);
+      expect(missing.seen.join('\n')).toContain('spend: accept-cost-missing');
+
+      const accepted = lines();
+      const argv = ['--model', 'deepseek-chat', '--limit', '1534', '--ledger', ledgerPath, '--arms', 'an-arm', '--accept-cost', '200'];
+      expect(main(argv, accepted.log)).toBe(0);
+      expect(accepted.seen.join('\n')).toContain('spend: ok');
+
+      // A flag given an empty value names no arm, which is the same as not passing it: the gate
+      // then has nothing to match the ledger row against and refuses for the original reason.
+      const empty = lines();
+      expect(main(['--model', 'deepseek-chat', '--limit', '1534', '--ledger', ledgerPath, '--arms', '', '--accept-cost', '200'], empty.log)).toBe(1);
+      expect(empty.seen.join('\n')).toContain('spend: over-budget-no-probe');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('prices a probe it is handed', () => {
     const dir = mkdtempSync(join(tmpdir(), 'spend-probe-'));
     try {
