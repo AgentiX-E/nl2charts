@@ -1271,29 +1271,27 @@ export const ARMS: readonly Arm[] = [
   // questions — the whole block costs 11 calls for the split, and the prompt pays for it on every
   // question (+k examples, measured against the parent's 3.7k prompt tokens).
   { name: 'macsql-bird-os', notes: false, evidence: 'dataset', repairs: 0, linking: false, template: 'macsql-bird-os' },
-  // The two corpus blocks on the one prompt that already carries a corpus. `macsql-bird-os` sends
-  // three question-SQL pairs written for *this* database; this arm adds the value block and the row
-  // block beside them, which is the compound the plan listed as its last open lever.
+  // The two corpus blocks on the prompt their own readings were taken on. This is the compound the
+  // corpus layer ends on, and the arithmetic closed it before it was dispatched.
   //
-  // It is admissible because the union was computed before the money, not because the parts looked
-  // additive. `bench:bird:compound` takes the union of what each block answers on its own artifact —
-  // 1,020 of 1,532 against a parent of 941 — which is +5.16pp of ceiling for a bill 1.594× the
-  // parent's, and the tariff on that bill is +2.97pp. The ceiling clears its own price by 2.19pp.
-  // The additive expectation, +2.35pp, does *not*, so the registered prediction is the mechanism
-  // that would make them super-additive: a column sample says which values a column holds and a row
-  // sample says which values occur together, and a literal the question spells wrongly can only be
-  // settled when the second says it belongs in the first's column.
+  // It was registered as `macsql-bird-os+samples+rows`, and that arm could not be built: the MAC-SQL
+  // skeleton is the whole prompt and has no slot for a row block, which the harness reported on the
+  // first case of `45117268824` rather than scoring it. Re-registered here on the assembled prompt,
+  // where both blocks have slots and where the two parts were measured, it is admissible against its
+  // own parent — `bench:bird:compound` puts the union at 1,020 of 1,532 against a parent of 941,
+  // +5.16pp of ceiling for a bill 1.594x, whose tariff is +2.97pp.
   //
-  // Pre-registered before the dispatch, in `docs/benchmarks.md`: **>= +2.97pp against
-  // `macsql-bird-os` in the same run, p < 0.05**, or the corpus layer closes at its compound as it
-  // closed at one of its parts.
+  // What closes it is the frontier rather than the price. `macsql-bird-os` answers 1,020 of the same
+  // 1,532 questions, so the compound's ceiling is exactly the score the product already has: a tie at
+  // 1.594x the bill. The instrument now says so in the verdict, and the arm is kept rather than
+  // deleted because the number it must beat moves whenever the frontier's corpus is replaced.
   {
-    name: 'macsql-bird-os+samples+rows',
+    name: 'inline+evidence+samples-wide+rows',
     notes: false,
     evidence: 'dataset',
     repairs: 0,
-    linking: false,
-    template: 'macsql-bird-os',
+    linking: true,
+    definitions: 'inline',
     samples: 'example',
     rowSamples: 3,
     compound: true,
@@ -2190,7 +2188,7 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   'macsql-prompt': "MAC-SQL's BIRD prompt sent instead of ours, on our card and our evidence: the criterion is registered in `docs/benchmarks.md` before the run — at least +12 of 600 cases against `inline+evidence` with exact McNemar p < 0.05, 1.00 calls a case, and at least 387 in the three-candidate pool — and it is dispatched beside `inline+evidence-nolink` because their template has no slot for our column hint, so the mechanism reading is the pair of them and the adoption reading is `inline+evidence`",
   'macsql-bird-qp': 'the query-plan procedure inside the template that ships: one sentence pair differs from `macsql-prompt`, so it prices a procedure at 1.00 calls a case — registered before the dispatch as >= 68.0% (single source 65.93 + 2.1pp) with the plan costing at most +40% prompt tokens, and readable on dev 1,532 because the MDE there is 2.30pp; it is dispatched rather than chained because a template that carries two worked examples is a prompt a push should not pay for on every commit',
   'macsql-bird-os': 'examples written for the database by the model, once per database and cached: the mechanism this repository registered for itself when retrieved examples failed (+0.91pp against a +4.0pp bar, p = 0.2684) and then never dispatched, and CHASE-SQL\'s strongest single path at +10.27pp; registered before the dispatch as >= 68.0% against the same single source, with the block counted in prompt tokens, and dispatched because it needs 11 synthesis calls plus the split',
-  'macsql-bird-os+samples+rows': 'the value block and the row block on the one prompt that carries a corpus: `bench:bird:compound` prices the union at +5.16pp of ceiling for a bill 1.594x the parent, which is +2.97pp of tariff, so the compound is admissible before it is run and the run is what decides it; dispatched beside `macsql-bird-os` in one artifact so the pair is within-run rather than across two dispatches',
+  'inline+evidence+samples-wide+rows': 'the value block and the row block on the prompt both were measured on: `bench:bird:compound` prices the union at +5.16pp of ceiling over `inline+evidence` for a bill 1.594x, whose tariff is +2.97pp — and then refuses it against the frontier, because `macsql-bird-os` already answers 1,020 of the same 1,532 and the compound\'s ceiling is 1,020. Closed by the frontier rather than by the price; kept because the number to beat moves when the frontier\'s corpus does',
   'inline+evidence+link-evidence': 'the hint built from the question and the dataset hint together, which is the middle source of RSL-SQL\'s bidirectional linking (its `extract_from_hint` scans the evidence for column names and unions the result): offline the same twelve slots move from 39.3% to 55.2% column recall at 29.8% → 31.4% precision, so this arm prices what that recall is worth at the answer rather than at the hint',
   'inline+evidence+rows': 'three stored rows per table on the same prompt: the one input RSL-SQL\'s `Instruction.py` names five times and this repository has never sent — a column sample shows a value\'s domain, a row sample shows which values occur together, and only the second can say that `status = \'Banned\'` belongs with `currency = \'EUR\'`; priced before it was built at 1,058 characters a question at the mean and 483 at the median on dev, with the prediction registered in `docs/benchmarks.md` (gain concentrates on questions whose gold literal `values` never found, or the schema layer closes entirely),',
   'select-prune': 'the card cut to the join closure: measured −1.4pp, and the loss is the ceiling rather than the selector (1,008 → 980 reachable cases), so it is priced; run it when the card changes',
@@ -2379,15 +2377,16 @@ export const COMPARISONS: readonly (readonly [string, string, string])[] = [
   ['inline+evidence+samples', 'inline+evidence+samples-gold', 'the same sampler on every profiled column versus on the columns the gold statement filters on: an oracle for what a column rule could be worth'],
   ['inline+evidence', 'inline+evidence-nolink', 'the column hint removed from the same prompt: the first reading of what the hint is worth, on a hint that is 30% precise'],
   ['inline+evidence', 'inline+evidence+link-evidence', 'the same hint built from the question and the dataset hint together: what the linker gains when it reads the text the model already reads'],
-  // The compound the corpus layer ends on. Two levers apart from `macsql-bird-os` by construction,
-  // which is why the question it answers is written here rather than inferred from a name: the
-  // union ceiling computed before the dispatch was +5.16pp for a bill 1.594x the parent's, against
-  // a tariff of +2.97pp, and the additive expectation of +2.35pp is under that — so this pair is
-  // the one place where "the blocks interact" is a claim the run can falsify.
+  // The compound the corpus layer ends on. Two levers apart from `inline+evidence` by construction,
+  // which is why the question it answers is written here rather than inferred from a name: the union
+  // ceiling computed before the dispatch was +5.16pp for a bill 1.594x the parent's, against a tariff
+  // of +2.97pp, and the additive expectation of +2.35pp is under that — so this pair is the one place
+  // where "the blocks interact" is a claim a run can falsify. It is not dispatched, because the
+  // ceiling equals the frontier's own score and a tie at 1.594x the bill is not a purchase.
   [
-    'macsql-bird-os',
-    'macsql-bird-os+samples+rows',
-    'the value block and the row block on the prompt that already carries a corpus: the compound the corpus layer ends on',
+    'inline+evidence',
+    'inline+evidence+samples-wide+rows',
+    'the value block and the row block on the prompt both parts were measured on: the compound the corpus layer ends on',
   ],
   ['inline+evidence', 'inline+evidence+rows', 'three stored rows per table: the one input in RSL-SQL\'s prompt this repository never had, priced at 800 characters a question'],
   ['inline+evidence', 'inline+evidence+empty', 'the turn after a statement returns nothing: the one refiner trigger whose message carries something true, priced on the arm the empty trigger actually fires on'],

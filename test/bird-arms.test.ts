@@ -2215,14 +2215,18 @@ describe('the two procedure arms and the block one of them carries', () => {
 });
 
 describe('the compound corpus arm', () => {
-  const compound = (): Arm => ARMS.find((entry) => entry.name === 'macsql-bird-os+samples+rows') as Arm;
+  const compound = (): Arm => ARMS.find((entry) => entry.name === 'inline+evidence+samples-wide+rows') as Arm;
 
-  it('puts both corpus blocks on the frontier template and changes nothing else', () => {
-    // The compound has to sit on `macsql-bird-os`, because that is where the score it must beat
-    // lives; a compound measured on `inline+evidence` would be a reading about a prompt the
-    // product does not send.
+  it('puts both corpus blocks on the prompt both parts were measured on', () => {
+    // The first registration of this compound sat on `macsql-bird-os`, and that arm could not be
+    // built: the MAC-SQL skeleton is the whole prompt and has no slot for a row block, which the
+    // harness reported on the first case of `45117268824` instead of scoring it. The blocks belong
+    // on the prompt whose children measured them, and that is also the only prompt that has slots
+    // for both.
     const arm = compound();
-    expect(arm.template).toBe('macsql-bird-os');
+    expect(arm.template).toBeUndefined();
+    expect(arm.evidence).toBe('dataset');
+    expect(arm.definitions).toBe('inline');
     expect(arm.samples).toBe('example');
     // No column rule: the narrowed block is `samples-wide-link`, a different and smaller lever, and
     // the bill the compound was priced on is the wide one's.
@@ -2232,22 +2236,26 @@ describe('the compound corpus arm', () => {
     // the tariff it was priced against assumes exactly that.
     expect(arm.vote).toBeUndefined();
     expect(arm.select).toBeUndefined();
-    expect(arm.linking).toBe(false);
+    expect(arm.compound).toBe(true);
   });
 
   it('is priced for an on-demand dispatch and never for a push', () => {
-    // It needs eleven synthesis calls before the first question is asked, and it exists to answer
-    // one question. A chain that carried it would pay for the block on every commit.
-    expect(DEFAULT_ARMS).not.toContain('macsql-bird-os+samples+rows');
-    expect(DEV_ARMS).not.toContain('macsql-bird-os+samples+rows');
-    expect(Object.keys(ON_DEMAND_ARMS)).toContain('macsql-bird-os+samples+rows');
+    // Two blocks on every prompt is a bill a push should not carry, and the reading that closed it
+    // came from artifacts rather than from a dispatch.
+    expect(DEFAULT_ARMS).not.toContain('inline+evidence+samples-wide+rows');
+    expect(DEV_ARMS).not.toContain('inline+evidence+samples-wide+rows');
+    expect(Object.keys(ON_DEMAND_ARMS)).toContain('inline+evidence+samples-wide+rows');
   });
 
-  it('still refuses to render a prompt without the examples a model writes', () => {
-    // The compound inherits the template's contract, so a dispatch that forgot the block fails at
-    // the prompt rather than reporting the parent's score under the compound's name.
-    const options = promptFor(compound(), question, {});
-    expect(needsModelWrittenExamples(compound())).toBe(true);
-    expect(() => buildSqlPrompt(question.question, [], options)).toThrow(/received none/);
+  it('renders both blocks, which is the thing the skeleton could not do', () => {
+    // The refusal that ended the first registration was about the prompt, not about the score: an
+    // arm whose block renders nowhere is the parent with a longer name. This asserts the two blocks
+    // are in the prompt this arm sends, through the builder the run uses.
+    const options = promptFor(compound(), question, { rows: 'orders: (1, paid), (2, new)' });
+    expect(options.samples).toBe(true);
+    expect(options.rowSamples).toBe('orders: (1, paid), (2, new)');
+    expect(options.template).toBeUndefined();
+    const schema = [{ table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'status', type: 'TEXT' }] }];
+    expect(buildSqlPrompt(question.question, schema, options)).toContain('Rows in this database:');
   });
 });

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   billOfCase,
   compoundOf,
+  frontierOf,
   main,
   measure,
   PARENT_DRIFT_MAX,
@@ -321,6 +322,92 @@ describe('compoundOf, at the edges of its own arithmetic', () => {
       leverRight: new Set<string>(),
     };
     expect(() => compoundOf([{ ...base, lever: 'x' }, { ...base, lever: 'y' }])).toThrow(/answered nothing correctly/);
+  });
+});
+
+/**
+ * The comparison that closed this round's experiment.
+ *
+ * A ceiling measured against its own parent answers "is this lever worth running". It does not
+ * answer "is the result worth having", and the difference cost nothing to check: the compound's
+ * union of 1,020 was exactly the score `macsql-bird-os` already holds on the same 1,532 questions,
+ * which makes the best case a tie at 1.594x the bill.
+ */
+describe('the frontier, when the caller names one', () => {
+  const ids = [1, 2, 3, 4];
+  const parent = ids.map((n) => ({ id: `q${String(n)}`, passed: n === 1 }));
+  const lever = ids.map((n) => ({ id: `q${String(n)}`, passed: n === 1 || n === 2 }));
+
+  it('reads the score an arm already holds, with the run it came from', () => {
+    const path = artifact(parent, lever, 'lever', 'parent');
+    const reading = measure(readArtifact(path), 'parent', 'lever');
+    const frontier = frontierOf(path, 'parent', reading.cases);
+    expect(frontier).toEqual({ arm: 'parent', correct: 1, cases: 4, run: '1' });
+  });
+
+  it('refuses an arm the artifact never ran, and a split of another size', () => {
+    const path = artifact(parent, lever);
+    expect(() => frontierOf(path, 'absent', 4)).toThrow(/never ran/);
+    // Two scores over two corpora are not two scores over one, and this comparison is the only
+    // thing standing between a ceiling and a purchase.
+    expect(() => frontierOf(path, 'parent', 5)).toThrow(/not on one split/);
+  });
+
+  it('refuses a ceiling that only ties the score already on the table', () => {
+    const reading = compoundOf([measure(readArtifact(artifact(parent, lever)), 'parent', 'lever')]);
+    // The lever answers two of four; the parent answers one, so the ceiling is two and a frontier at
+    // two is a tie.
+    expect(reading.unionCorrect).toBe(2);
+    const verdict = verdictOf({
+      ...reading,
+      frontier: { arm: 'shipped', correct: 2, cases: 4, run: '9' },
+      unionCorrect: reading.unionCorrect,
+    });
+    expect(verdict.code).toBe('cannot-pay');
+    expect(verdict.message).toContain('shipped');
+    expect(verdict.message).toContain('not a purchase');
+  });
+
+  it('lets a ceiling above the frontier through, and prints the headroom', () => {
+    const reading = compoundOf([measure(readArtifact(artifact(parent, lever)), 'parent', 'lever')]);
+    const withFrontier = { ...reading, frontier: { arm: 'shipped', correct: 0, cases: 4, run: '9' }, headroomPp: 25 };
+    expect(verdictOf(withFrontier).code).toBe('can-pay');
+    expect(reportLines(withFrontier).join('\n')).toContain('frontier shipped 0 / 4');
+    expect(reportLines(withFrontier).join('\n')).toContain('+25.00pp of headroom');
+  });
+
+  it('refuses a frontier given without its artifact, and the reverse', () => {
+    expect(() => resolveSettings(['a.json', '--frontier', 'b.json'])).toThrow(/go together/);
+    expect(() => resolveSettings(['a.json', '--frontier-arm', 'x'])).toThrow(/go together/);
+    // A flag with no value at all is a different refusal from a flag with no partner: the first is a
+    // typo in the command line and the second is an incomplete comparison.
+    expect(() => resolveSettings(['a.json', '--frontier'])).toThrow(/needs an artifact path/);
+    expect(() => resolveSettings(['a.json', '--frontier', 'b.json', '--frontier-arm'])).toThrow(/needs an arm name/);
+    const both = resolveSettings(['a.json', '--frontier', 'b.json', '--frontier-arm', 'x']);
+    expect([both.frontierArtifact, both.frontierArm]).toEqual(['b.json', 'x']);
+  });
+
+  it('writes the headroom with the sign it has, including when nobody computed one', () => {
+    // A field that is read with `?? 0` and printed without a sign prints `-3.00pp` as `3.00pp`, and
+    // the one number a reader takes from this line is the sign.
+    const reading = compoundOf([measure(readArtifact(artifact(parent, lever)), 'parent', 'lever')]);
+    const frontier = { arm: 'shipped', correct: 0, cases: 4, run: '9' };
+    expect(reportLines({ ...reading, frontier }).join('\n')).toContain('+0.00pp of headroom');
+    expect(reportLines({ ...reading, frontier, headroomPp: -3 }).join('\n')).toContain('-3.00pp of headroom');
+  });
+
+  it('withdraws the dispatch from the command line, not only from a reading', () => {
+    // The exit code is what a dispatcher reads: a `can-pay` from the parent comparison alone would
+    // have authorised the run this section exists to stop.
+    const lines: string[] = [];
+    const path = artifact(parent, lever);
+    // `lever` holds the ceiling's own score, which is the tie the frontier check exists to catch.
+    const code = main([path, '--parent', 'parent', '--frontier', path, '--frontier-arm', 'lever'], (line) =>
+      lines.push(line),
+    );
+    expect(code).toBe(1);
+    expect(lines.join('\n')).toContain('cannot-pay');
+    expect(lines.join('\n')).toContain('frontier lever');
   });
 });
 

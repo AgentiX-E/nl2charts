@@ -217,9 +217,9 @@ describe('what a dispatch is allowed to spend', () => {
         env: { ...process.env, BIRD_ARMS: arms, QUESTIONS: questions, ACCEPT_COST: '' },
       });
     expect(run('a,b', '100')).toContain('2 arm(s) x 100 question(s) = 200 call(s)');
-    // The pair this round dispatched: 1,534 rows, two arms, and the trailing comma a caller leaves
-    // behind is not a third arm.
-    expect(run('macsql-bird-os,macsql-bird-os+samples+rows', '1534')).toContain(
+    // A registered pair: 1,534 rows, two arms, and the trailing comma a caller leaves behind is not
+    // a third arm.
+    expect(run('inline+evidence,inline+evidence+samples-wide+rows', '1534')).toContain(
       '2 arm(s) x 1534 question(s) = 3068 call(s)',
     );
     expect(run('a,', '10')).toContain('1 arm(s) x 10 question(s) = 10 call(s)');

@@ -20363,9 +20363,11 @@ rather than assumed.
 **Cost of this reading: ¥0.** It reads artifacts already on disk — one of which had to be downloaded
 again, because the composition table was printed for a run whose artifact nobody kept.
 
-## The base model was not the lever, and the compound that replaces it was priced before it ran
+## The base model was not the lever, and the compound it left was priced before it was withdrawn
 
-Two things came out of the same round, and only one of them cost money.
+Two things came out of the same round, and only one of them cost money. A third came out of the
+probe that followed: the compound could not be built, and re-priced on the prompt where it can be,
+its ceiling is the score the product already has. Both are below.
 
 ### The larger base, measured at the frontier
 
@@ -20422,31 +20424,72 @@ negative term positive.
 | questions both blocks answer correctly | 896 of 1,020 |
 | bill, a case | 241 → 384, **×1.594** |
 | tariff at ×1.594 | **+2.97pp** |
-| `bench:bird:compound` verdict | **can-pay**, by 2.19pp |
+| `bench:bird:compound` verdict against its own parent | **can-pay**, by 2.19pp |
+| the same verdict once the frontier is named | **cannot-pay**: 0.00pp of headroom |
 
-The ceiling clears its price and the expectation does not, which is the whole reason the compound is
-worth one dispatch rather than a paragraph: the two blocks fix almost the same questions (896 of
-1,020), so their gains cannot be added, and the only way they beat +2.35pp is if they are
-*super*-additive — a column sample says which values a column holds, a row sample says which values
-occur together, and a literal the question spells wrongly can only be settled when the second says it
-belongs in the first's column.
+The ceiling clears its own price and the expectation does not, which is why the compound was worth
+one probe rather than a paragraph: the two blocks fix almost the same questions (896 of 1,020), so
+their gains cannot be added, and the only way they beat +2.35pp is if they are *super*-additive — a
+column sample says which values a column holds, a row sample says which values occur together, and a
+literal the question spells wrongly can only be settled when the second says it belongs in the
+first's column. The probe then found that the prompt carrying them has no slot for the second block,
+and that against the arm this repository actually ships the whole question is worth +0.00pp; both
+are in the section below.
 
-The 66.58% is a coincidence worth naming so nobody reads it as a result: it is the ceiling of a union
-taken across two runs, and the same figure appears above as `macsql-bird-os` with thinking on. They
-are different quantities that happen to land on the same integer.
+The 66.58% is not a coincidence after all, and that is the finding: the union of the two blocks on
+`inline+evidence` is exactly the score `macsql-bird-os` reaches on its own. Two prompts, one score,
+and the template gets there with 1.00 calls a case and no second block.
 
-### Registered before the dispatch
+### The compound that was registered, and the two reasons it was withdrawn
 
-`macsql-bird-os+samples+rows`, the dev split, 1,532 questions, `deepseek-chat`, dispatched beside
-`macsql-bird-os` in one artifact so the pair is within-run:
+The registration was `macsql-bird-os+samples+rows` against `macsql-bird-os`, and it is withdrawn
+before it spent the ≈ ¥8 it was priced at. Neither reason is an accuracy reading; both are
+arithmetic, and the first one cost 100 cases to find.
 
-> **Pays if ≥ +2.97pp against `macsql-bird-os` with exact McNemar p < 0.05.** The dev split resolves
-> 2.30pp at 80% power, so the criterion is above the noise floor and below the ceiling; a gain
-> between +2.30 and +2.97pp is a real effect the ledger still refuses, and it closes the corpus layer
-> at its compound.
+**It could not be built.** `45117268824` dispatched the pair on a 100-question probe and the arm
+failed on all 100 cases before any statement reached the engine:
 
-**Cost: ≈ ¥4** for the pair, against the ¥110.08 the base-model run spent to answer a question with a
-different sign.
+> `harness: prompt template 'macsql-bird-os' is the whole prompt and has no slot for rowSamples;
+> drop the option or use the assembled prompt`
+
+The MAC-SQL skeleton carries a schema, its own three worked examples, and the question. It has no
+row block, and no arrangement of the arm's fields would give it one. The harness reporting that on
+the first case rather than scoring it is the behaviour the partial-artifact line exists for: the
+alternative is a run that reports the parent's score under the compound's name.
+
+The probe also settled a second thing about the pair: at 100 questions × 2 arms with the gate's
+own 1.5 safety multiple, the projection was ¥0.75, so the ¥10 dispatching budget covers a probe of
+exactly this size and nothing about the probe was improvident.
+
+**Re-registered on the prompt that has slots, the ceiling is the frontier's own score.**
+
+`inline+evidence+samples-wide+rows` against `inline+evidence` is the compound both parts were
+measured on, and there it does clear its price:
+
+| quantity | value |
+| --- | ---: |
+| parent (`inline+evidence`, run `43579551678`) | 941 / 1,532 = 61.42% |
+| ceiling, the union of the two block arms | **1,020 / 1,532 = 66.58%** |
+| ceiling over that parent | +5.16pp |
+| tariff on a bill ×1.594 | +2.97pp |
+| **`macsql-bird-os`, same split, run `45040430602`** | **1,020 / 1,532 = 66.58%** |
+| headroom over the score the product already has | **+0.00pp** |
+
+The union of what the two blocks answer is exactly what the shipped template already answers. A
+compound whose best case is a tie at 1.594× the bill is not a purchase at any tariff, and
+`bench:bird:compound` now refuses it in the verdict rather than leaving that comparison to a reader:
+
+> `cannot-pay: the ceiling reaches 1020 questions and macsql-bird-os already answers 1020 of the
+> same 1532 (run 45040430602): the best arrangement of these blocks ties what the product has, and a
+> tie at 2.97pp of tariff is not a purchase`
+
+The instrument gained the check this round needed — a ceiling compared only against its own parent
+answers "is this lever worth running", not "is the result worth having" — and the arm is kept rather
+than deleted, because the number it must beat moves whenever the frontier's corpus is replaced.
+
+**The corpus layer closes here**: at its one part (+2.02pp for +31.9% of the bill, which pays), at
+its other part (+0.33pp, which does not), and at its compound (+0.00pp of headroom, which cannot).
+**Cost: ≈ ¥0.3, the probe.** The withdrawable spend was ¥8.
 
 ### The default model the price table could not bill
 

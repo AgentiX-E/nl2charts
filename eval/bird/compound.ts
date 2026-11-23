@@ -120,6 +120,26 @@ export interface CompoundReading {
   readonly multiple: number;
   /** Points the tariff demands at that multiple. */
   readonly requiredPp: number;
+  /** The best score already on the table, when the caller names it. */
+  readonly frontier?: Frontier;
+  /** Union minus that score: the headroom a ceiling has over what the product already is. */
+  readonly headroomPp?: number;
+}
+
+/**
+ * The score the product already has, and the arm that holds it.
+ *
+ * A ceiling measured against its own parent says whether a lever is worth running. It does not say
+ * whether the result is worth having, and the difference decided this round: the compound's union
+ * against `inline+evidence` is +5.16pp of ceiling over a parent at 941, and the frontier arm — a
+ * different prompt that this repository already ships — answers 1,020 of the same 1,532 questions.
+ * A ceiling that lands exactly on the number already on the table buys a tie at 1.594x the bill.
+ */
+export interface Frontier {
+  readonly arm: string;
+  readonly correct: number;
+  readonly cases: number;
+  readonly run: string;
 }
 
 /** The two verdicts, and nothing in between. */
@@ -299,16 +319,58 @@ export function compoundOf(readings: readonly Measurement[]): CompoundReading {
 }
 
 /**
+ * The score one arm already holds, read off an artifact.
+ *
+ * The artifact has to be a run of the same split, and this function refuses one that asked a
+ * different number of questions: two scores over two corpora are not two scores over one, and the
+ * comparison this feeds is the only thing standing between a ceiling and a purchase.
+ */
+export function frontierOf(path: string, arm: string, cases: number): Frontier {
+  const read = readArtifact(path);
+  const rows = read.arms.get(arm);
+  if (rows === undefined) {
+    throw new Error(`${path} never ran ${arm}, so it holds no frontier to compare against`);
+  }
+  if (rows.size !== cases) {
+    throw new Error(
+      `${path} scored ${arm} on ${String(rows.size)} questions and this compound is over ${String(cases)}, so the two numbers are not on one split`,
+    );
+  }
+  let correct = 0;
+  for (const row of rows.values()) if (row.passed) correct += 1;
+  return { arm, correct, cases: rows.size, run: read.run };
+}
+
+/**
  * Does the compound's ceiling clear its own price?
  *
  * `cannot-pay` is the only final answer: a ceiling below the tariff means no arrangement of these
  * blocks reaches what the ledger demands, so the run is not a purchase. `can-pay` means the
  * arithmetic permits the experiment — the shipment gate still needs a paired reading, and this
  * function cannot produce one.
+ *
+ * A named frontier joins the price as a second way to be refused, and it is the stricter one: a
+ * ceiling that ties the score the product already has cannot pay at any price, because the best
+ * case is a tie at a bigger bill. The two refusals are different facts and the message says which.
  */
-export function verdictOf(reading: { readonly ceilingPp: number; readonly requiredPp: number }): CompoundVerdict {
+export function verdictOf(reading: {
+  readonly ceilingPp: number;
+  readonly requiredPp: number;
+  readonly unionCorrect?: number;
+  readonly frontier?: Frontier;
+}): CompoundVerdict {
   const ceiling = Math.round(reading.ceilingPp * 100) / 100;
   const required = Math.round(reading.requiredPp * 100) / 100;
+  if (reading.frontier !== undefined && reading.unionCorrect !== undefined && reading.frontier.correct >= reading.unionCorrect) {
+    return {
+      code: 'cannot-pay',
+      message:
+        `the ceiling reaches ${String(reading.unionCorrect)} questions and ${reading.frontier.arm} already answers ` +
+        `${String(reading.frontier.correct)} of the same ${String(reading.frontier.cases)} (run ${reading.frontier.run}): the ` +
+        `best arrangement of these blocks ties what the product has, and a tie at ${reading.requiredPp.toFixed(2)}pp of ` +
+        `tariff is not a purchase`,
+    };
+  }
   if (ceiling < required) {
     return {
       code: 'cannot-pay',
@@ -327,18 +389,27 @@ export function reportLines(
   verdict: CompoundVerdict = verdictOf(reading),
 ): readonly string[] {
   const cases = String(reading.cases);
+  const frontier =
+    reading.frontier === undefined
+      ? []
+      : [
+          `  frontier ${reading.frontier.arm} ${String(reading.frontier.correct)} / ${String(reading.frontier.cases)} = ` +
+            `${((reading.frontier.correct / reading.frontier.cases) * 100).toFixed(2)}%  ` +
+            `${(reading.headroomPp ?? 0) >= 0 ? '+' : ''}${(reading.headroomPp ?? 0).toFixed(2)}pp of headroom (run ${reading.frontier.run})`,
+        ];
   return [
     `compound of ${reading.levers.join(' + ')} over ${reading.parent} (${cases} questions, runs ${reading.runs.join(', ')})`,
     `  parent   ${String(reading.parentCorrect)} / ${cases} = ${((reading.parentCorrect / reading.cases) * 100).toFixed(2)}%`,
     `  ceiling  ${String(reading.unionCorrect)} / ${cases} = ${((reading.unionCorrect / reading.cases) * 100).toFixed(2)}%  +${reading.ceilingPp.toFixed(2)}pp  (oracle: right wherever either block was)`,
     `  additive +${reading.additivePp.toFixed(2)}pp  (counts the ${String(reading.overlap)} questions both blocks fix twice)`,
     `  bill     ${reading.parentBill.toFixed(0)} -> ${reading.compoundBill.toFixed(0)} a case  x${reading.multiple.toFixed(3)}  demands +${reading.requiredPp.toFixed(2)}pp`,
+    ...frontier,
     `  verdict  ${verdict.code}: ${verdict.message}`,
   ];
 }
 
 /** Asserts `--self-test` makes, for the line it prints. */
-export const SELF_TEST_ASSERTIONS = 9;
+export const SELF_TEST_ASSERTIONS = 11;
 
 /** The self-test: the arithmetic this file exists to get right, on numbers small enough to check. */
 export function selfTest(): { problems: readonly string[]; assertions: number } {
@@ -394,6 +465,19 @@ export function selfTest(): { problems: readonly string[]; assertions: number } 
     [compound.compoundBill, Math.round(compound.multiple * 100) / 100],
     [310, 1.55],
   );
+  // The refusal this round produced: a ceiling that lands on the score already on the table buys a
+  // tie, and a tie at any tariff above zero is not a purchase. The union is 75 of 100 here.
+  const frontier = { arm: 'shipped', correct: 75, cases: 100, run: '3' };
+  same(
+    'a ceiling that ties the shipped score cannot pay',
+    verdictOf({ ceilingPp: compound.ceilingPp, requiredPp: compound.requiredPp, unionCorrect: 75, frontier }).code,
+    'cannot-pay',
+  );
+  same(
+    'a ceiling one question above the shipped score is a headroom rather than a tie',
+    verdictOf({ ceilingPp: compound.ceilingPp, requiredPp: compound.requiredPp, unionCorrect: 76, frontier: { ...frontier, correct: 75 } }).code,
+    'can-pay',
+  );
   return { problems, assertions };
 }
 
@@ -401,12 +485,17 @@ export function selfTest(): { problems: readonly string[]; assertions: number } 
 export interface Settings {
   readonly parent: string;
   readonly artifacts: readonly string[];
+  /** The artifact holding the best score already on the table, when the caller names one. */
+  readonly frontierArtifact?: string;
+  readonly frontierArm?: string;
 }
 
 /** Parse the command line. */
 export function resolveSettings(argv: readonly string[]): Settings {
   const artifacts: string[] = [];
   let parent = 'inline+evidence';
+  let frontierArtifact: string | undefined;
+  let frontierArm: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index] as string;
     if (argument === '--parent') {
@@ -416,13 +505,37 @@ export function resolveSettings(argv: readonly string[]): Settings {
       index += 1;
       continue;
     }
+    if (argument === '--frontier') {
+      const value = argv[index + 1];
+      if (value === undefined) throw new Error('--frontier needs an artifact path');
+      frontierArtifact = value;
+      index += 1;
+      continue;
+    }
+    if (argument === '--frontier-arm') {
+      const value = argv[index + 1];
+      if (value === undefined) throw new Error('--frontier-arm needs an arm name');
+      frontierArm = value;
+      index += 1;
+      continue;
+    }
     if (argument.startsWith('--')) throw new Error(`unknown flag ${argument}`);
     artifacts.push(argument);
   }
   if (artifacts.length === 0) {
-    throw new Error('name at least one artifact: compound.ts <artifact>... [--parent <arm>]');
+    throw new Error('name at least one artifact: compound.ts <artifact>... [--parent <arm>] [--frontier <artifact> --frontier-arm <arm>]');
   }
-  return { parent, artifacts };
+  // Both or neither: a ceiling compared against an arm nobody named is a comparison to nothing, and
+  // an arm named without its artifact is a number with no source.
+  if ((frontierArtifact === undefined) !== (frontierArm === undefined)) {
+    throw new Error('--frontier and --frontier-arm go together: an artifact with no arm names no score, and an arm with no artifact has no run behind it');
+  }
+  return {
+    parent,
+    artifacts,
+    ...(frontierArtifact === undefined ? {} : { frontierArtifact }),
+    ...(frontierArm === undefined ? {} : { frontierArm }),
+  };
 }
 
 /** The entry point. */
@@ -454,8 +567,16 @@ export function main(
     return measure(read, settings.parent, levers[0] as string);
   });
   const reading = compoundOf(readings);
-  const verdict = verdictOf(reading);
-  for (const line of reportLines(reading, verdict)) log(line);
+  const frontier =
+    settings.frontierArtifact === undefined || settings.frontierArm === undefined
+      ? undefined
+      : frontierOf(settings.frontierArtifact, settings.frontierArm, reading.cases);
+  const withFrontier: CompoundReading =
+    frontier === undefined
+      ? reading
+      : { ...reading, frontier, headroomPp: ((reading.unionCorrect - frontier.correct) / reading.cases) * 100 };
+  const verdict = verdictOf(withFrontier);
+  for (const line of reportLines(withFrontier, verdict)) log(line);
   return verdict.code === 'can-pay' ? 0 : 1;
 }
 

@@ -113,10 +113,10 @@
       "branches": 100
     },
     "eval/bird/compound.ts": {
-      "lines": 98.92,
-      "statements": 98.92,
+      "lines": 99.15,
+      "statements": 99.15,
       "functions": 100,
-      "branches": 97.97
+      "branches": 98.52
     },
     "eval/bird/condition-gate.ts": {
       "lines": 100,
@@ -443,10 +443,10 @@
       "branches": 97.14
     },
     "eval/bird/spend.ts": {
-      "lines": 99.55,
-      "statements": 99.55,
+      "lines": 99.56,
+      "statements": 99.56,
       "functions": 100,
-      "branches": 99.21
+      "branches": 99.25
     },
     "eval/bird/sql-shape.ts": {
       "lines": 100,

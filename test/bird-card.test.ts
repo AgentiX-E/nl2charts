@@ -1232,7 +1232,7 @@ describe('the block an arm carries on its card', () => {
     // skipping it silently is exactly the hole this loop was written to close — so the skipped set
     // is named, and `bird-arms.test.ts` asserts the block on the builder that arm does use.
     const skipped = ARMS.filter((entry) => entry.samples !== undefined && entry.template !== undefined).map((entry) => entry.name);
-    expect(skipped.sort()).toEqual(['macsql-bird-os+samples+rows']);
+    expect(skipped).toEqual([]);
     const priced = ARMS.filter((entry) => entry.samples !== undefined && entry.template === undefined);
     expect(priced.length).toBeGreaterThan(3);
     for (const arm of priced) {
