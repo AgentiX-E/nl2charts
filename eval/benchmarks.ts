@@ -92,12 +92,18 @@ export const BENCHMARKS: readonly Benchmark[] = [
     metrics: ['EX'],
     status: 'absent',
     gap:
-      'The corpus is not vendored and no harness reads it. It is also the benchmark this pipeline is '
-      + 'least shaped for: every WikiSQL question is single-table and single-condition, so the schema '
-      + 'card, the join graph and the linker — the three mechanisms this repository has priced — have '
-      + 'nothing to do. Building it means a second adapter (its tables are JSON, not SQLite) and a '
-      + 'flattening of the question into the same prompt contract; the number would then measure a '
-      + 'capability this product does not sell.',
+      'The corpus is not vendored, and the reason is transport rather than design. `data.tar.bz2` is '
+      + '26 MB in one blob, and the sandbox\'s egress proxy ends a GitHub blob download at about 7 MB: '
+      + 'two attempts produced 5,791,744 and 7,324,757 of 26,164,664 bytes, and `bzip2 -t` rejects '
+      + 'both with "file ends unexpectedly". The judgement itself is no longer the obstacle — '
+      + '`eval/wikisql/form.ts` ports the reference template and result comparison '
+      + '(`lib/query.py`, `lib/dbengine.py`) with 25 assertions behind it, including the two choices '
+      + 'that decide whether a number is comparable: string condition values are lower-cased on both '
+      + 'sides, and the comparison is ordered, because the reference compares `fetchall()` tuples. '
+      + 'It is also the benchmark this pipeline is least shaped for: every question is single-table '
+      + 'and single-condition, so the schema card, the join graph and the linker have nothing to do. '
+      + 'The number would measure a capability this product does not sell, which is why the corpus is '
+      + 'worth fetching only when a reading is needed, not before.',
   },
   {
     id: 'spider-dev',
@@ -111,9 +117,14 @@ export const BENCHMARKS: readonly Benchmark[] = [
       'Spider needs an exact-match reading as well as an execution one, and this repository has only '
       + 'the execution judge: `eval/bird/compare.ts` compares result sets through the same driver BIRD '
       + 'uses, and `arms[].exactMatchRate` is a normalised string match over generated statements, not '
-      + 'Spider\'s component-wise clause match. Building it means vendoring the 1,034-question dev set '
-      + 'with its SQLite files, porting the official evaluator\'s clause decomposition, and re-pricing '
-      + 'every floor — a split is a coordinate, and a number moved across splits is not a reading.',
+      + 'Spider\'s component-wise clause match. The judge can be ported — the reference `evaluation.py` '
+      + '(30 KB) and `process_sql.py` (17 KB) download fine — but the corpus does not: the repository '
+      + 'carries code and no data, and the 1,034-question dev set with its 20 SQLite files is served '
+      + 'from the project site and a Google Drive folder, neither of which answers from this sandbox. '
+      + 'Porting the evaluator with no corpus to run it on would be an instrument that has never been '
+      + 'measured, which is the state this table exists to prevent. Building it means a fetcher that '
+      + 'reaches one of those two sources, then a clause decomposition, then a re-pricing of every '
+      + 'floor — a split is a coordinate, and a number moved across splits is not a reading.',
   },
   {
     id: 'bird-mini-dev',
@@ -219,12 +230,18 @@ export const BENCHMARKS: readonly Benchmark[] = [
     metrics: ['F1@3', 'F1@5'],
     status: 'absent',
     gap:
-      'The corpus is public on Hugging Face and no harness here reads it. Two things differ from '
-      + 'Text2Vis: one query has a *set* of valid visualizations, so the reading is precision and recall '
-      + 'over that set rather than top-1, and the mark vocabulary is Vega-Lite specifications rather '
-      + 'than this repository\'s eleven-mark contract. Building it means an adapter from Vega-Lite to '
-      + 'the mark contract plus a set-valued scorer; the leaderboard is trained-model territory '
-      + '(Step-NL2VIS 81.50 F1@3), which is the same wall as BIRD\'s.',
+      'The corpus is in `HKUSTDial/nvBench-2.0`, not on Hugging Face, and it does download: '
+      + '`data/nvbench2.0/dev.json` is 750 queries in 3.3 MB, small enough to survive the egress proxy '
+      + 'that truncates larger blobs. What does not arrive is the judge. `code/evaluation/evaluation.py` '
+      + 'loads `raw_data/nvbench_metadata.json` at import time and the repository does not carry that '
+      + 'file — no `raw_data/` directory exists in the tree — so the official script cannot start from a '
+      + 'public checkout, and the metadata has to be rebuilt by `code/data_synthesis_pipeline/'
+      + 'part1_metadata/*.py` against the databases first. Two things also differ from Text2Vis: one '
+      + 'query has a *set* of valid visualizations, so the reading is precision and recall over that set '
+      + 'rather than top-1, and the mark vocabulary is Vega-Lite specifications rather than this '
+      + 'repository\'s eleven-mark contract. Building it means rebuilding the metadata, an adapter from '
+      + 'Vega-Lite to the mark contract, and a set-valued scorer; the leaderboard is trained-model '
+      + 'territory (Step-NL2VIS 81.50 F1@3), which is the same wall as BIRD\'s.',
   },
   {
     id: 'viscodebench',
