@@ -63,6 +63,13 @@ cannot be argued with.
   empty-drawing assertion and the per-mark geometry counts still hold.
 
 ### Fixed
+- **The README quoted a symbol count 109 too low, and nothing compared the two.** The gate table said
+  "430 symbols snapshotted"; `api-surface.json` held 539, and holds 552 after this round's thirteen
+  new exports. A count in prose is a checked-in claim about a file, and it had been wrong for as long
+  as anybody could tell, because the only thing that reads the snapshot is the gate that writes it.
+  `check-exports.mjs` now reads the sentence out of `README.md` and compares it with the list it
+  built (A6), so a README that quotes the count quotes *this* run's — and a README that stops quoting
+  one is red rather than silently unchecked.
 - **"No A/A control" now has a word.** A workflow input with a non-empty default cannot be unset
   from the command line: the dispatcher passes a blank, Actions reads a blank as "not supplied",
   and the input's default is what the run receives. `bird-model.yml` defaulted `aa` to

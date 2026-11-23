@@ -15,6 +15,12 @@
  * `stale-build.mjs` now compares the built declaration against the newest source in the
  * package — nested modules included — and refuses to read a build that cannot contain the
  * code being checked. The budget gate shares it, because it reads the same files.
+ *
+ * One more number lives beside this one and had drifted: the README's gate table said "430 symbols
+ * snapshotted" while the snapshot held 539, and it had said 430 for as long as anybody could tell —
+ * a hand-typed count in prose is a checked-in claim about a file, and nothing was comparing the two.
+ * The count is now read from the same list this check builds, so the sentence cannot outlive it:
+ * a README that quotes a symbol count quotes *this* run's.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -87,6 +93,20 @@ function main() {
     process.exit(1);
   }
   const total = Object.values(current).reduce((sum, list) => sum + list.length, 0);
+  // The README quotes the count in one sentence and the sentence is part of the gate table, so a
+  // stale number there reads exactly like a current one. It is compared rather than removed: a
+  // number a reader can sanity-check is worth keeping, and keeping it by derivation is the only
+  // way it stays true.
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  const quoted = /\((\d+) symbols snapshotted\)/.exec(readme);
+  if (quoted === null) {
+    console.error('A6: README.md no longer quotes the snapshot size, so the gate table has no count to check');
+    process.exit(1);
+  }
+  if (Number(quoted[1]) !== total) {
+    console.error(`A6: README.md says ${quoted[1]} symbols snapshotted, the snapshot holds ${total}`);
+    process.exit(1);
+  }
   console.log(`api surface: ${total} symbols across ${PACKAGES.length} packages, no drift`);
 }
 
