@@ -112,6 +112,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/compound.ts": {
+      "lines": 98.92,
+      "statements": 98.92,
+      "functions": 100,
+      "branches": 97.97
+    },
     "eval/bird/condition-gate.ts": {
       "lines": 100,
       "statements": 100,

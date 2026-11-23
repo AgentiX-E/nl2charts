@@ -53,6 +53,11 @@ export const PRICES: Readonly<Record<string, ModelPrice>> = {
   'glm-4.6v': { input: 1, output: 3, cached: 0.2, asOf: READ_ON, source: ZHIPU },
   'glm-4.6v-flashx': { input: 0.15, output: 1.5, cached: 0.03, asOf: READ_ON, source: ZHIPU },
   'glm-4.5-air': { input: 0.8, output: 6, cached: 0.16, asOf: READ_ON, source: ZHIPU },
+  // There is no `glm-4.5` row, and its absence is a finding rather than an omission: that name was
+  // `bird-model.yml`'s default for three months, and the page above lists GLM-4.5-Air and GLM-4.5V
+  // and no plain GLM-4.5, so no citation exists to put in this table. A dispatch under a name with
+  // no row is refused by `eval/bird/spend.ts` rather than costed at zero — which is the whole point
+  // of the table, and the reason the workflow's default is now `glm-4.5-air`.
   // The BIRD backbone. Priced at the peak-hour, cache-miss column, so a bill read off this table is an
   // upper bound: the provider charges half in every hour outside 09:00-12:00 and 14:00-18:00 on
   // weekdays, and this repository runs most of its jobs at night.

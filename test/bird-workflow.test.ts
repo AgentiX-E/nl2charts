@@ -10,6 +10,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DEFAULT_ARMS } from '../eval/bird/run.js';
+import { RETIRED } from '../eval/bird/spend.js';
+import { PRICES } from '../eval/price.js';
 
 describe('a benchmark workflow publishes what a failed run produced', () => {
   const workflows = ['.github/workflows/bird-dev.yml', '.github/workflows/bird-model.yml', '.github/workflows/ci.yml'];
@@ -103,6 +105,76 @@ describe('the second endpoint follows the second provider', () => {
     const end = rest.findIndex((line) => line.trim() !== '' && /^ {6}[a-z_]+:/u.test(line));
     const block = rest.slice(0, end === -1 ? rest.length : end).join('\n');
     expect(block).toContain("default: ''");
+  });
+});
+
+/**
+ * A dispatch whose model has no price row cannot be costed, and a dispatch that cannot be costed
+ * cannot be decided.
+ *
+ * `bird-model.yml` defaulted to `glm-4.5` for three months. The provider's price page does not list
+ * that name — only GLM-4.5-Air and GLM-4.5V — so every dispatch of the default reached `bench:bill`
+ * as "no price on file", which is the same sentence that let the `deepseek-v4-pro` run be read as
+ * roughly free until its invoice arrived. The fix is not a fabricated row: it is a default the table
+ * holds, and this test is what keeps the two files agreeing.
+ */
+describe('the model a dispatch starts from', () => {
+  const WORKFLOWS = [
+    '.github/workflows/bird-dev.yml',
+    '.github/workflows/bird-model.yml',
+    '.github/workflows/text2vis-llm.yml',
+    '.github/workflows/text2vis-judge.yml',
+  ];
+
+  /**
+   * Every model a workflow dispatches when nobody overrides it.
+   *
+   * Two places, because the fallback lives in two. An input's `default:` is the obvious one; the
+   * other is the `|| '…'` of the env expression that turns a blank input into a name, and
+   * `bird-dev.yml` uses exactly that form — its `default: ''` is deliberate, so a reader of the
+   * `default:` line alone sees no model at all.
+   */
+  function defaultsOf(file: string): string[] {
+    const text = readFileSync(resolve(process.cwd(), file), 'utf8');
+    const names = new Set<string>();
+    const lines = text.split('\n');
+    const at = lines.findIndex((line) => /^ {6}models?:$/u.test(line));
+    if (at === -1) throw new Error(`${file} declares no model input, so this test is reading nothing`);
+    for (const line of lines.slice(at + 1)) {
+      if (/^ {6}[a-z_]+:\s*$/u.test(line)) break;
+      const found = /^ {8}default: '([^']*)'/u.exec(line);
+      if (found === null) continue;
+      for (const name of (found[1] as string).split(',')) if (name.trim() !== '') names.add(name.trim());
+      break;
+    }
+    for (const line of lines) {
+      if (!/^\s+(?:LLM_MODEL|TEXT2VIS_LLM_MODELS):/u.test(line)) continue;
+      // A name, not a quoted fragment: `inputs.model != '' && inputs.model || 'deepseek-chat'` has
+      // three quote pairs, and only the one that holds a model name is the fallback. The class
+      // excludes spaces and `|`, which is what the two empty sides of the expression contain.
+      for (const found of line.matchAll(/'([A-Za-z0-9][A-Za-z0-9._-]*)'/gu)) names.add(found[1] as string);
+    }
+    return [...names];
+  }
+
+  it('names a model the price table holds, so the run can be costed before it is paid for', () => {
+    for (const file of WORKFLOWS) {
+      const models = defaultsOf(file);
+      expect(models.length, `${file} names no default model`).toBeGreaterThan(0);
+      for (const model of models) {
+        expect(PRICES[model], `${file} defaults to ${model}, which eval/price.ts cannot bill`).toBeDefined();
+        expect(RETIRED[model], `${file} defaults to ${model}, which is retired`).toBeUndefined();
+      }
+    }
+  });
+
+  it('reads a quoted literal out of every model input, so the parse above is not blind', () => {
+    // A regex that matched nothing would pass every assertion above while checking nothing, which is
+    // how a guard becomes decoration. Each of these four names a model in one of the two forms.
+    expect(defaultsOf('.github/workflows/bird-dev.yml')).toEqual(['deepseek-chat']);
+    expect(defaultsOf('.github/workflows/bird-model.yml')).toEqual(['glm-4.5-air']);
+    expect(defaultsOf('.github/workflows/text2vis-llm.yml')).toEqual(['deepseek-chat']);
+    expect(defaultsOf('.github/workflows/text2vis-judge.yml')).toEqual(['glm-4.6v']);
   });
 });
 

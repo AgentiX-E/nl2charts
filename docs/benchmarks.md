@@ -14272,7 +14272,7 @@ reason the round spent nothing:
 
 | component | its own reading | in a combined arm |
 | --- | --- | --- |
-| `samples-wide` (their value block) | +2.02pp on one call, for +74.9% prompt tokens | refused on cost; the narrowed form on three candidates read **+0.52pp for +68.1% charged tokens** (`43606308056`), and the reach split showed the block moved nothing where it fired |
+| `samples-wide` (their value block) | +2.02pp on one call, for +74.9% prompt tokens | **superseded** — on the bill's own denominator (+31.9%) the block clears its +1.60pp tariff at p = 0.0035, see "The base model was not the lever" below; on the composition it was asked about here it is still one positive term among negatives; the narrowed form on three candidates read **+0.52pp for +68.1% charged tokens** (`43606308056`), and the reach split showed the block moved nothing where it fired |
 | `dense.ts` (their row transcription) | — | measured **−5.65pp** as an arm (`41190457163`) |
 | their decomposer | **−1.1pp** | refused |
 | their refiner | +0.41pp against its parent on the same split | the only component left, and it fires on the 7% of questions whose first statement does not execute |
@@ -14933,7 +14933,7 @@ the decision that ignored it: *a pipeline is not the sum of its levers*. The ari
 
 | MAC-SQL component | its own reading | decision | why |
 | --- | ---: | --- | --- |
-| value block (`samples-wide`) | +2.02pp for **+74.9% prompt tokens** | refused | unit cost |
+| value block (`samples-wide`) | +2.02pp for **+74.9% prompt tokens** | refused | unit cost — **superseded**: the denominator is the bill (misses plus reply, +31.9%), on which the block clears its tariff; the sum below does not change, because the other two terms are negative |
 | dense schema (`dense.ts`) | **−5.65pp** | refused | measured negative |
 | decomposer | **−1.1pp** | refused | measured negative |
 | refiner (`inline+repair`) | +0.41pp | **adopted** | the only cheap positive |
@@ -20362,3 +20362,105 @@ rather than assumed.
 
 **Cost of this reading: ¥0.** It reads artifacts already on disk — one of which had to be downloaded
 again, because the composition table was printed for a run whose artifact nobody kept.
+
+## The base model was not the lever, and the compound that replaces it was priced before it ran
+
+Two things came out of the same round, and only one of them cost money.
+
+### The larger base, measured at the frontier
+
+`45090651019` ran `macsql-bird-os` on `deepseek-v4-pro` over the dev split's 1,532 questions.
+
+| arm | base | passed | accuracy | paired | bill |
+| --- | --- | ---: | ---: | --- | ---: |
+| `macsql-bird-os` | `deepseek-flash` | 1,020 / 1,532 | 66.58% | — | ≈ ¥0.0027 a case |
+| `macsql-bird-os` | `deepseek-v4-pro` | **975 / 1,532** | **63.64%** | 73 : 86, p = 0.341 | **¥110.08** |
+
+**−2.09pp** against the comparison, for a bill 39× the shipped route's. The registered criterion was
+`≥ +2.30pp with p < 0.05`; a negative reading cannot satisfy it, so the base-model route is closed
+without appealing to the p-value. Two of the three failures that produced this run are worth naming
+because neither is about the model: the price table had no row for it, so `bench:bill` answered
+"no price on file" about a run that had already been billed; and the estimate that authorised the
+dispatch was written against the *idle-hour* rate of a model that was not on the table, for a run
+that landed in the weekday peak window. Both are now refusals in `eval/bird/spend.ts`.
+
+### The compound, and a verdict that was computed on the wrong denominator
+
+The plan's last open lever was the corpus: the value block and the row block, together, on the one
+prompt that already carries a corpus. Before spending anything on it, `bench:bird:compound` computes
+what such a prompt *could* score — the union of what each block answers on its own artifact — and
+prices it on the quantity a bill is made of.
+
+That computation turned up a correction to a reading this file published two rounds ago.
+
+| lever | run | parent | lever | delta | p | its bill, a case | tariff at that multiple |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `inline+evidence+rows` | `43198451668` | 939 | 944 | +0.33pp | 0.702 | 241 → 307 (×1.275) | +1.38pp |
+| `inline+evidence+samples-wide` | `43579551678` | 941 | 972 | **+2.02pp** | **0.0035** | 241 → 317 (×1.319) | **+1.60pp** |
+
+The value block's row in the composition table above reads "refused on cost", and the figure beside
+it — *+74.9% prompt tokens* — is the wrong denominator. `ArmEvidence.tokensPerCase` in
+`packages/ai/src/shipment.ts` defines the quantity a decision is made against as the **cache-miss**
+column plus the reply, because a cached prompt token is a fiftieth of an uncached one. On that
+denominator the block is +31.9%, not +74.9%, and the tariff it has to clear is **+1.60pp** against a
+measured **+2.02pp at p = 0.0035**. It pays. Its 95% interval, [0.70, 3.35], still admits a value
+under the tariff — so the honest statement is "pays on the estimate, and the interval does not close
+the question" rather than "refused".
+
+The correction does not re-open the MAC-SQL composition the round that wrote that table refused: the
+dense schema was measured **−5.65pp** and the decomposer **−1.1pp**, and no denominator makes a
+negative term positive.
+
+### What the two blocks could do together
+
+| quantity | value |
+| --- | ---: |
+| questions either block answers | **1,020 / 1,532 = 66.58%** |
+| parent, the higher of the two artifacts | 941 / 1,532 = 61.42% |
+| ceiling over that parent | **+5.16pp** |
+| additive, which counts the overlap twice | +2.35pp |
+| questions both blocks answer correctly | 896 of 1,020 |
+| bill, a case | 241 → 384, **×1.594** |
+| tariff at ×1.594 | **+2.97pp** |
+| `bench:bird:compound` verdict | **can-pay**, by 2.19pp |
+
+The ceiling clears its price and the expectation does not, which is the whole reason the compound is
+worth one dispatch rather than a paragraph: the two blocks fix almost the same questions (896 of
+1,020), so their gains cannot be added, and the only way they beat +2.35pp is if they are
+*super*-additive — a column sample says which values a column holds, a row sample says which values
+occur together, and a literal the question spells wrongly can only be settled when the second says it
+belongs in the first's column.
+
+The 66.58% is a coincidence worth naming so nobody reads it as a result: it is the ceiling of a union
+taken across two runs, and the same figure appears above as `macsql-bird-os` with thinking on. They
+are different quantities that happen to land on the same integer.
+
+### Registered before the dispatch
+
+`macsql-bird-os+samples+rows`, the dev split, 1,532 questions, `deepseek-chat`, dispatched beside
+`macsql-bird-os` in one artifact so the pair is within-run:
+
+> **Pays if ≥ +2.97pp against `macsql-bird-os` with exact McNemar p < 0.05.** The dev split resolves
+> 2.30pp at 80% power, so the criterion is above the noise floor and below the ceiling; a gain
+> between +2.30 and +2.97pp is a real effect the ledger still refuses, and it closes the corpus layer
+> at its compound.
+
+**Cost: ≈ ¥4** for the pair, against the ¥110.08 the base-model run spent to answer a question with a
+different sign.
+
+### The default model the price table could not bill
+
+The plan's next item was "add a `glm-4.5` price row before wiring `bird-model.yml`". The row cannot
+be added, and that is the finding: the provider's price page — the one `eval/price.ts` cites for
+every Zhipu number — lists **GLM-4.5-Air** and **GLM-4.5V** and no plain GLM-4.5, so there is no
+citation to put in the table. The name was that workflow's dispatch default for three months, which
+means every run of the default would have reached `bench:bill` as *no price on file*: the same
+sentence that let the `deepseek-v4-pro` run read as roughly free until its invoice arrived.
+
+The fix is therefore not a fabricated row but a default the table holds, `glm-4.5-air`
+(0.8 / 6 / 0.16 元 per million, the `[0, 32K)` input and `≥0.2K` output columns), plus a test that
+reads each dispatch workflow's own default out of the YAML and fails if `eval/price.ts` cannot bill
+it. A model with no row stays refused rather than priced at zero; a model added to that page later
+gets a row with its date, which is the only form of price this repository accepts.
+
+**Cost: ¥0.** Reading a page is free; the run that would have been uncosted is the one that is not.

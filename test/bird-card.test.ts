@@ -1224,7 +1224,18 @@ describe('the block an arm carries on its card', () => {
     const parent = promptOf(resolveArm('inline+evidence') as never, question(7).question as never, '', tables).system;
     // The guard the defect slipped past: an arm's name is a claim about its prompt, and a block
     // that renders nowhere turns the claim into a second copy of the parent.
-    for (const arm of ARMS.filter((entry) => entry.samples !== undefined)) {
+    //
+    // A template arm is outside this instrument by its own declaration: its blocks are `【…】`
+    // headings with the question in the middle, so `runCard` drops it with "no card can be cut out
+    // of it" before a case is read, and `promptOf` on one throws about the example set the run
+    // writes rather than about the block. The compound corpus arm is the first arm to be both, and
+    // skipping it silently is exactly the hole this loop was written to close — so the skipped set
+    // is named, and `bird-arms.test.ts` asserts the block on the builder that arm does use.
+    const skipped = ARMS.filter((entry) => entry.samples !== undefined && entry.template !== undefined).map((entry) => entry.name);
+    expect(skipped.sort()).toEqual(['macsql-bird-os+samples+rows']);
+    const priced = ARMS.filter((entry) => entry.samples !== undefined && entry.template === undefined);
+    expect(priced.length).toBeGreaterThan(3);
+    for (const arm of priced) {
       const block = arm.samples === 'example' ? exampleFor('shop') : valuesFor('shop');
       const built = promptOf(arm, question(7).question as never, '', tables, undefined, block);
       expect(built.system, `${arm.name} renders its parent's card`).not.toBe(parent);

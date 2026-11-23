@@ -20,7 +20,14 @@ on:
       model:
         description: Model name at the endpoint
         required: true
-        default: 'glm-4.5'
+        # `glm-4.5` was this default and it cannot be billed: the provider's price page
+        # (docs.bigmodel.cn/cn/guide/start/pricing, read 2026-11-23) lists GLM-4.5-Air and GLM-4.5V
+        # and no plain GLM-4.5 row, so a dispatch under that name reaches `bench:bill` as "no price
+        # on file" — the same silence that let the `deepseek-v4-pro` run be read as roughly free.
+        # `glm-4.5-air` is on the page and on `eval/price.ts`'s table, so a run of this workflow can
+        # be costed before it is dispatched rather than after. A caller who wants a model the table
+        # does not hold must add the row from the provider's page first; the gate refuses otherwise.
+        default: 'glm-4.5-air'
       base_url:
         description: OpenAI-compatible base URL
         required: true
@@ -125,8 +132,8 @@ jobs:
       # narrow that to 22.1%, and the preflight prints the number it did not rule out.
       BIRD_PREFLIGHT_SAMPLES: '12'
       # A slower model needs a longer deadline, and a timeout reported as "the endpoint was
-      # busy" is this harness measuring its own patience: glm-4.5 as primary hit the 60s
-      # default on 88% of cases at concurrency 8.
+      # busy" is this harness measuring its own patience: the workflow's former default,
+      # glm-4.5, hit the 60s default on 88% of cases at concurrency 8.
       #
       # The number is an input because a hard-coded deadline is a contract with one model.
       # `glm-4.6` at 180s failed 207 of 496 calls in the `names` arm — 41.7%, above the 10%

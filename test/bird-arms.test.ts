@@ -137,7 +137,10 @@ describe('ablation arms', () => {
     const declared = new Set(
       [...COMPARISONS.map(([left, right]) => `${left}\u0000${right}`), ...PAIRS.map(([left, right]) => `${left}\u0000${right}`)],
     );
-    const samplers = ARMS.filter((arm) => arm.samples !== undefined);
+    // A compound is two levers from its parent by construction, so the "one lever away" parent this
+    // test requires does not exist for it. Its price is not read off a pairing at all: it is computed
+    // by `bench:bird:compound` from the parts' own artifacts, before the dispatch.
+    const samplers = ARMS.filter((arm) => arm.samples !== undefined && arm.compound !== true);
     expect(samplers.length).toBeGreaterThan(0);
     for (const arm of samplers) {
       // The sampler's own parent: the arm one lever away. For the plain samplers that is the card
@@ -1468,7 +1471,10 @@ describe('the fourth candidate, bought by a rule instead of by a selector', () =
 describe('the catalogue and the runner agree about levers', () => {
   // The identity of an arm, not a lever: two arms whose names differ are not "one lever apart", and
   // `changedLevers` must not think they are. Everything else a reader can set on an arm is a lever.
-  const NOT_LEVERS = new Set(['name']);
+  // `compound` joins the identity here for the opposite reason to `name`: it is not a lever *between*
+  // two arms, it says an arm is deliberately two levers from its parent, and `changedLevers` must read
+  // it as part of what the arm is rather than as a change a pair could hide.
+  const NOT_LEVERS = new Set(['name', 'compound']);
   const runner = readFileSync(resolve(process.cwd(), 'eval/bird/run.ts'), 'utf8');
   const declared = /export interface Arm \{([\s\S]*?)\n\}/.exec(runner);
   if (declared === null || declared.index === undefined) throw new Error('the Arm interface is not where this test reads it, so the test is blind');
@@ -2205,5 +2211,43 @@ describe('the two procedure arms and the block one of them carries', () => {
     // No mixed arm carries it today, which is why this is built rather than looked up: the day one
     // does, the preview must not be the thing that discovers it by throwing.
     expect(needsModelWrittenExamples({ ...arm('select-mixed'), mixed: ['macsql-bird-os'] })).toBe(true);
+  });
+});
+
+describe('the compound corpus arm', () => {
+  const compound = (): Arm => ARMS.find((entry) => entry.name === 'macsql-bird-os+samples+rows') as Arm;
+
+  it('puts both corpus blocks on the frontier template and changes nothing else', () => {
+    // The compound has to sit on `macsql-bird-os`, because that is where the score it must beat
+    // lives; a compound measured on `inline+evidence` would be a reading about a prompt the
+    // product does not send.
+    const arm = compound();
+    expect(arm.template).toBe('macsql-bird-os');
+    expect(arm.samples).toBe('example');
+    // No column rule: the narrowed block is `samples-wide-link`, a different and smaller lever, and
+    // the bill the compound was priced on is the wide one's.
+    expect(arm.sampleColumns).toBeUndefined();
+    expect(arm.rowSamples).toBe(3);
+    // No candidate, no selector, no extra call: a compound of blocks is still one call a case, and
+    // the tariff it was priced against assumes exactly that.
+    expect(arm.vote).toBeUndefined();
+    expect(arm.select).toBeUndefined();
+    expect(arm.linking).toBe(false);
+  });
+
+  it('is priced for an on-demand dispatch and never for a push', () => {
+    // It needs eleven synthesis calls before the first question is asked, and it exists to answer
+    // one question. A chain that carried it would pay for the block on every commit.
+    expect(DEFAULT_ARMS).not.toContain('macsql-bird-os+samples+rows');
+    expect(DEV_ARMS).not.toContain('macsql-bird-os+samples+rows');
+    expect(Object.keys(ON_DEMAND_ARMS)).toContain('macsql-bird-os+samples+rows');
+  });
+
+  it('still refuses to render a prompt without the examples a model writes', () => {
+    // The compound inherits the template's contract, so a dispatch that forgot the block fails at
+    // the prompt rather than reporting the parent's score under the compound's name.
+    const options = promptFor(compound(), question, {});
+    expect(needsModelWrittenExamples(compound())).toBe(true);
+    expect(() => buildSqlPrompt(question.question, [], options)).toThrow(/received none/);
   });
 });
