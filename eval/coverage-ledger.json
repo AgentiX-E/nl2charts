@@ -737,10 +737,10 @@
       "branches": 100
     },
     "eval/wikisql/run.ts": {
-      "lines": 96.46,
-      "statements": 96.46,
+      "lines": 96.52,
+      "statements": 96.52,
       "functions": 100,
-      "branches": 96.59
+      "branches": 96.66
     }
   }
 }

@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { createOracle } from '../eval/bird/oracle.js';
-import { digestOf, Judge, parseSplit } from '../eval/wikisql/exec.js';
+import { afterAll, describe, expect, it } from 'vitest';
+import { digestOf } from '../eval/wikisql/exec.js';
+import { openSplit } from '../eval/wikisql/run.js';
+import type { OpenSplit } from '../eval/wikisql/run.js';
 
 // The differential test: the port against the implementation every published WikiSQL number came
 // from. `reference-digest.json` is produced by `eval/wikisql/reference/dump.py`, which imports the
@@ -13,7 +14,13 @@ import { digestOf, Judge, parseSplit } from '../eval/wikisql/exec.js';
 // the digest fails.
 //
 // The corpus is not vendored, so this file skips when the cache is cold. What runs in CI is the
-// judge's own suite; what runs here is the reason to believe it.
+// judge's own suite; what runs here is the reason to believe it — and `wikisql-judge.yml` warms the
+// cache and runs this file, so the belief is re-checked on demand rather than assumed.
+//
+// Nothing is read until a test body asks for it. `describe.skipIf` marks a suite skipped but still
+// runs its callback to register the tests inside, so a `readFileSync` at that level ran on every
+// commit on a machine with no 26 MB corpus: the first version of this file reported `ENOENT`
+// exactly where it meant "the split was never fetched".
 
 const CACHE = process.env.WIKISQL_CACHE ?? resolve('eval/.cache/wikisql');
 const FIXTURE = resolve('eval/wikisql/reference-digest.json');
@@ -46,11 +53,20 @@ describe('the reference fixture', () => {
 });
 
 describe.skipIf(!warm)('the port against the reference judge', () => {
-  const oracle = createOracle(resolve('eval/bird/oracle.py'), CACHE);
-  const judge = new Judge(oracle, `${record.split}.db`);
-  const rows = parseSplit(readFileSync(join(CACHE, `${record.split}.jsonl`), 'utf8'));
+  // Opened once, on first use, and closed by the process: 8,421 questions through one oracle.
+  let opened: OpenSplit | undefined;
+  const split = async (): Promise<OpenSplit> => {
+    opened ??= await openSplit(CACHE, record.split);
+    return opened;
+  };
+  // One oracle for both tests: closing it after the first would leave the second reading a dead
+  // process, which is the shape of a passing test that proves nothing.
+  afterAll(async () => {
+    if (opened !== undefined) await opened.close();
+  });
 
   it('reproduces every gold answer in the split', async () => {
+    const { judge, rows } = await split();
     const answers = [];
     for (const row of rows) answers.push(await judge.goldOf(row));
     // The digest covers all 8,421. The reference and this port disagreed on zero of them when the
@@ -59,6 +75,7 @@ describe.skipIf(!warm)('the port against the reference judge', () => {
   }, 120_000);
 
   it('reproduces the sampled rows cell for cell', async () => {
+    const { judge, rows } = await split();
     for (const entry of record.sample) {
       const row = rows[entry.index];
       expect(row).toBeDefined();

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
-import { cacheDir, diff, main, reportLines, resolveSettings, score, selfTest, validate } from '../eval/wikisql/run.js';
+import { cacheDir, diff, main, openSplit, reportLines, resolveSettings, score, selfTest, validate } from '../eval/wikisql/run.js';
 import { parseSplit } from '../eval/wikisql/exec.js';
 import type { Answer, Reading, SplitRow } from '../eval/wikisql/exec.js';
 
@@ -149,6 +149,31 @@ describe('reportLines', () => {
 describe('selfTest', () => {
   it('holds every claim it makes', () => {
     expect(selfTest()).toEqual([]);
+  });
+});
+
+describe('openSplit', () => {
+  // The loader is a function so that a suite which skips can skip *without* reading the corpus:
+  // `describe.skipIf` still runs the callback that registers its tests, and a read there threw
+  // `ENOENT` on every CI commit. These three cases are that contract.
+  it('opens a fetched split, answers from it, and closes it', async () => {
+    const opened = await openSplit(fixture(GOOD), 'dev');
+    expect(opened.rows).toHaveLength(2);
+    const answer = await opened.judge.goldOf(opened.rows[0] as SplitRow);
+    expect(answer.ok).toBe(true);
+    await opened.close();
+  });
+
+  it('slices to the limit it was given rather than reading the whole file into the run', async () => {
+    const opened = await openSplit(fixture(GOOD), 'dev', 1);
+    expect(opened.rows.map((row) => row.question)).toEqual(['q']);
+    await opened.close();
+  });
+
+  it('names the missing file when the cache is cold', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nl2charts-wikisql-open-'));
+    dirs.push(dir);
+    await expect(openSplit(dir, 'dev')).rejects.toThrow(/cache is cold: .*dev\.jsonl/u);
   });
 });
 

@@ -115,6 +115,38 @@ async function mapWindow<T, R>(
 /** Answers one question. A function rather than a judge, so the folding below can be tested alone. */
 export type GoldReader = (row: SplitRow) => Promise<Answer>;
 
+/** A split that is on disk and open: its rows, a judge bound to its database, and its oracle. */
+export interface OpenSplit {
+  readonly rows: readonly SplitRow[];
+  readonly judge: Judge;
+  readonly close: () => Promise<void>;
+}
+
+/**
+ * Open a fetched split, or say which file is missing.
+ *
+ * It is a function rather than four lines in `main` because the differential test needs the same
+ * thing, and because a caller that reads these files at import time is a caller that throws on a
+ * fresh clone. `describe.skipIf` marks a suite skipped but still runs its callback to register the
+ * tests inside it — so a `readFileSync` in that callback ran on every CI commit, on a machine with
+ * no 26 MB corpus, and reported `ENOENT` where it meant "the split was never fetched". Loading
+ * lazily is what makes `skipIf` mean what it says.
+ */
+export async function openSplit(cache: string, split: string, limit?: number): Promise<OpenSplit> {
+  const questions = join(cache, `${split}.jsonl`);
+  const tables = join(cache, `${split}.tables.jsonl`);
+  const db = join(cache, `${split}.db`);
+  for (const path of [questions, tables, db]) {
+    if (!existsSync(path)) {
+      throw new Error(`cache is cold: ${path} — run \`node eval/wikisql/fetch.mjs --split ${split}\``);
+    }
+  }
+  const all = parseSplit(readFileSync(questions, 'utf8'));
+  const rows = limit === undefined ? all : all.slice(0, limit);
+  const oracle: Oracle = createOracle(ORACLE, cache);
+  return { rows, judge: new Judge(oracle, `${split}.db`), close: () => oracle.close() };
+}
+
 export interface Validation {
   readonly cases: number;
   readonly errors: number;
@@ -243,20 +275,9 @@ export async function main(
   }
   const settings = resolveSettings(argv);
   const cache = cacheDir(settings.cache);
-  const questions = join(cache, `${settings.split}.jsonl`);
-  const tables = join(cache, `${settings.split}.tables.jsonl`);
-  const db = join(cache, `${settings.split}.db`);
-  for (const path of [questions, tables, db]) {
-    if (!existsSync(path)) {
-      throw new Error(`cache is cold: ${path} — run \`node eval/wikisql/fetch.mjs --split ${settings.split}\``);
-    }
-  }
-  const all = parseSplit(readFileSync(questions, 'utf8'));
-  const rows = settings.limit === undefined ? all : all.slice(0, settings.limit);
-
-  const oracle: Oracle = createOracle(ORACLE, cache);
+  const opened = await openSplit(cache, settings.split, settings.limit);
   try {
-    const judge = new Judge(oracle, `${settings.split}.db`);
+    const { judge, rows } = opened;
     const read: GoldReader = (row) => judge.goldOf(row);
     const validation = await validate(read, rows);
     if (settings.digest) {
@@ -291,7 +312,7 @@ export async function main(
     }
     return validation.errors === 0 && validation.unstable.length === 0 ? 0 : 1;
   } finally {
-    await oracle.close();
+    await opened.close();
   }
 }
 
