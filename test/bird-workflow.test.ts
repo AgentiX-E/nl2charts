@@ -7,6 +7,7 @@
  * was not, which is the drift a per-file test catches and a reader does not.
  */
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DEFAULT_ARMS } from '../eval/bird/run.js';
@@ -175,6 +176,62 @@ describe('the model a dispatch starts from', () => {
     expect(defaultsOf('.github/workflows/bird-model.yml')).toEqual(['glm-4.5-air']);
     expect(defaultsOf('.github/workflows/text2vis-llm.yml')).toEqual(['deepseek-chat']);
     expect(defaultsOf('.github/workflows/text2vis-judge.yml')).toEqual(['glm-4.6v']);
+  });
+});
+
+/**
+ * The spend gate is an upper bound on the bill, and a bound computed from half the calls is not one.
+ *
+ * `--limit` is what the projection multiplies a per-case bill by, and `bird-dev.yml` passed the
+ * question count. A dispatch of two arms asks every question twice, so the pair registered at 1,534
+ * was authorised at the price of one arm — and the arm it left out is the one carrying two extra
+ * blocks. The step now multiplies, and this test runs the arithmetic rather than reading for the
+ * string, because a shell expression is a program and a regex over it proves nothing about its value.
+ */
+describe('what a dispatch is allowed to spend', () => {
+  /** The shell lines of the spend step that come before the command itself. */
+  function arithmetic(): string {
+    const text = readFileSync(resolve(process.cwd(), '.github/workflows/bird-dev.yml'), 'utf8');
+    const at = text.indexOf('name: What this dispatch is allowed to spend');
+    if (at === -1) throw new Error('the spend step is not where this test reads it, so the test is blind');
+    const block = text.slice(at).split('\n');
+    const start = block.findIndex((line) => line.trim() === 'run: |');
+    const kept: string[] = [];
+    for (const line of block.slice(start + 1)) {
+      if (line.trim() === '') continue;
+      if (!/^ {10}/u.test(line)) break;
+      const command = line.trim();
+      // The two `pnpm bench:spend` invocations and the branch around them are the gate, not the count.
+      if (command.startsWith('if ') || command === 'else' || command === 'fi' || command.startsWith('pnpm ')) continue;
+      kept.push(command);
+    }
+    if (kept.length === 0) throw new Error('the spend step has no arithmetic to run');
+    return kept.join('\n');
+  }
+
+  it('counts every call the dispatch will make, not one arm of them', () => {
+    const script = `${arithmetic()}\n`;
+    const run = (arms: string, questions: string): string =>
+      execFileSync('bash', ['-c', script], {
+        encoding: 'utf8',
+        env: { ...process.env, BIRD_ARMS: arms, QUESTIONS: questions, ACCEPT_COST: '' },
+      });
+    expect(run('a,b', '100')).toContain('2 arm(s) x 100 question(s) = 200 call(s)');
+    // The pair this round dispatched: 1,534 rows, two arms, and the trailing comma a caller leaves
+    // behind is not a third arm.
+    expect(run('macsql-bird-os,macsql-bird-os+samples+rows', '1534')).toContain(
+      '2 arm(s) x 1534 question(s) = 3068 call(s)',
+    );
+    expect(run('a,', '10')).toContain('1 arm(s) x 10 question(s) = 10 call(s)');
+  });
+
+  it('hands the gate the arm list and the caller the ceiling, in one place', () => {
+    const text = readFileSync(resolve(process.cwd(), '.github/workflows/bird-dev.yml'), 'utf8');
+    // The arm list is what lets a ledger row be the basis above the budget; without it the only
+    // admissible basis is a probe artifact, which a CI dispatch has no way to pass.
+    expect(text).toContain('--arms "$BIRD_ARMS"');
+    expect(text).toContain('--limit "$CALLS"');
+    expect(text).toContain('--accept-cost "$ACCEPT_COST"');
   });
 });
 

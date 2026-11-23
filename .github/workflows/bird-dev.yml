@@ -45,6 +45,14 @@ on:
         description: Arm to run twice as an A/A control (blank = none)
         required: false
         default: ''
+      accept_cost:
+        # The ceiling, in yuan, for a dispatch whose projection is above the ¥10 budget. Blank is the
+        # common case and the gate prices it without one; above the budget the number is stated here
+        # rather than inherited from a default, because a default is how a ¥110 run is authorised by
+        # a field nobody looked at.
+        description: 'Yuan this dispatch may spend (blank = the gate prices it against the ¥10 budget)'
+        required: false
+        default: ''
       second_model:
         description: Model for `@second` candidate sources (blank = none)
         required: false
@@ -146,8 +154,31 @@ jobs:
       # A blank `limit` means the whole split, and the whole split is 1,534 rows: the projection
       # uses the row count rather than the 1,532 that can be judged, because the gate's job is to
       # be an upper bound on the bill and not to be flattering about it.
+      #
+      # The count it multiplies is **calls**, not questions. `--limit` is what the projection
+      # multiplies a per-case bill by, and a two-arm dispatch asks every question twice — the
+      # compound pair below is 3,068 calls, and its second arm also carries two extra blocks. This
+      # step passed the question count and so authorised a pair at the price of one arm; the gate
+      # that was written to be an upper bound was reading the lower one.
+      #
+      # `--arms` is what lets a ledger row be the basis. The row says which prompt it measured, and
+      # above the budget that has to be a prompt this dispatch sends; without it the only admissible
+      # basis was a probe artifact, which a CI dispatch cannot pass, so an expensive run was refused
+      # for not having been probed on the day it was dispatched. `accept_cost` is the stated ceiling
+      # and has no default: above the budget the caller says the number instead of inheriting one.
       - name: What this dispatch is allowed to spend
-        run: pnpm bench:spend --model "$LLM_MODEL" --limit "${{ inputs.limit != '' && inputs.limit || '1534' }}"
+        env:
+          QUESTIONS: ${{ inputs.limit != '' && inputs.limit || '1534' }}
+          ACCEPT_COST: ${{ inputs.accept_cost }}
+        run: |
+          ARMS=$(printf '%s' "$BIRD_ARMS" | tr ',' '\n' | grep -c .)
+          CALLS=$((QUESTIONS * ARMS))
+          echo "spend: $ARMS arm(s) x $QUESTIONS question(s) = $CALLS call(s)"
+          if [ -n "$ACCEPT_COST" ]; then
+            pnpm bench:spend --model "$LLM_MODEL" --limit "$CALLS" --arms "$BIRD_ARMS" --accept-cost "$ACCEPT_COST"
+          else
+            pnpm bench:spend --model "$LLM_MODEL" --limit "$CALLS" --arms "$BIRD_ARMS"
+          fi
       - name: Cache the dev split
         uses: actions/cache@v4
         with:

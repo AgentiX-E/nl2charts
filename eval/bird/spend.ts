@@ -41,6 +41,7 @@
  *
  *   tsx eval/bird/spend.ts --model deepseek-chat --limit 1534
  *   tsx eval/bird/spend.ts --model deepseek-flash --limit 100 --accept-thinking 20
+ *   tsx eval/bird/spend.ts --model deepseek-chat --limit 3068 --arms a,b --accept-cost 14
  *   tsx eval/bird/spend.ts --record eval/out/bird-eval.json --model deepseek-chat
  *   tsx eval/bird/spend.ts --self-test
  */
@@ -158,6 +159,17 @@ export interface SpendRequest {
   readonly acceptThinkingPp?: number;
   /** The ceiling the caller accepts, in yuan. Required only above {@link BUDGET_YUAN}. */
   readonly acceptCostYuan?: number;
+  /**
+   * The arms this dispatch runs, when the caller knows them.
+   *
+   * The basis above the budget has to be measured on a prompt this dispatch actually sends, and an
+   * arm name is how a ledger row says which prompt it measured. Without this the only way to
+   * satisfy the check was a probe artifact, which a CI dispatch cannot pass — so a run measured on
+   * its own arm yesterday was refused for not having been measured on it today, and the route out
+   * was to stop asking. A row measured on one of these arms answers the question the check is
+   * asking; a row measured on some other arm does not.
+   */
+  readonly arms?: readonly string[];
 }
 
 /** Tokens per case for one build, the unit every basis is stored in. */
@@ -520,11 +532,13 @@ export function adjudicateSpend(
     `= ${formatYuan(projection.total)}`;
 
   if (projection.total > BUDGET_YUAN) {
-    if (basis.source !== 'probe') {
+    const onThisPrompt = basis.source === 'probe' || (request.arms ?? []).includes(basis.arm);
+    if (!onThisPrompt) {
       return refuse(
         'over-budget-no-probe',
-        `${priced}, from a ledger row measured on run ${String(basis.run)} (${String(basis.arm)}). Above ${formatYuan(BUDGET_YUAN)} ` +
-          `the basis has to be measured on this dispatch: pass --probe <artifact>.`,
+        `${priced}, from a ledger row measured on run ${String(basis.run)} (${String(basis.arm)}), which is not an arm this ` +
+          `dispatch runs. Above ${formatYuan(BUDGET_YUAN)} the basis has to be measured on the prompt being paid for: ` +
+          `pass --probe <artifact>, or --arms naming the arm the row was measured on.`,
         projection,
       );
     }
@@ -627,6 +641,14 @@ export function main(
   const acceptThinkingText = value(argv, '--accept-thinking');
   const acceptCostText = value(argv, '--accept-cost');
   const probePath = value(argv, '--probe');
+  const armsText = value(argv, '--arms');
+  const arms =
+    armsText === undefined
+      ? undefined
+      : armsText
+          .split(',')
+          .map((name) => name.trim())
+          .filter((name) => name !== '');
 
   const verdict = adjudicateSpend(
     {
@@ -634,6 +656,7 @@ export function main(
       limit: Number(limitText),
       ...(acceptThinkingText === undefined ? {} : { acceptThinkingPp: Number(acceptThinkingText) }),
       ...(acceptCostText === undefined ? {} : { acceptCostYuan: Number(acceptCostText) }),
+      ...(arms === undefined || arms.length === 0 ? {} : { arms }),
     },
     {
       ledger: readLedger(ledgerPath),

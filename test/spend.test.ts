@@ -302,6 +302,32 @@ describe('a run above the budget', () => {
     expect(verdict.message).toContain('--probe');
   });
 
+  it('accepts a ledger row as the basis when it measured an arm this dispatch runs', () => {
+    // The question the check asks is "was this basis measured on the prompt being paid for", and a
+    // ledger row carries the arm it was measured on. A CI dispatch cannot pass a probe artifact at
+    // all, so before this route existed an expensive run measured on its own arm last week was
+    // refused for not having been measured on it this week — and the alternatives to a gate that
+    // can be satisfied are a gate that is bypassed and a gate that is deleted.
+    const measured = adjudicateSpend(
+      { model: 'deepseek-chat', limit: 1534, arms: ['macsql-bird-os', 'an-arm'] },
+      { ledger: expensive },
+    );
+    expect(measured.code).toBe('accept-cost-missing');
+    // The projection it prints is the number to copy into --accept-cost rather than to guess.
+    const accepted = adjudicateSpend(
+      { model: 'deepseek-chat', limit: 1534, arms: ['an-arm'], acceptCostYuan: Math.ceil(measured.projection?.total ?? 0) },
+      { ledger: expensive },
+    );
+    expect(accepted.code).toBe('ok');
+    expect(accepted.projection?.basis.source).toBe('ledger');
+  });
+
+  it('still refuses a ledger row measured on an arm the dispatch does not run', () => {
+    const verdict = adjudicateSpend({ model: 'deepseek-chat', limit: 1534, arms: ['another-arm'] }, { ledger: expensive });
+    expect(verdict.code).toBe('over-budget-no-probe');
+    expect(verdict.message).toContain('an-arm');
+  });
+
   it('refuses a probe-priced run whose ceiling nobody accepted', () => {
     const verdict = adjudicateSpend({ model: 'deepseek-chat', limit: 1534 }, { ledger: { rows: {} }, probe });
     expect(verdict.code).toBe('accept-cost-missing');
