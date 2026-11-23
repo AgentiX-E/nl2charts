@@ -241,6 +241,41 @@ out is one call.
    the thinking-mode cell is 9.7× and would need 43.5 points against the 1.37 it offers. Cost stopped
    being a column a reader was expected to weigh and became the denominator of the rule.
 
+8. **A dispatch that cannot be priced is not dispatched.** `45090651019` named a model with no row
+   in `eval/price.ts`, so `bench:bill` answered "no price on file" about a reading that had already
+   been billed — and the dispatch had gone out on a hand estimate of ¥35-55 written against the
+   *idle-hour* rate of a model that was not on the table. The bill was ¥110.08 on the artifact and
+   ¥124 on the provider's page, the difference being the four retries an artifact never records. It
+   answered 975/1,532: **2.09 points below** the same arm on a model at 1/45th the price. `pnpm
+   bench:spend` now decides four things before a run is allowed to leave, and `bird-dev` runs it as
+   a step before it fetches the split.
+
+## What the dispatch gate refuses
+
+| Code | Refused when | The run that taught it |
+| --- | --- | --- |
+| `retired` | the model is on `RETIRED` | `deepseek-v4-pro`: 975/1,532 against 1,020 for the same arm at 1/45th the price, −2.09pp, ¥110.08 |
+| `unpriced` | `eval/price.ts` has no row for the model | the same run: `bench:bill` could not cost a bill that had already been paid |
+| `thinking-undocumented` | the endpoint reasons and the caller declared no gain | 94.0% of that run's completion tokens were reasoning, at ¥27 a million |
+| `thinking-too-cheap` | the declared gain is under `5 × (extra cost)`, the same curve `ship.ts` uses | 6.76× a case demands 28.8pp, which no arm here offers |
+| `no-cost-basis` | more than 150 questions and no measured basis | the ¥110 estimate that was never a measurement |
+| `over-budget-no-probe` | the projection is over ¥10 and the basis was measured on another arm | 134 tokens a case against 2,536, same model name |
+| `accept-cost-missing` / `accept-cost-too-low` | nobody stated a ceiling, or stated one below the projection | — |
+
+`eval/spend/per-case.json` holds the bases: **tokens a case**, per model, each row naming the run
+that measured it and the arm it was measured on. Tokens and not money, for the reason the price
+table exists — a stored yuan figure goes stale the moment a provider changes a rate, while a token
+count re-prices itself. Three rows are recorded from artifacts that were already paid for:
+`deepseek-chat` from `44991167518`, `deepseek-flash` from `45040430602`, `deepseek-v4-pro` from
+`45090651019`. The projection charges 1.5× the measured figure, because the basis was measured on
+whatever prompt that run sent and a wider card or a corpus arm moves completion tokens by tens of
+percent.
+
+The default dispatch passes in one line — `deepseek-chat`, 1,534 questions, ¥0.0025 a case × 1,534 ×
+1.5 = **¥5.65** against a ¥10 budget — and the run that burned the money is refused in one line
+too. A gate whose only observable behaviour is refusal is a gate somebody puts `|| true` on, so
+both are asserted.
+
 ## What this does not fix
 
 `ci.yml` still runs `benchmark and ablation` on every push. It is free — no key is in its

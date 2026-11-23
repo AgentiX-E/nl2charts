@@ -7,6 +7,23 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The gate that refuses a dispatch before it spends, written after the one that cost ¥124.**
+  `45090651019` ran `deepseek-v4-pro` over 1,532 questions: ¥110.08 on the artifact and ¥124 on the
+  provider's page — the difference being the four retries an artifact never records — for 975/1,532,
+  which is **2.09 points below** the same arm on a model at 1/45th the price. Four things were wrong
+  and `eval/bird/spend.ts` (`pnpm bench:spend`) makes each one a refusal: a model with no price row
+  cannot be dispatched, because `bench:bill` answered "no price on file" about a reading that had
+  already been billed; a thinking model must declare the gain it expects and the declaration is
+  checked against `DEFAULT_SHIPMENT_POLICY.tokenTariff` (6.76× the price of a case demands 13.8pp, so
+  the mode is closed by arithmetic rather than by a sentence); above 150 questions there is no
+  projection without a measured basis; and above ¥10 that basis has to have been measured on this
+  dispatch, with the ceiling stated. `eval/spend/per-case.json` holds the measured bases — tokens a
+  case per model, written by `--record` from real artifacts, never money, so a price change re-prices
+  every row instead of leaving a table of stale yuan. On the default dispatch the gate passes in one
+  line: `deepseek-chat` at 1,534 questions projects ¥5.65 against a ¥10 budget. `bird-dev` runs it as
+  a step before it fetches the split, because a gate that lives in a local CLI is a gate the next
+  dispatch walks around.
+### Added
 - **The WikiSQL template, ported and tested — and three absences that now say where the chain
   breaks.** `eval/wikisql/form.ts` re-implements the reference judge's `SELECT <agg>(colN) AS result
   FROM <table> [WHERE …]` template and its result comparison from `lib/query.py` and `lib/dbengine.py`,

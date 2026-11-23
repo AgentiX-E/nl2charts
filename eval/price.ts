@@ -57,6 +57,17 @@ export const PRICES: Readonly<Record<string, ModelPrice>> = {
   // upper bound: the provider charges half in every hour outside 09:00-12:00 and 14:00-18:00 on
   // weekdays, and this repository runs most of its jobs at night.
   'deepseek-flash': { input: 2, output: 8, cached: 0.04, asOf: READ_ON, source: DEEPSEEK },
+  // The larger base, and the one that answered `45090651019`. It is on this table because it was
+  // dispatched while it was not: `bench:bill` printed "no price on file for deepseek-v4-pro" on a
+  // reading that had already been billed, so the one command this repository uses to answer "what
+  // did that cost" could not answer it. Same peak-hour, cache-miss column as Flash, for the same
+  // reason — a bill read off this table is an upper bound, never an understatement.
+  //
+  // The rate is only half of what that run cost. The model's thinking mode is on by default and
+  // 94.0% of its completion tokens were reasoning: 3,653,919 of 3,885,213, or ¥98.66 of a ¥110
+  // reading. A price table that reports the rate without the mode says a run was expensive without
+  // saying why.
+  'deepseek-v4-pro': { input: 9, output: 27, cached: 0.3, asOf: '2026-11-23', source: DEEPSEEK },
   // The two names every reading before this table was written used. Both have left the provider's
   // list, and its own page says a request under either is served by V4.1-Flash and **billed at Flash
   // prices** — so these are the same numbers under an older name, not a guess. `deepseek-reasoner` is

@@ -1,0 +1,43 @@
+{
+  "note": "What a case costs on one model, in tokens a case, measured on the run named in each row. Money is derived from eval/price.ts at read time, so a price change re-prices every row. Written by `pnpm bench:spend --record`; see eval/bird/spend.ts for what reads it.",
+  "rows": {
+    "deepseek-chat": {
+      "prompt": 3137,
+      "completion": 147,
+      "cached": 2548,
+      "cases": 3064,
+      "arm": "select-mixed-rule",
+      "run": "44991167518",
+      "asOf": "2026-11-22",
+      "served": [
+        "deepseek-flash"
+      ]
+    },
+    "deepseek-flash": {
+      "prompt": 3972,
+      "completion": 1285,
+      "cached": 3678,
+      "reasoning": 1223,
+      "cases": 3064,
+      "arm": "macsql-bird-os",
+      "run": "45040430602",
+      "asOf": "2026-11-22",
+      "served": [
+        "deepseek-flash"
+      ]
+    },
+    "deepseek-v4-pro": {
+      "prompt": 4384,
+      "completion": 2536,
+      "cached": 4147,
+      "reasoning": 2385,
+      "cases": 1532,
+      "arm": "macsql-bird-os",
+      "run": "45090651019",
+      "asOf": "2026-11-23",
+      "served": [
+        "deepseek-v4-pro"
+      ]
+    }
+  }
+}

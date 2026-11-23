@@ -436,6 +436,12 @@
       "functions": 100,
       "branches": 97.14
     },
+    "eval/bird/spend.ts": {
+      "lines": 99.55,
+      "statements": 99.55,
+      "functions": 100,
+      "branches": 99.21
+    },
     "eval/bird/sql-shape.ts": {
       "lines": 100,
       "statements": 100,

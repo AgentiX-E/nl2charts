@@ -134,6 +134,20 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # What this dispatch may spend, refused before the split is even fetched.
+      #
+      # `45090651019` was dispatched on a hand estimate of ¥35-55 against a price table with no row
+      # for the model it named. It billed ¥110.08 and answered 975/1,532 — 2.09 points *below* the
+      # same arm on a model at 1/45th the price. `eval/bird/spend.ts` holds the four rules that
+      # would have stopped it; this step is where they bind, because a gate that lives in a local
+      # CLI is a gate the next dispatch walks around. It costs nothing and calls no model: it reads
+      # `eval/spend/per-case.json` and `eval/price.ts` and does arithmetic.
+      #
+      # A blank `limit` means the whole split, and the whole split is 1,534 rows: the projection
+      # uses the row count rather than the 1,532 that can be judged, because the gate's job is to
+      # be an upper bound on the bill and not to be flattering about it.
+      - name: What this dispatch is allowed to spend
+        run: pnpm bench:spend --model "$LLM_MODEL" --limit "${{ inputs.limit != '' && inputs.limit || '1534' }}"
       - name: Cache the dev split
         uses: actions/cache@v4
         with:
