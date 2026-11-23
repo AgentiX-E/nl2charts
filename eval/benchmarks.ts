@@ -117,17 +117,27 @@ export const BENCHMARKS: readonly Benchmark[] = [
     metrics: ['EM', 'EX'],
     status: 'absent',
     gap:
-      'Spider needs an exact-match reading as well as an execution one, and this repository has only '
-      + 'the execution judge: `eval/bird/compare.ts` compares result sets through the same driver BIRD '
-      + 'uses, and `arms[].exactMatchRate` is a normalised string match over generated statements, not '
-      + 'Spider\'s component-wise clause match. The judge can be ported — the reference `evaluation.py` '
-      + '(30 KB) and `process_sql.py` (17 KB) download fine — but the corpus does not: the repository '
-      + 'carries code and no data, and the 1,034-question dev set with its 20 SQLite files is served '
-      + 'from the project site and a Google Drive folder, neither of which answers from this sandbox. '
-      + 'Porting the evaluator with no corpus to run it on would be an instrument that has never been '
-      + 'measured, which is the state this table exists to prevent. Building it means a fetcher that '
-      + 'reaches one of those two sources, then a clause decomposition, then a re-pricing of every '
-      + 'floor — a split is a coordinate, and a number moved across splits is not a reading.',
+      'The corpus is the databases, not the question file. `process_sql.get_sql` resolves every '
+      + 'column through a `Schema` built from a live SQLite file, so exact match is not a string '
+      + 'comparison and cannot be computed from `dev.json` alone; the reference `evaluate()` parses '
+      + 'gold and prediction through that same schema. The twenty `.sqlite` files ship only inside '
+      + '`spider_data.zip`, and four routes were tried: the project site answers 404 for it, the '
+      + 'Drive mirror does not answer, the git repository carries '
+      + '`evaluation_examples/examples/dev.json` (3,629,512 B, fetched) and no `database/` directory, '
+      + 'and three mirrors that do vendor `database/<db>/<db>.sqlite` report 0 bytes over 237 to 332 '
+      + 'files because they are LFS pointers — the one decoded reads `version https://git-lfs.'
+      + 'github.com/spec/v1`, and the media endpoint returns 404. Rebuilding the databases is not a '
+      + 'substitute: the only publicly fetchable schema export (jkkummerfeld/text2sql-data\'s '
+      + '`spider-schema.csv`, which its own converter turns into 166 empty databases) normalises '
+      + 'identifiers, so `pets_1`\'s `PetType` arrives as `pet_type` and **300 of 1,034 dev golds no '
+      + 'longer parse** — measured, not guessed. Two facts about the judge itself are now assertions '
+      + 'in `eval/spider/judge.py --self-test`: `Evaluator.eval_partial_match` mutates the label it '
+      + 'is given (`eval_sel` calls `label_sel.remove(...)`), so a harness that parses a gold once '
+      + 'and reuses it reads **279 of the 734 parsing golds as 0 against themselves**; and the judge '
+      + 'imports `nltk` and needs the `punkt_tab` model, so it is not the standard-library program '
+      + 'WikiSQL\'s is. `eval/spider/check.ts` is the gate that would receive a checkout — twenty '
+      + 'databases, every gold parsed, every gold agreeing with itself — and it is tested against a '
+      + 'stub, so the day the corpus lands the reading is one command rather than a port.',
   },
   {
     id: 'bird-mini-dev',

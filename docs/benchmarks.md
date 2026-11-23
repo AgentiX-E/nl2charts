@@ -18535,12 +18535,19 @@ graph and the linker, the three mechanisms this repository has priced, have noth
 the instrument was worth building and the dispatch is not first in the queue: the score would describe
 a capability the product does not sell.
 
-**Spider 1.0** is the opposite problem: it needs EM as well as EX, and this repository has only the
-execution judge. `arms[].exactMatchRate` is a normalised string match over generated statements, not
-Spider's component-wise clause match, so quoting it as Spider EM would be the coordinate error this
-file spends thousands of lines refusing. The dev leaderboard runs 82.8% EX (DIN-SQL and DAIL-SQL with
-GPT-4) to 93.52% EX (MA-SToR-SQL V5, as its authors report it), with dev EM in the 58–77% band
-(LGESQL + ELECTRA 58.4, RESDSQL-3B + NatSQL 63.1, DAIL-SQL + GPT-4 66.5, Graphix-T5-3B + PICARD 77.1).
+**Spider 1.0** is the opposite problem twice over. It needs EM as well as EX, this repository has only
+the execution judge, and — the correction this round measured — **the corpus is the twenty databases,
+not `dev.json`**. `process_sql.get_sql` resolves every column through a `Schema` built from a live
+SQLite file, so exact match is not a string comparison and cannot be computed from the question file;
+the reference `evaluate()` parses gold and prediction through that same schema. The dev leaderboard
+runs 82.8% EX (DIN-SQL and DAIL-SQL with GPT-4) to 93.52% EX (MA-SToR-SQL V5, as its authors report
+it), with dev EM in the 58–77% band (LGESQL + ELECTRA 58.4, RESDSQL-3B + NatSQL 63.1, DAIL-SQL + GPT-4
+66.5, Graphix-T5-3B + PICARD 77.1). What the corpus costs is the section below, and its answer is that
+four routes to it were tried and none delivered.
+
+`eval/spider/check.ts` is what would receive a checkout: twenty databases, every gold parsed, every
+gold reading exact match against itself. It is tested against a stub, so the day the corpus lands the
+reading is one command rather than a port.
 
 **nvBench 2.0** is the only absent row that is a *method* gap rather than a corpus gap. One query maps
 to a set of valid visualizations, so the reading is F1 over that set; the mark vocabulary is Vega-Lite
@@ -20581,3 +20588,52 @@ was called.
 **The instrument is in the gate.** `eval/wikisql/{exec,run}.ts` enter `eval/coverage-ledger.json`,
 which now records 122 files with all four dimensions at or above 95%, and the five new test files
 carry 98 assertions between them.
+
+## Four routes to Spider's databases, and the two things the judge does that a harness must know
+
+The plan for two rounds read: "Spider needs EM as well as EX; the judge can be ported — `evaluation.py`
+and `process_sql.py` download fine — but the corpus does not." The first half is true and the second
+half was the wrong shape: the judge **cannot** be used without the corpus, because it is not a string
+comparison. So this round went looking for the twenty databases, and priced the substitute.
+
+| route | what answered |
+| --- | --- |
+| `yale-lily.github.io/spider/spider_data.zip` | 404 — the page that hosted it has moved |
+| the Drive mirror | no answer from this sandbox |
+| `taoyds/spider` (the reference implementation's own repo) | `evaluation_examples/examples/dev.json`, 3,629,512 B; **no `database/` directory** |
+| three GitHub mirrors that do vendor `database/<db>/<db>.sqlite` | 0 bytes over 237–332 files: LFS pointers. The one decoded reads `version https://git-lfs.github.com/spec/v1`, and `media.githubusercontent.com` returns 404 for the object |
+
+**The substitute, priced.** `jkkummerfeld/text2sql-data` publishes `spider-schema.csv` (265,834 B) and
+the converter that turns it into empty SQLite databases; both fetch in seconds, and the converter
+builds 166 databases without complaint. It is not Spider:
+
+| quantity | reading |
+| --- | ---: |
+| databases rebuilt | 166 (20 of them the dev split's, one needing a case-preserving rename) |
+| dev golds that parse against them | **734 / 1,034** |
+| dev golds that do not | **300** (29.0%) |
+| why | the export normalises identifiers: `pets_1`'s `PetType` arrives as `pet_type`, and `get_sql` resolves column names literally |
+
+So a schema-only rebuild cannot stand in for the corpus, and "we could not download 100 MB" is not the
+whole reason Spider is absent. The honest row is what it was, with a better sentence in it.
+
+**Two facts about the judge, both now assertions.** `eval/spider/judge.py` wraps the vendored
+`evaluation.py` and `process_sql.py` behind a JSON-lines pipe, and `--self-test` pins the two things a
+harness gets wrong:
+
+| fact | consequence | assertion |
+| --- | --- | --- |
+| `Evaluator.eval_partial_match` **mutates** its label (`eval_sel` calls `label_sel.remove(...)`) | a harness that parses a gold once and reuses it scores every later comparison against a shrinking list: **279 of the 734 parsing golds read 0 against themselves** | `compare(pred, pred)` with one object reads 0; two parses read 1 |
+| the judge imports `nltk` and needs the `punkt_tab` model | it is not a standard-library program the way WikiSQL's is; a machine without the model gets a traceback from inside `tokenize()`, which reads like a corpus error | the self-test runs only where the model is present, and the differential test says so when it skips |
+
+**What is tested and what is not.** `eval/spider/check.ts` is the receiving gate: it reads a checkout,
+refuses a missing database by name, counts the golds that fail to parse, and requires every gold to
+read exact match against itself. Twenty assertions cover its protocol, its counting and its exit codes
+(0 scorable, 1 readable but unscorable, 2 unreadable) against a nine-line stub judge, so no test in
+this repository needs nltk or a corpus. The one test that does need them is skipped where the model is
+absent, and prints the reason rather than passing quietly.
+
+**Cost of this reading: ¥0**, and the conclusion is negative on purpose: Spider's gap is a corpus that
+four routes could not reach, not a judge nobody wrote. That moves it out of the plan's "¥0, 3–4 h"
+column — where it has sat for two rounds — and into "blocked on a download somebody has to perform
+outside this sandbox".

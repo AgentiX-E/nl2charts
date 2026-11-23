@@ -634,6 +634,12 @@
       "functions": 100,
       "branches": 97.95
     },
+    "eval/spider/check.ts": {
+      "lines": 98.93,
+      "statements": 98.93,
+      "functions": 100,
+      "branches": 98.88
+    },
     "eval/text2vis/ablate.ts": {
       "lines": 100,
       "statements": 100,

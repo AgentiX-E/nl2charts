@@ -25,7 +25,7 @@
     "gate:readings": "tsx eval/bird/readings.ts --check",
     "gate:shipment": "tsx eval/bird/ship.ts --check && tsx eval/bird/ship.ts --self-test",
     "gate:text2vis": "node tools/check-text2vis-baseline.mjs",
-    "gate:all": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && node tools/coverage-gate.mjs --self-test && node tools/local-db.mjs --self-test && pnpm gate:layering && node tools/check-layering.mjs --self-test && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && node tools/check-workflows.mjs --self-test && node tools/check-workflows.mjs && pnpm gate:exports && pnpm gate:budgets && pnpm gate:dispatch && tsx eval/bird/spend.ts --self-test && pnpm bench:guard && pnpm bench:competitors:intake && pnpm gate:secrets && node tools/check-secrets.mjs --self-test && node tools/check-bird-baseline.mjs --self-test && node tools/bird-summary.mjs --self-test && node tools/bird-reconcile.mjs --self-test && node tools/stratify-mixed.mjs --self-test && node tools/check-gate-parity.mjs --self-test && node tools/check-gate-parity.mjs && pnpm gate:commands && pnpm gate:readings && pnpm gate:shipment && tsx eval/bird/marginal.ts --self-test && tsx eval/bird/compound.ts --self-test && node tools/check-text2vis-baseline.mjs --self-test && node tools/check-eval-coverage.mjs --self-test && node tools/check-eval-coverage.mjs && pnpm bench:coverage",
+    "gate:all": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && node tools/coverage-gate.mjs --self-test && node tools/local-db.mjs --self-test && pnpm gate:layering && node tools/check-layering.mjs --self-test && node tools/check-platform.mjs && node tools/check-platform.mjs --self-test && node tools/check-workflows.mjs --self-test && node tools/check-workflows.mjs && pnpm gate:exports && pnpm gate:budgets && pnpm gate:dispatch && tsx eval/bird/spend.ts --self-test && pnpm bench:guard && pnpm bench:competitors:intake && pnpm gate:secrets && node tools/check-secrets.mjs --self-test && node tools/check-bird-baseline.mjs --self-test && tsx eval/spider/check.ts --self-test && node tools/bird-summary.mjs --self-test && node tools/bird-reconcile.mjs --self-test && node tools/stratify-mixed.mjs --self-test && node tools/check-gate-parity.mjs --self-test && node tools/check-gate-parity.mjs && pnpm gate:commands && pnpm gate:readings && pnpm gate:shipment && tsx eval/bird/marginal.ts --self-test && tsx eval/bird/compound.ts --self-test && node tools/check-text2vis-baseline.mjs --self-test && node tools/check-eval-coverage.mjs --self-test && node tools/check-eval-coverage.mjs && pnpm bench:coverage",
     "bench": "tsx eval/run.ts",
     "bench:ablate": "tsx eval/ablate.ts",
     "verify": "pnpm typecheck && pnpm build && pnpm test:coverage && pnpm gate:coverage && pnpm gate:all && pnpm bench && pnpm bench:linking && pnpm bench:semantic",
@@ -119,7 +119,8 @@
     "bench:bird:ves": "tsx eval/bird/ves.ts",
     "bench:wikisql": "tsx eval/wikisql/run.ts",
     "bench:wikisql:fetch": "node eval/wikisql/fetch.mjs",
-    "bench:wikisql:digest": "tsx eval/wikisql/run.ts --digest"
+    "bench:wikisql:digest": "tsx eval/wikisql/run.ts --digest",
+    "bench:spider:check": "tsx eval/spider/check.ts"
   },
   "devDependencies": {
     "@agentix-e/nl2charts-ai": "workspace:*",
