@@ -247,7 +247,7 @@ describe('main', () => {
   it('prints the ladder and exits zero on an artifact with a pool', () => {
     const lines: string[] = [];
     expect(main(['--artifact', artifactFile(widePool())], (line) => lines.push(line))).toBe(0);
-    expect(lines.at(-1)).toContain('the second source pays');
+    expect(lines.at(-1)).toContain('a wider pool pays');
   });
 
   it('prints the named pair on one line, with the cells a reader can check', () => {
@@ -387,6 +387,6 @@ describe('the self-test can fail, and the command says so', () => {
     const artifact = artifactFile(widePool());
     const result = spawnSync('npx', ['tsx', 'eval/bird/marginal.ts', '--artifact', artifact], { cwd: join(__dirname, '..'), encoding: 'utf8' });
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('the second source pays');
+    expect(result.stdout).toContain('a wider pool pays');
   });
 });

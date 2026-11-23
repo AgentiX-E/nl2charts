@@ -233,7 +233,17 @@ export function bestBySize(rows: readonly ReplayRow[], sources: readonly string[
  * shrug — "trending positive" — in prose for long enough that it is worth being unable to.
  */
 export function marginal(rows: readonly ReplayRow[], margin = DEFAULT_MARGIN_PP): MarginalVerdict[] {
-  const steps = bestBySize(rows, sourcesOf(rows));
+  return marginalFor(rows, bestBySize(rows, sourcesOf(rows)), margin);
+}
+
+/**
+ * The same verdicts from a ladder the caller already enumerated.
+ *
+ * `main` needs the ladder for its table and the verdicts for its sentences, and enumerating twice
+ * would price every subset twice for a reader who cannot see the difference. The separation is the
+ * cheap kind: one function computes, the other decides.
+ */
+export function marginalFor(rows: readonly ReplayRow[], steps: readonly SubsetScore[], margin = DEFAULT_MARGIN_PP): MarginalVerdict[] {
   const verdicts: MarginalVerdict[] = [];
   for (let index = 1; index < steps.length; index += 1) {
     const left = steps[index - 1] as SubsetScore;
@@ -412,14 +422,15 @@ export function main(
     else for (const text of [line, `  ${namedPair.both} both · ${namedPair.onlyRight} only ${namedPair.right.sources.join('+')} · ${namedPair.onlyLeft} only ${namedPair.left.sources.join('+')} · ${namedPair.neither} neither`]) log(text);
     return 0;
   }
-  const verdicts = marginal(rows, settings.margin);
+  const steps = bestBySize(rows, sourcesOf(rows));
+  const verdicts = marginalFor(rows, steps, settings.margin);
   if (argv.includes('--json')) {
     log(JSON.stringify({ artifact: settings.artifact, arm, cases: rows.length, margin: settings.margin, verdicts }, null, 2));
     return 0;
   }
-  for (const line of reportLines(rows, verdicts, bestBySize(rows, sourcesOf(rows)))) log(line);
+  for (const line of reportLines(rows, verdicts, steps)) log(line);
   const first = verdicts[0];
-  log(first === undefined ? '  verdict: one source, nothing to add' : `  verdict: ${first.pays ? 'the second source pays' : 'a wider pool cannot pay at this margin'}`);
+  log(first === undefined ? '  verdict: one source, nothing to add' : `  verdict: ${first.pays ? 'a wider pool pays' : 'a wider pool cannot pay at this margin'}`);
   return 0;
 }
 
