@@ -28,7 +28,8 @@ describe('the price of a question', () => {
   it('prices the chat tier far below the reasoning one, which is the error that produced the invoice', () => {
     const chat = unitPriceOf(METRICS, 'deepseek-chat');
     const reasoner = unitPriceOf(METRICS, 'deepseek-reasoner');
-    expect(chat?.cnyPerQuestion).toBeCloseTo(0.0034533, 6);
+    // The dearest chat arm is the one that reads the count as well as the rules: ¥2.82 for the split.
+    expect(chat?.cnyPerQuestion).toBeCloseTo(2.82 / 750, 6);
     expect((reasoner?.cnyPerQuestion ?? 0) / (chat?.cnyPerQuestion ?? 1)).toBeGreaterThan(15);
   });
 

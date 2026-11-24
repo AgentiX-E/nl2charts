@@ -7,7 +7,7 @@ import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs, pendingOf,
   DEFAULT_REPLICA, productPrompt, providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest,
-  summaryLine, timeoutMsOf, PROMPT_VERSION, RULES, SPEC_MARKS, type StoredAnswer,
+  summaryLine, timeoutMsOf, PROMPT_VERSION, REASONING_RULES, RULES, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
 import { REPLICAS } from '../eval/nvbench2/corpus-prompt.js';
@@ -577,12 +577,38 @@ describe('the arm', () => {
     expect(both).toContain('name (category) [2 distinct]: a, b');
   });
 
-  it('ship no count: the ranks rule is measured before it is sent', () => {
+  it('ships the count on the chat tier and leaves it off the reasoning one, which the layers record', () => {
     expect(RULES).toContain('ranks');
-    // The default is what the product sends, and a rule that has not cleared its interval has no
-    // business in it — `metrics.json` decides that, and the drift test reads it.
-    expect(DEFAULT_RULES).not.toContain('ranks');
-    expect(productPrompt({ question: 'q', counts: { name: 3 } }, { name: 'category' }, 3)[1]).not.toContain('distinct');
+    // The two tiers disagree on this rule, so the product has two prompts rather than one. Both
+    // readings are in `metrics.json` under `arms.layers`; the drift test below re-derives the lists.
+    const shipped = productPrompt({ question: 'q', counts: { name: 3 } }, { name: 'category' }, 3)[1];
+    const reasoner = productPrompt({ question: 'q', counts: { name: 3 } }, { name: 'category' }, 3, 'reasoning')[1];
+    expect(shipped).toContain('[3 distinct]');
+    expect(reasoner).not.toContain('distinct');
+    expect(reasoner).not.toContain('STEPS:');
+  });
+
+  it('takes each tier’s rules from the layer that measured them', () => {
+    type Drop = { separated: boolean; delta: number; questions: number };
+    const fixture = JSON.parse(readFileSync('eval/nvbench2/metrics.json', 'utf8')) as {
+      arms: { layers: Record<'chat' | 'reasoning', { rules: string[]; drops: Record<string, Drop> }> };
+    };
+    // The two lists are the layers, rule for rule.
+    expect([...DEFAULT_RULES].sort()).toEqual([...fixture.arms.layers.chat.rules].sort());
+    expect([...REASONING_RULES].sort()).toEqual([...fixture.arms.layers.reasoning.rules].sort());
+    // A tier may drop a rule, never invent one, and every dropped rule has to be dropped on evidence:
+    // a rule that separates from zero on a tier and is missing from that tier's list is a product
+    // sending something other than what was measured.
+    for (const [tier, layer] of [['chat', fixture.arms.layers.chat], ['reasoning', fixture.arms.layers.reasoning]] as const) {
+      const sent = tier === 'chat' ? DEFAULT_RULES : REASONING_RULES;
+      for (const drop of Object.values(layer.drops)) {
+        expect(drop.separated).toBe(false);
+        // A comparison that does not state its denominator is not a comparison.
+        expect(drop.questions).toBe(750);
+      }
+      for (const rule of sent) expect(layer.drops[rule]).toBeUndefined();
+    }
+    expect(REASONING_RULES.every((rule) => DEFAULT_RULES.includes(rule))).toBe(true);
   });
 
   it('asks for the ambiguity before the charts only when the steps rule is on', () => {
@@ -658,7 +684,7 @@ describe('the arm', () => {
   });
 
   it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
-    expect(rulesOf(undefined)).toEqual(['count', 'corpus', 'corpus2', 'steps']);
+    expect(rulesOf(undefined)).toEqual(['count', 'ranks', 'corpus', 'corpus2', 'steps']);
     expect(rulesOf('')).toEqual([]);
     expect(rulesOf('variants')).toEqual(['variants']);
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
@@ -708,11 +734,11 @@ describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', metrics: 'eval/nvbench2/metrics.json', artifact: undefined, limit: undefined, k: 3, ask: 3,
-      concurrency: 6, maxTokens: 900, samples: undefined, rules: ['count', 'corpus', 'corpus2', 'steps'], replica: undefined,
+      concurrency: 6, maxTokens: 900, samples: undefined, rules: ['count', 'ranks', 'corpus', 'corpus2', 'steps'], replica: undefined,
       budget: 12,
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', metrics: 'eval/nvbench2/metrics.json', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2', 'steps'], replica: undefined, budget: 12 });
+      .toEqual({ split: 'test', cache: 'c', metrics: 'eval/nvbench2/metrics.json', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'ranks', 'corpus', 'corpus2', 'steps'], replica: undefined, budget: 12 });
   });
 
   it('reads a ceiling in yuan, and refuses an amount that is not money', () => {
@@ -814,7 +840,7 @@ describe('the command', () => {
     expect(payload['replica']).toBe('basic');
     // The rules field still says what the product path would have sent, because an artifact is also a
     // record of the run's configuration; the replica field is what says those rules were not sent.
-    expect(payload['rules']).toEqual(['count', 'corpus', 'corpus2', 'steps']);
+    expect(payload['rules']).toEqual(['count', 'ranks', 'corpus', 'corpus2', 'steps']);
   });
 
   it('counts the questions already paid for, so a re-dispatch knows it is free', async () => {

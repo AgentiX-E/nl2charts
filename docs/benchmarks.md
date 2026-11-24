@@ -18303,6 +18303,7 @@ F1@3: 27.46% → 28.89% (+1.44%, 95% [-0.55%, 3.30%], inside the noise) over 250
 | `steps`, reasoning tier, 250 questions | +0.70 | [−1.49, +2.92] | inside the noise |
 | **`steps`, chat tier, 750 questions** | **+3.90** | **[+1.99, +5.80]** | **separated from zero** |
 | **`ranks`, chat tier, 750 questions** | **+1.95** | **[+0.46, +3.38]** | **separated from zero** |
+| `ranks`, reasoning tier, 750 questions | −0.23 | [−1.63, +1.26] | inside the noise, for 42% more |
 
 Four conclusions, none of which the means alone could produce:
 
@@ -18334,10 +18335,15 @@ Four conclusions, none of which the means alone could produce:
    whether to run the full split, not what the full split will say, because one dispatch of 60
    questions resolves to about ±7 points.
 
-The product path follows the measurement and not symmetry: `DEFAULT_RULES` is
-`count,corpus,corpus2,steps` because that is the highest full-split arm, and a caller paying for a
-reasoning tier is documented to drop `steps` because on that tier it buys nothing measurable for half
-again the bill.
+The product path follows the measurement and not symmetry, and now it follows it per tier rather than
+in one list. `DEFAULT_RULES` is `count,ranks,corpus,corpus2,steps` — the highest full-split chat arm
+— and `REASONING_RULES` is `count,corpus,corpus2`, because both `steps` (+1.16, 95% [−0.52, +2.79])
+and `ranks` (−0.23, 95% [−1.63, +1.26]) are inside the noise on the reasoning tier while costing 47%
+and 42% more respectively. A tier that resolves the ambiguity in its own words does not need a
+preamble that names it, and the tier is where a third of the bill goes. `metrics.json` records both
+lists under `arms.layers`, with each dropped rule and its interval, and a test re-derives both lists
+from that node: a rule that starts separating on a tier has to be added, and a dropped rule that
+separates has to be sent — otherwise CI fails rather than the document ageing.
 
 ### What the gold sets are built from, counted rather than assumed
 

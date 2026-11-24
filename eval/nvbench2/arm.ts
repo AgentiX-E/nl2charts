@@ -138,7 +138,22 @@ export type Rule = (typeof RULES)[number];
  * and not selected. `test/nvbench2-arm.test.ts` re-derives this from `metrics.json`, so an arm that
  * beats this one without the default following it fails CI rather than drifting quietly.
  */
-export const DEFAULT_RULES: readonly Rule[] = ['count', 'corpus', 'corpus2', 'steps'];
+export const DEFAULT_RULES: readonly Rule[] = ['count', 'ranks', 'corpus', 'corpus2', 'steps'];
+
+/**
+ * The rules a reasoning tier is sent, which is not always the same list.
+ *
+ * `steps` and `ranks` both separate from zero on the chat tier and neither separates on the reasoning
+ * tier: `steps` reads +1.16 [−0.52, +2.79] there and `ranks` reads −0.23 [−1.63, +1.26], which is a
+ * third of the bill again for nothing measurable. A tier that already resolves the ambiguity in its
+ * own words does not need either preamble, and the tier is where a third of the bill goes — so the
+ * default is layered rather than one list pretending to be optimal for both.
+ *
+ * `metrics.json` holds both readings under `arms.layers`, and `test/nvbench2-arm.test.ts` re-derives
+ * both lists from it: a rule that starts separating on the reasoning tier has to be added here, and a
+ * rule that stops separating on the chat tier has to come out of `DEFAULT_RULES`, or CI says so.
+ */
+export const REASONING_RULES: readonly Rule[] = ['count', 'corpus', 'corpus2'];
 
 /**
  * Which replica the product path sends, if the ablation found one better than our own prompt.
@@ -344,8 +359,9 @@ export function productPrompt(
   row: Pick<SplitRow, 'question'> & Partial<Pick<SplitRow, 'columns' | 'examples' | 'counts'>>,
   types: FieldTypes,
   k: number,
+  tier: 'chat' | 'reasoning' = 'chat',
 ): readonly [string, string] {
-  return buildSpecPrompt(row, types, k, DEFAULT_RULES, DEFAULT_REPLICA);
+  return buildSpecPrompt(row, types, k, tier === 'reasoning' ? REASONING_RULES : DEFAULT_RULES, DEFAULT_REPLICA);
 }
 
 /** The same array without its repeats, in the order the model wrote them. */

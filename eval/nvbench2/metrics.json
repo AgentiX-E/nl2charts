@@ -379,6 +379,41 @@
     "promptTokens": 704353,
     "completionTokens": 148257,
     "yuan": 2.59
+   },
+   "count+ranks+corpus+corpus2+steps": {
+    "run": 45436676323,
+    "rules": [
+     "count",
+     "ranks",
+     "corpus",
+     "corpus2",
+     "steps"
+    ],
+    "f1": {
+     "1": 0.2201,
+     "3": 0.2816,
+     "5": 0.2816
+    },
+    "hit": {
+     "1": 0.4387,
+     "3": 0.5013,
+     "5": 0.5013
+    },
+    "predictions": 2083,
+    "matched": 602,
+    "first": {
+     "mark": 178,
+     "channels": 414,
+     "field": 800,
+     "aggregate": 17,
+     "properties": 13,
+     "transform": 59,
+     "rest": 0
+    },
+    "countFieldless": 10,
+    "promptTokens": 831251,
+    "completionTokens": 144832,
+    "yuan": 2.82
    }
   },
   "selected": {
@@ -633,6 +668,75 @@
     }
    ],
    "because2": "the intervals are paired percentile bootstraps over questions, 2,000 resamples, seed 20261124, from `pnpm bench:nvbench2:compare`. A 250-row comparison resolves about ±2 points of F1@3, which is why the whole ask sweep is inside the noise and why the steps arm had to be re-measured on 750 rows before it was believed."
+  },
+  "layers": {
+   "because": "one prompt change measured on both tiers over the same 750 dev questions. `readings` is the chat tier and `published` is the reasoning tier. A rule earns a place in a tier's list where it separates from zero there, so the two lists are allowed to differ; this node is what the tests read to check that neither list drifts from the measurement.",
+   "chat": {
+    "model": "deepseek-chat",
+    "rules": [
+     "count",
+     "ranks",
+     "corpus",
+     "corpus2",
+     "steps"
+    ],
+    "best": "count+ranks+corpus+corpus2+steps",
+    "f1@3": 28.16,
+    "runnerUp": {
+     "arm": "count+corpus+corpus2+steps",
+     "f1@3": 26.28
+    },
+    "delta": 1.95,
+    "low": 0.46,
+    "high": 3.38,
+    "separated": true,
+    "yuan": {
+     "with": 2.82,
+     "without": 2.6
+    },
+    "drops": {}
+   },
+   "reasoning": {
+    "model": "deepseek-reasoner",
+    "rules": [
+     "count",
+     "corpus",
+     "corpus2"
+    ],
+    "best": "count+corpus+corpus2+steps",
+    "f1@3": 32.23,
+    "runnerUp": {
+     "arm": "count+ranks+corpus+corpus2+steps",
+     "f1@3": 32.0
+    },
+    "delta": -0.23,
+    "low": -1.63,
+    "high": 1.26,
+    "separated": false,
+    "yuan": {
+     "with": 28.05,
+     "without": 19.72
+    },
+    "run": 45447758141,
+    "drops": {
+     "ranks": {
+      "delta": -0.23,
+      "low": -1.63,
+      "high": 1.26,
+      "separated": false,
+      "because": "32.00 against 32.23 over the same 750 questions, for ¥28.05 against ¥19.72 — the tier already knows how many distinct values a column has, and the schema line is 42% more prompt for a difference the noise covers.",
+      "questions": 750
+     },
+     "steps": {
+      "delta": 1.16,
+      "low": -0.52,
+      "high": 2.79,
+      "separated": false,
+      "because": "the tier writes its own preamble before the array, so asking for one buys nothing measurable for half again the bill.",
+      "questions": 750
+     }
+    }
+   }
   }
  },
  "replicas": {
