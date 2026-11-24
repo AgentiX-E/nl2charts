@@ -405,6 +405,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
         });
     return {
       answer,
+      row,
       scored: { predictions: answer.charts, golds: row.golds, types: types ?? {} } satisfies Case,
     };
   });
@@ -429,11 +430,13 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     ...(options.samples === undefined
       ? {}
       : {
-          samples: asked.slice(0, options.samples).map((row, at) => ({
+          // Read off `answered` rather than off `asked` + an index: the sample is a fact about what
+          // was answered, and a lookup that needs a `?? []` is a branch no input can reach.
+          samples: answered.slice(0, options.samples).map(({ row, scored }) => ({
             csv: row.csv,
             question: row.question,
-            predictions: answered[at]?.scored.predictions ?? [],
-            golds: row.golds,
+            predictions: scored.predictions,
+            golds: scored.golds,
           })),
         }),
     cost: {

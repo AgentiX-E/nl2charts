@@ -371,6 +371,11 @@ describe('the command line', () => {
       .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined });
   });
 
+  it('carries the sample count through the command line, and through the run it starts', () => {
+    expect(parseArgs(['--samples', '4']).samples).toBe(4);
+    expect(parseArgs(['--samples', '4']).limit).toBeUndefined();
+  });
+
   it('refuses a limit or a k that is not a positive whole number', () => {
     expect(() => parseArgs(['--limit', '0'])).toThrow(/positive whole number/);
     expect(() => parseArgs(['--limit', 'half'])).toThrow(/positive whole number/);
@@ -444,6 +449,12 @@ describe('the command', () => {
     const payload = JSON.parse(readFileSync(artifact, 'utf8')) as Record<string, unknown>;
     expect(payload['asked']).toBe(1);
     expect(payload['cost']).toMatchObject({ calls: 1 });
+    // No `--samples` on this command: the field is absent rather than an empty list, so a reader can
+    // tell "nothing was kept" from "nothing was answered".
+    expect(payload).not.toHaveProperty('samples');
+    expect(await main(['--cache', dir, '--limit', '1', '--samples', '1', '--artifact', artifact], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
+    const kept = JSON.parse(readFileSync(artifact, 'utf8')) as Record<string, unknown>;
+    expect(kept['samples']).toHaveLength(1);
   });
 
   it('prints the reading when no artifact was named', async () => {
