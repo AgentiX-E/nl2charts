@@ -64,6 +64,11 @@ jobs:
       # agrees with `column_examples` on all 8,952 field decisions.
       - name: Check the corpus
         run: pnpm bench:nvbench2:check
+      # What the golds are built from, printed before anything is judged against them: the share of
+      # field encodings that name a unique-per-row column is the fact the `ranks` rule cites, and a
+      # corpus that changes its construction has to change this line rather than quietly date a rule.
+      - name: State the shape of the golds
+        run: pnpm bench:nvbench2:shape
       # The port against the reference: same digest over 1,501 preprocessed golds, same F1@1/3/5.
       - name: Compare the port with the reference judge
         run: pnpm exec vitest run test/nvbench2-reference.test.ts --reporter=dot

@@ -18327,6 +18327,32 @@ The product path follows the measurement and not symmetry: `DEFAULT_RULES` is
 reasoning tier is documented to drop `steps` because on that tier it buys nothing measurable for half
 again the bill.
 
+### What the gold sets are built from, counted rather than assumed
+
+The dev split's 750 questions carry 2,321 gold charts between them, a median of 3 per question. The
+set of a question is built from the **columns** of its table rather than from the columns whose names
+sound like data: 248 questions name every column they have (mean coverage 65.9%), and 1,987 of 4,567
+field encodings — 43.5% — put a column on a channel when that column's values are unique per row.
+938 of those are on `x`, because a timestamp is unique per row and is still the axis. Only 4 of the
+750 tables contain a newline inside a quoted field, which is why the row counts here are parsed
+rather than split on `\n`: a naive count inflates those tables, and an inflated row count makes
+"unique per row" fail on exactly the tables where it matters.
+
+This is the kind of fact a prompt rule gets written on top of, so it is printed before anything is
+judged. `pnpm bench:nvbench2:shape` opens the split and the 803 tables and states those numbers — no
+model, no network, no cost — and the corpus check workflow runs it on every push:
+
+```
+gold shape: 750 question(s), 2321 chart(s), median 3 per question · 4567 field encoding(s), 1987 on a
+unique-per-row column (43.5%) · 248 name every column (mean coverage 65.9%)
+```
+
+The command exists because a rule in this repository was first written the other way round: *a column
+whose distinct count equals the row count is an identifier and carries no channel*. At 43.5% that rule
+would have told the arm to drop exactly the columns its own golds put on the axis. An offline count
+refuted it before a dispatch was paid for, and the refutation is now an assertion against the
+checked-in split rather than a paragraph in a design document.
+
 Five of nine carry a number over the denominator their leaderboard reports, and two of those five are
 counts rather than accuracies. A sixth — R-VES — carries a number over 600 of its leaderboard's 1,532
 questions, which is a real reading and not that row, so the table states the denominator rather than

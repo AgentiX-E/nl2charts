@@ -7,7 +7,7 @@ import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs, pendingOf,
   DEFAULT_REPLICA, productPrompt, providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest,
-  summaryLine, timeoutMsOf, PROMPT_VERSION, SPEC_MARKS, type StoredAnswer,
+  summaryLine, timeoutMsOf, PROMPT_VERSION, RULES, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
 import { REPLICAS } from '../eval/nvbench2/corpus-prompt.js';
@@ -535,6 +535,54 @@ describe('the arm', () => {
     expect(buildSpecPrompt(partial, types, 3, ['values'])[1]).toContain('name (category)');
     // And a row that carries no examples at all is still a row.
     expect(buildSpecPrompt({ question: 'q' }, types, 3, ['values'])[1]).toContain('amount (quantitative)');
+  });
+
+  it('writes how many distinct values a column holds only when the ranks rule is on', () => {
+    const row = { question: 'q', counts: { amount: 240, name: 3 } };
+    const types = { amount: 'quantitative', name: 'category' } as const;
+    const [, bare] = buildSpecPrompt(row, types, 3, []);
+    const [, ranked] = buildSpecPrompt(row, types, 3, ['ranks']);
+    expect(bare).not.toContain('distinct');
+    expect(ranked).toContain('amount (quantitative) [240 distinct]');
+    expect(ranked).toContain('name (category) [3 distinct]');
+    // A column the schema says nothing about is listed by type alone rather than as `[undefined
+    // distinct]`, because a printed absence is worse than a missing clause: it reads as a fact.
+    const partial = { question: 'q', counts: { amount: 240 } };
+    const [, some] = buildSpecPrompt(partial, types, 3, ['ranks']);
+    expect(some).toContain('amount (quantitative) [240 distinct]');
+    expect(some).toContain('name (category)');
+    expect(some).not.toContain('undefined');
+  });
+
+  it('counts only integers as a distinct count, because that is what the schema files hold', () => {
+    const types = { name: 'category' } as const;
+    const prompt = (count: unknown): string => buildSpecPrompt({ question: 'q', counts: { name: count } }, types, 3, ['ranks'])[1];
+    // The corpus writes integers. Everything else is a schema this rule has nothing to say about, and
+    // a quoted number is the one that would slip through a `Number()` conversion unnoticed.
+    expect(prompt(3)).toContain('[3 distinct]');
+    expect(prompt('3')).not.toContain('distinct');
+    expect(prompt(1.5)).not.toContain('distinct');
+    expect(prompt(-1)).not.toContain('distinct');
+    expect(prompt(null)).not.toContain('distinct');
+    expect(prompt({ count: 3 })).not.toContain('distinct');
+    // Zero is a number the schema can state, and this guard is about the form of the value rather
+    // than about its plausibility: dropping it would be the reader deciding what the schema means.
+    expect(prompt(0)).toContain('[0 distinct]');
+  });
+
+  it('puts the count before the sample values, and keeps both when both rules are on', () => {
+    const row = { question: 'q', counts: { name: 2 }, examples: { name: ['a', 'b'] } };
+    const types = { name: 'category' } as const;
+    const [, both] = buildSpecPrompt(row, types, 3, ['ranks', 'values']);
+    expect(both).toContain('name (category) [2 distinct]: a, b');
+  });
+
+  it('ship no count: the ranks rule is measured before it is sent', () => {
+    expect(RULES).toContain('ranks');
+    // The default is what the product sends, and a rule that has not cleared its interval has no
+    // business in it — `metrics.json` decides that, and the drift test reads it.
+    expect(DEFAULT_RULES).not.toContain('ranks');
+    expect(productPrompt({ question: 'q', counts: { name: 3 } }, { name: 'category' }, 3)[1]).not.toContain('distinct');
   });
 
   it('asks for the ambiguity before the charts only when the steps rule is on', () => {

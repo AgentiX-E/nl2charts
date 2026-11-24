@@ -658,6 +658,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/nvbench2/goldshape.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 97.59
+    },
     "eval/nvbench2/judge.ts": {
       "lines": 100,
       "statements": 100,

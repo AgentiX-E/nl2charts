@@ -89,6 +89,19 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
  *   almost nothing: pairwise, `field` varies 571 times, the channel set 393, two channels 285, and
  *   the mark only 96. The corpus is enumerating plausible *column assignments*, so `k` candidates
  *   spent on `k` marks are `k` candidates spent on the wrong axis.
+ * - `ranks` — the corpus's schema carries `unique_value_counts` beside the type map, and its own
+ *   prompting baseline prints it. This arm printed the type and not the count, which leaves the one
+ *   decision the gold sets turn on to the model's guess: which columns can take a free axis. A count
+ *   is mechanical where a name is not — `authid` has thirteen distinct values over thirteen rows,
+ *   `authorder` has three, and a model reading the two names in isolation has no way to know that.
+ *   **The first draft of this rule was wrong, and an offline check said so before a yuan was spent**:
+ *   it read "distinct count equals row count" as *identifier, therefore no channel*, and the dev split
+ *   contradicts it — 1,964 of 4,567 gold field encodings (43%) name such a column, 938 of them on `x`,
+ *   because a timestamp is unique per row and is still the axis. What the split says instead is that
+ *   the gold set is built from the *columns* and not from their names: 248 of 750 questions cover
+ *   every column of their table. So the rule states the arithmetic as a way to tell a category from a
+ *   measure and explicitly forbids dropping a column for sounding like an id — the opposite advice to
+ *   the draft, and the one the golds support.
  * - `values` — the corpus publishes `table_schema.column_examples` for every sample, and its names
  *   are opaque (`authid`, `authorder`, `authposition` are three columns of the same table). A column
  *   list that carries three values per column is the corpus's own disambiguation, and it is part of
@@ -110,7 +123,7 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
  *   does name. Asked as a preamble, it makes the enumeration explicit instead of implicit, and step
  *   two is exactly the set the golds are.
  */
-export const RULES = ['count', 'variants', 'values', 'corpus', 'corpus2', 'steps'] as const;
+export const RULES = ['count', 'ranks', 'variants', 'values', 'corpus', 'corpus2', 'steps'] as const;
 export type Rule = (typeof RULES)[number];
 
 /**
@@ -147,6 +160,15 @@ const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
   count: [
     'A count names no column: write {"aggregate": "count"} with no "field", because a count counts',
     'rows rather than a column of them. Name a field only for sum, mean, min and max.',
+  ],
+  ranks: [
+    'Each column is followed by how many distinct values it holds. Use that count to decide what a',
+    'column is for, never to leave it out: few distinct values against many rows means a category,',
+    'and a category is the natural free axis; as many distinct values as rows means the column is',
+    'unique per row, which makes a timestamp an axis and a number an identifier that is still a',
+    'column of the table. The set is built from the columns, not from the names: do not drop a column',
+    'because its name sounds like an id or a code, and do not promote one because its name sounds',
+    'like a measure. Every column the question does not fix is a chart, up to the width asked for.',
   ],
   variants: [
     'The array is a set of charts an analyst would accept, not several attempts at one chart: keep the',
@@ -232,6 +254,18 @@ function identityOf(system: string, user: string, model: string, maxTokens: numb
 }
 
 /**
+ * How many distinct values a column holds, when the schema states it in a form a reader can use.
+ *
+ * `unique_value_counts` is `Record<string, unknown>` because it is parsed from a file, so this guard
+ * is not defensive noise: the corpus writes integers, and anything else is a schema the rule has
+ * nothing to say about. Failing to `undefined` keeps the column listed by type alone, rather than
+ * printing `[undefined distinct]` into a prompt and calling it a signal.
+ */
+function distinctOf(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : undefined;
+}
+
+/**
  * The instruction, and the table it is about.
  *
  * The two messages are separate for the reason `eval/text2vis/llm.ts` gives: the system half is
@@ -280,12 +314,19 @@ export function buildSpecPrompt(
       : ['Answer with the array and nothing else: no prose, no code fence, no explanation.']),
   ].join('\n');
   const samples = row.examples ?? {};
+  const counts = row.counts ?? {};
   const fields = Object.entries(types)
     .map(([name, kind]) => {
-      if (!rules.includes('values')) return `${name} (${kind})`;
+      // The count comes before the samples because it is the cheaper half of the same sentence: a
+      // reader who stops after `[3 distinct]` still knows the column is not an identifier.
+      const distinct = distinctOf(counts[name]);
+      const listed = rules.includes('ranks') && distinct !== undefined
+        ? `${name} (${kind}) [${String(distinct)} distinct]`
+        : `${name} (${kind})`;
+      if (!rules.includes('values')) return listed;
       const values = samples[name];
       const shown = Array.isArray(values) ? values.map((value) => String(value)).join(', ') : '';
-      return shown.length === 0 ? `${name} (${kind})` : `${name} (${kind}): ${shown}`;
+      return shown.length === 0 ? listed : `${listed}: ${shown}`;
     })
     .join(', ');
   const user = [`Table columns: ${fields}`, `Question: ${row.question}`].join('\n');
