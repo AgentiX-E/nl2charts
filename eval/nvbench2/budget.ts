@@ -163,7 +163,22 @@ export function closestPriceOf(
   model: string,
   rules: readonly string[],
 ): UnitPrice | undefined {
-  const candidates = armPricesOf(metrics).filter((arm) => arm.model === model);
+  return closestOf(armPricesOf(metrics), model, rules);
+}
+
+/**
+ * The closest arm in a list that is already in memory.
+ *
+ * Split from `closestPriceOf` so the choice can be tested against arms a caller constructs — including
+ * one that carries no rule set, which is the shape a hand-written row has and the reason `rules` is
+ * optional on `UnitPrice`.
+ */
+export function closestOf(
+  arms: readonly UnitPrice[],
+  model: string,
+  rules: readonly string[],
+): UnitPrice | undefined {
+  const candidates = arms.filter((arm) => arm.model === model);
   if (candidates.length === 0) return undefined;
   let best = candidates[0] as UnitPrice;
   for (const arm of candidates) {
@@ -186,10 +201,9 @@ export function unitPriceOf(
   model: string,
   rules?: readonly string[],
 ): UnitPrice | undefined {
-  if (rules !== undefined && rules.length > 0) {
-    const close = closestPriceOf(metrics, model, rules);
-    if (close !== undefined) return close;
-  }
+  // Two views of one file, and the closest arm is only defined when there is an instruction to be
+  // close to: an empty rule set is a dispatch that names nothing, which is the dearest case.
+  if (rules !== undefined && rules.length > 0) return closestPriceOf(metrics, model, rules);
   return unitPricesOf(metrics).get(model);
 }
 

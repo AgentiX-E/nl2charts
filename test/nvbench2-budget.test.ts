@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_BUDGET_CNY, armPricesOf, closestPriceOf, quoteLine, quoteOf, refusalOf, unitPriceOf, unitPricesOf,
+  DEFAULT_BUDGET_CNY, armPricesOf, closestOf, closestPriceOf, quoteLine, quoteOf, refusalOf, unitPriceOf, unitPricesOf,
 } from '../eval/nvbench2/budget.js';
 
 /** The published readings, so a test of the price table is a test of the file the product reads. */
@@ -98,6 +98,9 @@ describe('the price of an instruction, not of a model', () => {
     expect(closestPriceOf(metrics, 'm', ['x'])?.source).toBe('arms.readings.a');
     // A dispatch with no rules is every arm at once, and the conservative read is the dearest.
     expect(closestPriceOf(metrics, 'm', [])?.source).toBe('arms.readings.b');
+    // The same through `unitPriceOf`: an empty rule set is "no instruction", so it keeps the maximum
+    // rather than choosing the arm that happens to overlap least.
+    expect(unitPriceOf(metrics, 'm', [])?.source).toBe('arms.readings.b');
     // A model with no arm at all has no closest arm either.
     expect(closestPriceOf(metrics, 'other', ['x'])).toBeUndefined();
   });
@@ -110,6 +113,59 @@ describe('the price of an instruction, not of a model', () => {
       const dearest = arms.reduce((left, right) => (right.cnyPerQuestion > left.cnyPerQuestion ? right : left));
       expect(price.cnyPerQuestion).toBeCloseTo(dearest.cnyPerQuestion, 10);
     }
+  });
+});
+
+describe('a price table read from a file', () => {
+  it('reads a rule list leniently, because metrics.json is a file and not a type', () => {
+    const metrics = {
+      arms: {
+        model: 'm',
+        asked: 10,
+        readings: {
+          // A rule set written as a string, and one that holds a number: both are how a hand-edited
+          // table goes wrong, and neither may turn into a price for the wrong instruction.
+          a: { rules: 'count', yuan: 10 },
+          b: { rules: ['count', 3], yuan: 20 },
+        },
+      },
+    };
+    const prices = armPricesOf(metrics);
+    expect(prices.find((price) => price.source.endsWith('.a'))?.rules).toEqual([]);
+    expect(prices.find((price) => price.source.endsWith('.b'))?.rules).toEqual(['count']);
+    // A reading that is not an object is not a reading: a table with one bad row still quotes.
+    expect(armPricesOf({ arms: { model: 'm', asked: 10, readings: { bad: 'free' } } })).toEqual([]);
+    expect(armPricesOf({ replicas: { model: 'm', asked: 10, readings: { bad: 'free' } } })).toEqual([]);
+  });
+
+  it('drops a tier cell that is not a price, and reads one whose name has no instruction', () => {
+    const metrics = { arms: { tiers: { rows: 10, cells: { m: { yuan: 10 }, 'n|': { yuan: 0 }, o: 'free' } } } };
+    const prices = armPricesOf(metrics);
+    // `m` has no `|` in its name: the tier is the model and the instruction is empty, not the name.
+    expect(prices).toHaveLength(1);
+    expect(prices[0]?.model).toBe('m');
+    expect(prices[0]?.rules).toEqual([]);
+  });
+
+  it('skips a replica reading whose denominator the file does not state', () => {
+    // A replica divides by the replicas node's own `asked`. Without it there is a bill and no
+    // denominator, which is not a price and must not become one.
+    expect(armPricesOf({ replicas: { model: 'm', readings: { r: { yuan: 10 } } } })).toEqual([]);
+    expect(armPricesOf({ replicas: { model: 'm', asked: 5, readings: { r: { yuan: 10 } } } }))
+      .toEqual([{ model: 'm', cnyPerQuestion: 2, source: 'replicas.readings.r', rules: [] }]);
+  });
+
+  it('chooses among arms it is handed, including one that carries no rule set', () => {
+    const arms = [
+      { model: 'm', cnyPerQuestion: 1, source: 'hand-written' },
+      { model: 'm', cnyPerQuestion: 9, source: 'measured', rules: ['count'] },
+    ];
+    // An arm with no rule set has nothing in common with a named one, so the named arm wins on
+    // closeness even though it is dearer — and an empty request ties, which the dearer arm breaks.
+    expect(closestOf(arms, 'm', ['count'])?.source).toBe('measured');
+    // Two empty rule sets are the same instruction: overlap is 1, not a division by zero.
+    expect(closestOf([arms[0]!], 'm', [])?.source).toBe('hand-written');
+    expect(closestOf(arms, 'other', ['count'])).toBeUndefined();
   });
 });
 
