@@ -247,6 +247,7 @@ jobs:
                 '| charts per question | ' + perQuestion + ' |',
                 '| unparsed replies | ' + payload.unparsed + ' |',
                 '| truncated replies | ' + payload.truncated + ' |',
+                '| calls that failed | ' + (payload.failed ?? 0) + ' |',
                 '| calls | ' + payload.cost.calls + ' |',
                 '| tokens | ' + payload.cost.promptTokens + ' in / ' + payload.cost.completionTokens + ' out |',
                 '| cost | ' + (payload.cost.yuan === undefined ? 'unpriced' : '¥' + payload.cost.yuan.toFixed(4)) + ' |',

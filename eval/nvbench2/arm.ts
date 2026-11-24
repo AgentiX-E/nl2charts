@@ -115,13 +115,15 @@ export type Rule = (typeof RULES)[number];
  * The rules the product path sends, which is the arm the ablation measured best.
  *
  * `count`, `corpus` and `corpus2` read 22.39 F1@3 on dev against 5.02 for no rules at all: 15.88 with
- * `count,corpus`, then +6.51 when the arm was asked for a set instead of a single chart — 1,607 charts
- * over 750 questions rather than 827, and 433 of them gold rather than 237. `variants` (14.64 with
- * `count`), `values` (4.82 alone) and `count,variants,corpus` (14.44) were each measured and not
- * selected. `test/nvbench2-arm.test.ts` re-derives this from `metrics.json`, so an arm that beats this
- * one without the default following it fails CI rather than drifting quietly.
+ * `count,corpus`, then +6.51 when the arm was asked for a set instead of a single chart. `steps` adds
+ * a `STEPS:` preamble naming the ambiguity, its candidate columns and the measure before the array,
+ * and reads **26.28** — +3.90 with a paired bootstrap interval of [1.99, 5.80] over 750 questions,
+ * which is the first prompt change in this file whose effect is separated from the noise. `variants`
+ * (14.64 with `count`), `values` (4.82 alone) and `count,variants,corpus` (14.44) were each measured
+ * and not selected. `test/nvbench2-arm.test.ts` re-derives this from `metrics.json`, so an arm that
+ * beats this one without the default following it fails CI rather than drifting quietly.
  */
-export const DEFAULT_RULES: readonly Rule[] = ['count', 'corpus', 'corpus2'];
+export const DEFAULT_RULES: readonly Rule[] = ['count', 'corpus', 'corpus2', 'steps'];
 
 /** What each rule adds to the instruction. Wrapped to keep the system message readable in a log. */
 const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
@@ -408,6 +410,15 @@ export interface AnsweredRow {
   readonly truncated: boolean;
   /** True when nothing in the reply was a chart. */
   readonly unparsed: boolean;
+  /**
+   * True when the call produced no reply at all — a deadline or a transport fault that survived every
+   * attempt, or a budget too small to answer inside.
+   *
+   * Distinct from `unparsed`, which is an answer this repository cannot read, and distinct from a wrong
+   * answer, which is one it can. A failed row is left out of the reading and counted, because scoring a
+   * timeout as zero charts would put a network into a benchmark number.
+   */
+  readonly failed: boolean;
   readonly replayed: boolean;
   /** True when this row cost an endpoint call. A row whose table had no type map cost none. */
   readonly called: boolean;
@@ -432,6 +443,8 @@ export interface ArmReport {
   readonly replayed: number;
   readonly unparsed: number;
   readonly truncated: number;
+  /** Calls that produced no reply. Excluded from the reading and reported beside it. */
+  readonly failed: number;
   readonly reading: Reading;
   /**
    * The same reading, one question at a time.
@@ -481,20 +494,39 @@ async function answerOne(
       charts: cached.truncated ? [] : parseSpecs(cached.reply, options.ask),
       truncated: cached.truncated,
       unparsed: !cached.truncated && parseSpecs(cached.reply, options.ask).length === 0,
+      failed: false,
       replayed: true,
       called: false,
       promptTokens: cached.usage?.promptTokens ?? 0,
       completionTokens: cached.usage?.completionTokens ?? 0,
     };
   }
-  const response = await provider.complete({
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    maxTokens: options.maxTokens,
-    temperature: 0,
-  });
+  // A call that failed is a row without an answer, not the end of the run. The previous behaviour — raise
+  // out of `mapLimit` — cost a 750-question reasoning run three times: the answers were cached and
+  // replayable, but the run reported nothing, so the reading had to be bought a second time to exist.
+  let response;
+  try {
+    response = await provider.complete({
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      maxTokens: options.maxTokens,
+      temperature: 0,
+    });
+  } catch {
+    return {
+      index: row.index,
+      charts: [],
+      truncated: false,
+      unparsed: false,
+      failed: true,
+      replayed: false,
+      called: true,
+      promptTokens: 0,
+      completionTokens: 0,
+    };
+  }
   const reply = response.text;
   const truncated = response.finishReason === 'length';
   const charts = truncated ? [] : parseSpecs(reply, options.ask);
@@ -511,6 +543,7 @@ async function answerOne(
     charts,
     truncated,
     unparsed: !truncated && charts.length === 0,
+    failed: false,
     replayed: false,
     called: true,
     promptTokens: usage.promptTokens,
@@ -588,6 +621,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
           charts: [],
           truncated: false,
           unparsed: true,
+          failed: false,
           replayed: false,
           called: false,
           promptTokens: 0,
@@ -602,11 +636,13 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     return {
       answer,
       row,
+      // A failed row scores nothing because it answered nothing: its case is dropped below rather than
+      // handed to the judge as an empty prediction.
       scored: { predictions: answer.charts, golds: row.golds, types: types ?? {} } satisfies Case,
     };
   });
   const answers = answered.map((entry) => entry.answer);
-  const cases: Case[] = answered.map((entry) => entry.scored);
+  const cases: Case[] = answered.filter((entry) => !entry.answer.failed).map((entry) => entry.scored);
   const reading = readingOf(cases, SCORED_KS);
   const promptTokens = answers.reduce((sum, answer) => sum + answer.promptTokens, 0);
   const completionTokens = answers.reduce((sum, answer) => sum + answer.completionTokens, 0);
@@ -623,6 +659,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     replayed: answers.filter((answer) => answer.replayed).length,
     unparsed: answers.filter((answer) => answer.unparsed).length,
     truncated: answers.filter((answer) => answer.truncated).length,
+    failed: answers.filter((answer) => answer.failed).length,
     reading,
     perQuestion: perQuestionOf(cases, SCORED_KS),
     rules,
@@ -785,7 +822,8 @@ export function summaryLine(report: ArmReport): string {
   const f1 = report.reading.f1[3];
   const reading = f1 === undefined ? '—' : f1.toFixed(4);
   const price = report.cost.yuan === undefined ? 'unpriced' : formatYuan(report.cost.yuan);
-  return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.asked)} questions · ask ${String(report.ask)} · ${String(report.cost.calls)} calls · ${price}`;
+  const failed = report.failed === 0 ? '' : ` · ${String(report.failed)} failed`;
+  return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.reading.questions)} of ${String(report.asked)} scored · ask ${String(report.ask)} · ${String(report.cost.calls)} calls${failed} · ${price}`;
 }
 
 /** Read the corpus and ask it. The thin half, kept separate so the thick half can be tested. */

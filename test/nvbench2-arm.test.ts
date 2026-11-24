@@ -324,6 +324,42 @@ describe('the arm', () => {
     expect(provider.seen[0]).toContain('at most 3 charts');
   });
 
+  it('survives a call that never answers, and reports the row instead of the run', async () => {
+    // Three dispatches died this way before the arm did: a reasoning call past its deadline threw out of
+    // `mapLimit`, the answers already bought stayed in the cache, and the run reported nothing — so the
+    // reading had to be bought again to exist. A row without a reply is a missing row, not a wrong one,
+    // and certainly not the end of the run.
+    const kinds: string[] = [];
+    const provider: LlmProvider = {
+      id: 'fake',
+      model: 'fake-model',
+      complete: async (request) => {
+        const question = request.messages[1]?.content ?? '';
+        if (question.includes('(1)')) {
+          kinds.push('failed');
+          throw new Error('timeout');
+        }
+        kinds.push('answered');
+        return { text: JSON.stringify([GOLD]), model: 'fake-model', usage: { promptTokens: 10, completionTokens: 5 }, finishReason: 'stop' };
+      },
+    };
+    const report = await runArm({
+      split: 'dev', rows: [row(0), row(1), row(2)], types: { 'a.csv': TYPES }, provider,
+      k: 3, maxTokens: 900, concurrency: 1, rules: ['count'],
+    });
+    expect(kinds).toEqual(['answered', 'failed', 'answered']);
+    expect(report.failed).toBe(1);
+    expect(report.asked).toBe(3);
+    // The two that answered are the reading, and the failed row is not a zero in it.
+    expect(report.reading.questions).toBe(2);
+    expect(report.reading.f1[3]).toBeCloseTo(1, 6);
+    // It still counts as a call, because the endpoint was asked; it is not billed, because a reply that
+    // never arrived reported no tokens.
+    expect(report.cost.calls).toBe(3);
+    expect(summaryLine(report)).toContain('2 of 3 scored');
+    expect(summaryLine(report)).toContain('1 failed');
+  });
+
   it('keeps the first N answers verbatim when it is asked to, so a surprising reading can be read', async () => {
     const report = await runArm({
       split: 'dev', rows: [row(0), row(1)], types: { 'a.csv': TYPES },
@@ -397,7 +433,7 @@ describe('the arm', () => {
 
   it('prints a reading at the precision a bill is read at, and says `unpriced` when the model has no row', async () => {
     const base = await runArm({ split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(JSON.stringify([GOLD])), k: 3, maxTokens: 900, concurrency: 1 });
-    expect(summaryLine(base)).toBe('nvbench2 arm: dev F1@3 1.0000 · 1 questions · ask 3 · 1 calls · unpriced');
+    expect(summaryLine(base)).toBe('nvbench2 arm: dev F1@3 1.0000 · 1 of 1 scored · ask 3 · 1 calls · unpriced');
     const priced = { ...base, model: 'deepseek-chat', cost: { ...base.cost, yuan: 0.00042 } };
     expect(summaryLine(priced)).toContain('deepseek-chat' === priced.model ? '' : '¥');
     expect(summaryLine({ ...priced, reading: { ...priced.reading, f1: { 1: 1 } } })).toContain('F1@3 —');
@@ -536,7 +572,7 @@ describe('the arm', () => {
   });
 
   it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
-    expect(rulesOf(undefined)).toEqual(['count', 'corpus', 'corpus2']);
+    expect(rulesOf(undefined)).toEqual(['count', 'corpus', 'corpus2', 'steps']);
     expect(rulesOf('')).toEqual([]);
     expect(rulesOf('variants')).toEqual(['variants']);
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
@@ -586,10 +622,10 @@ describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, ask: 3, concurrency: 6, maxTokens: 900, samples: undefined,
-      rules: ['count', 'corpus', 'corpus2'],
+      rules: ['count', 'corpus', 'corpus2', 'steps'],
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2'] });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2', 'steps'] });
   });
 
   it('carries the sample count through the command line, and through the run it starts', () => {
