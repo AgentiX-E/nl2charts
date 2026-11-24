@@ -382,17 +382,36 @@ describe('the arm', () => {
     const [counted] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['count']);
     const [varied] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['variants']);
     const [both] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['count', 'variants']);
+    const [withValues] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['values']);
     expect(counted.length).toBeGreaterThan(bare.length);
     expect(counted).toContain('A count names no column');
     expect(varied).toContain('a set of charts an analyst would accept');
     expect(varied).not.toContain('A count names no column');
+    expect(withValues).toContain('Each column is listed with sample values');
+    expect(both).not.toContain('Each column is listed with sample values');
     // The closing instruction stays last, or the rules would be read as an afterthought.
     expect(both.trimEnd().endsWith('no prose, no code fence, no explanation.')).toBe(true);
     expect(both.indexOf('A count names no column')).toBeLessThan(both.indexOf('a set of charts an analyst'));
   });
 
+  it('lists a column with its sample values only when the values rule is on', () => {
+    const row = { question: 'q', examples: { amount: [1, 2, 3], name: ['a', 'b', 'c'] } };
+    const types = { amount: 'quantitative', name: 'category' } as const;
+    const [, bare] = buildSpecPrompt(row, types, 3, []);
+    const [, shown] = buildSpecPrompt(row, types, 3, ['values']);
+    expect(bare).toContain('Table columns: amount (quantitative), name (category)');
+    expect(shown).toContain('amount (quantitative): 1, 2, 3');
+    expect(shown).toContain('name (category): a, b, c');
+    // A column the corpus published no example for still gets a line, because a missing line would
+    // read as a missing column.
+    const partial = { question: 'q', examples: { amount: [1] } };
+    expect(buildSpecPrompt(partial, types, 3, ['values'])[1]).toContain('name (category)');
+    // And a row that carries no examples at all is still a row.
+    expect(buildSpecPrompt({ question: 'q' }, types, 3, ['values'])[1]).toContain('amount (quantitative)');
+  });
+
   it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
-    expect(rulesOf(undefined)).toEqual(['count', 'variants']);
+    expect(rulesOf(undefined)).toEqual(['count', 'variants', 'values']);
     expect(rulesOf('')).toEqual([]);
     expect(rulesOf('variants')).toEqual(['variants']);
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
@@ -418,10 +437,10 @@ describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, concurrency: 6, maxTokens: 900, samples: undefined,
-      rules: ['count', 'variants'],
+      rules: ['count', 'variants', 'values'],
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'variants'] });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'variants', 'values'] });
   });
 
   it('carries the sample count through the command line, and through the run it starts', () => {

@@ -56,7 +56,7 @@ on:
         default: '0'
         type: string
       rules:
-        description: 'Comma-separated prompt rules: count, variants (empty string = neither, the first arm)'
+        description: 'Comma-separated prompt rules: count, variants, values — or `none`, the first arm'
         required: false
         default: 'count,variants'
         type: string
@@ -136,6 +136,9 @@ jobs:
           # a cache entry and a save from one cannot hide from the other.
           arm="$(printf '%s' "${RULES:-none}" | tr ',' '+')"
           echo "slug=$(printf '%s-%s-%s-%s' "$MODEL" "$SPLIT" "$K" "$arm" | tr -c 'A-Za-z0-9._-' _)" >> "$GITHUB_OUTPUT"
+          # `none` rather than the empty string, because a dispatch input left empty falls back to its
+          # default and an arm that says "no rules" must not quietly run with both of them.
+          if [ "$RULES" = "none" ]; then echo "list=" >> "$GITHUB_OUTPUT"; else echo "list=$RULES" >> "$GITHUB_OUTPUT"; fi
 
       # The answers, keyed by the request rather than by the calendar: model, split, k and the code
       # that builds the prompt. A change to any of them is a new key and therefore a save; an
@@ -160,7 +163,7 @@ jobs:
           if [ "$LIMIT" != "0" ]; then EXTRA="--limit $LIMIT"; fi
           if [ "${{ inputs.samples }}" != "0" ]; then EXTRA="$EXTRA --samples ${{ inputs.samples }}"; fi
           pnpm bench:nvbench2:arm --split "$SPLIT" --k "$K" --concurrency "$CONCURRENCY" $EXTRA \
-            --rules "${{ inputs.rules }}" --artifact eval/out/nvbench2-arm.json
+            --rules "${{ steps.instrument.outputs.list }}" --artifact eval/out/nvbench2-arm.json
 
       # Before the gate, not after: a run that misses its floor has still bought its answers.
       - name: Keep what this run paid for

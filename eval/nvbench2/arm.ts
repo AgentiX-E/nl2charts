@@ -84,8 +84,13 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
  *   almost nothing: pairwise, `field` varies 571 times, the channel set 393, two channels 285, and
  *   the mark only 96. The corpus is enumerating plausible *column assignments*, so `k` candidates
  *   spent on `k` marks are `k` candidates spent on the wrong axis.
+ * - `values` — the corpus publishes `table_schema.column_examples` for every sample, and its names
+ *   are opaque (`authid`, `authorder`, `authposition` are three columns of the same table). A column
+ *   list that carries three values per column is the corpus's own disambiguation, and it is part of
+ *   the schema rather than of the gold: 310 of 750 questions have golds that differ only in one
+ *   channel's field, over a median of 5 columns, so telling the columns apart is the whole game.
  */
-export const RULES = ['count', 'variants'] as const;
+export const RULES = ['count', 'variants', 'values'] as const;
 export type Rule = (typeof RULES)[number];
 
 /** What each rule adds to the instruction. Wrapped to keep the system message readable in a log. */
@@ -98,6 +103,10 @@ const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
     'The array is a set of charts an analyst would accept, not several attempts at one chart: keep the',
     'mark, the measure and any filter identical across entries, and let the entries differ only in',
     'which column carries the axis or channel the question does not name. Most plausible first.',
+  ],
+  values: [
+    'Each column is listed with sample values. Use them to tell columns apart: a question about',
+    'amounts asks for the column whose values are amounts, not the one whose name resembles it.',
   ],
 };
 
@@ -124,7 +133,7 @@ function identityOf(system: string, user: string, model: string, maxTokens: numb
  * type and a model that guesses a type produces a chart the corpus calls transposed.
  */
 export function buildSpecPrompt(
-  row: Pick<SplitRow, 'question'>,
+  row: Pick<SplitRow, 'question'> & { readonly examples?: Readonly<Record<string, unknown>> },
   types: FieldTypes,
   k: number,
   rules: readonly Rule[] = RULES,
@@ -142,8 +151,14 @@ export function buildSpecPrompt(
     ...rules.flatMap((rule) => RULE_TEXT[rule]),
     'Answer with the array and nothing else: no prose, no code fence, no explanation.',
   ].join('\n');
+  const samples = row.examples ?? {};
   const fields = Object.entries(types)
-    .map(([name, kind]) => `${name} (${kind})`)
+    .map(([name, kind]) => {
+      if (!rules.includes('values')) return `${name} (${kind})`;
+      const values = samples[name];
+      const shown = Array.isArray(values) ? values.map((value) => String(value)).join(', ') : '';
+      return shown.length === 0 ? `${name} (${kind})` : `${name} (${kind}): ${shown}`;
+    })
     .join(', ');
   const user = [`Table columns: ${fields}`, `Question: ${row.question}`].join('\n');
   return [system, user];
