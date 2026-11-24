@@ -246,9 +246,10 @@ export const BENCHMARKS: readonly Benchmark[] = [
       file: 'eval/nvbench2/metrics.json',
       path: ['arms', 'selected', 'published', 'f1@3'],
       kind: 'run',
-      note: 'F1@3 over the 750-question dev split, the selected prompt arm on deepseek-reasoner; '
-        + '22.39 is the same rules on a chat tier (published.chatF1@3), the ceiling is 84.96 and the '
-        + 'corpus\'s own prompting baseline 58.96',
+      note: 'F1@3 over the 750-question dev split, `count,corpus,corpus2,steps` on deepseek-chat, '
+        + '¥2.59 for the split; the same rules on the reasoning tier read 31.12 without `steps` '
+        + 'because the decomposition is inside the noise there (+0.70, 95% [-1.49, 2.92]) for 1.47x the '
+        + 'bill. Ceiling 84.96, the corpus\'s own prompting baseline 58.96',
     },
     gap:
       'Measured, and the number is a prompt arm rather than a trained system. `eval/nvbench2/'
@@ -266,11 +267,14 @@ export const BENCHMARKS: readonly Benchmark[] = [
       + '`eval/nvbench2/diff.py` is the evidence: the vendored reference and the port produce the same '
       + 'digest over all 1,501 preprocessed gold charts and the same F1@1/3/5 on both splits. The one '
       + 'number worth quoting before any model runs is **818 of 1,501 golds are transpose-equivalent** '
-      + '(381 dev, 437 test) — that is how much of the reading the type map decides. Nine arms price '
-      + 'the prompt in `metrics.json`; the wall the misses still hit is which column a sentence means '
-      + '(511 of 1,044 misses part on `field`), and the leaderboard is trained-model territory '
-      + '(Step-NL2VIS 81.50 F1@3) with a *prompted* Qwen3-235B-Step at 77.78 F1@5 — which is the '
-      + 'step-wise decomposition this arm does not yet do.',
+      + '(381 dev, 437 test) — that is how much of the reading the type map decides. Ten arms price '
+      + 'the prompt in `metrics.json`, and every claim of a gain between them now carries a paired '
+      + 'bootstrap interval: the ask sweep is inside the noise, `steps` clears it (+3.90, 95% '
+      + '[1.99, 5.80] over 750 questions) and is worth nothing measurable on the reasoning tier, where '
+      + 'the decomposition is already happening. The wall the misses still hit is which column a '
+      + 'sentence means (794 of 1,534 misses part on `field`), and what separates this arm from the '
+      + 'leaderboard is now model strength and a step-trained decoder rather than the prompt: a '
+      + '*prompted* Qwen3-235B-Step reads 77.78 F1@5 and Step-NL2VIS 81.50 F1@3 with SFT.',
   },
   {
     id: 'viscodebench',

@@ -345,27 +345,62 @@
     "countFieldless": 63,
     "promptTokens": 561103,
     "yuan": 1.70075
+   },
+   "count+corpus+corpus2+steps": {
+    "run": 45363830228,
+    "rules": [
+     "count",
+     "corpus",
+     "corpus2",
+     "steps"
+    ],
+    "f1": {
+     "1": 0.2151,
+     "3": 0.2628,
+     "5": 0.2628
+    },
+    "hit": {
+     "1": 0.4333,
+     "3": 0.492,
+     "5": 0.492
+    },
+    "predictions": 2098,
+    "matched": 564,
+    "first": {
+     "mark": 172,
+     "channels": 482,
+     "field": 794,
+     "aggregate": 16,
+     "properties": 13,
+     "transform": 57,
+     "rest": 0
+    },
+    "countFieldless": 2,
+    "promptTokens": 704353,
+    "completionTokens": 148257,
+    "yuan": 2.59
    }
   },
   "selected": {
    "rules": [
     "count",
     "corpus",
-    "corpus2"
+    "corpus2",
+    "steps"
    ],
    "model": "deepseek-chat",
    "split": "dev",
-   "run": 45344467436,
+   "run": 45363830228,
    "published": {
-    "f1@3": 31.12,
-    "hit@3": 52.53,
+    "f1@3": 26.28,
+    "hit@3": 49.2,
     "questions": 750,
     "ceiling": 84.96,
     "baseline": 58.96,
-    "chatF1@3": 22.39,
-    "model": "deepseek-reasoner (31.12) and deepseek-chat (22.39)"
+    "chatF1@3": 26.28,
+    "model": "deepseek-chat (26.28); the reasoning tier without steps reads 31.12"
    },
-   "because": "the shipped rules are the highest-F1@3 arm of the nine, and the published figure is that arm on the reasoning tier over the full dev split; `chatF1@3` is the same rules on the chat tier. The figures in `published` are percent, which is the unit eval/benchmarks.ts resolves; every arm's raw fraction stays in `readings`."
+   "because": "the shipped rules are the highest full-split arm in `readings`, which the drift test re-derives on every run; the published figure is that arm on the chat tier over dev 750, and `steps` clears zero against the previous default (+3.90, 95% [1.99, 5.80], see `arms.prefix.intervals`). The reasoning tier reads 31.12 without `steps` because the decomposition it adds is inside the noise there (+0.70, 95% [-1.49, 2.92]) for 1.47x the bill. `published` is percent, which is the unit eval/benchmarks.ts resolves; every arm's raw fraction stays in `readings`."
   },
   "tiers": {
    "rows": 250,
@@ -430,6 +465,144 @@
      "truncated": 0
     }
    }
+  },
+  "prefix": {
+   "rows": 250,
+   "split": "dev",
+   "k": 3,
+   "because": "the first 250 dev questions, so a hypothesis costs a fifth of a full split. These are not in `readings`, because a fraction over 250 questions is not comparable with a fraction over 750: the drift test reads `readings` only, which is why every arm in it is a full split.",
+   "cells": {
+    "chat|count,corpus,corpus2|ask3": {
+     "f1@3": 23.53,
+     "hit@3": 41.2,
+     "precision@3": 29.27,
+     "recall@3": 21.97,
+     "produced": 550,
+     "matched": 151,
+     "yuan": 0.569,
+     "run": 45345343198
+    },
+    "chat|count,corpus,corpus2,steps|ask3": {
+     "f1@3": 27.46,
+     "hit@3": 51.2,
+     "precision@3": 29.07,
+     "recall@3": 27.2,
+     "produced": 699,
+     "matched": 196,
+     "yuan": 0.86,
+     "run": 45361572825
+    },
+    "chat|count,corpus,corpus2,steps|ask5": {
+     "f1@3": 28.84,
+     "hit@3": 50.8,
+     "precision@3": 30.05,
+     "recall@3": 28.02,
+     "produced": 940,
+     "matched": 197,
+     "yuan": 0.936,
+     "run": 45363090570,
+     "note": "a second draw of the same prompt read 29.50 (run 45357630485): temperature 0 is not determinism"
+    },
+    "chat|count,corpus,corpus2,steps|ask6": {
+     "f1@3": 28.34,
+     "hit@3": 50.8,
+     "precision@3": 30.27,
+     "recall@3": 27.99,
+     "produced": 993,
+     "matched": 201,
+     "yuan": 0.959,
+     "run": 45363109768
+    },
+    "chat|count,corpus,corpus2,steps|ask8": {
+     "f1@3": 28.89,
+     "hit@3": 52.4,
+     "precision@3": 30.47,
+     "recall@3": 28.63,
+     "produced": 1028,
+     "matched": 206,
+     "yuan": 0.974,
+     "run": 45361610788
+    },
+    "reasoner|count,corpus,corpus2|ask3": {
+     "f1@3": 32.63,
+     "hit@3": 55.2,
+     "precision@3": 42.67,
+     "recall@3": 29.27,
+     "produced": 548,
+     "matched": 207,
+     "yuan": 4.58,
+     "run": 45363858769
+    },
+    "reasoner|count,corpus,corpus2,steps|ask3": {
+     "f1@3": 33.32,
+     "hit@3": 55.6,
+     "precision@3": 44.4,
+     "recall@3": 29.75,
+     "produced": 521,
+     "matched": 209,
+     "yuan": 6.73,
+     "run": 45356913535
+    }
+   },
+   "intervals": [
+    {
+     "base": "chat|count,corpus,corpus2,steps|ask3",
+     "arm": "chat|count,corpus,corpus2,steps|ask5",
+     "k": 3,
+     "delta": 1.38,
+     "low": -0.66,
+     "high": 3.47,
+     "separated": false
+    },
+    {
+     "base": "chat|count,corpus,corpus2,steps|ask3",
+     "arm": "chat|count,corpus,corpus2,steps|ask6",
+     "k": 3,
+     "delta": 0.88,
+     "low": -0.94,
+     "high": 2.86,
+     "separated": false
+    },
+    {
+     "base": "chat|count,corpus,corpus2,steps|ask3",
+     "arm": "chat|count,corpus,corpus2,steps|ask8",
+     "k": 3,
+     "delta": 1.44,
+     "low": -0.55,
+     "high": 3.3,
+     "separated": false
+    },
+    {
+     "base": "chat|count,corpus,corpus2,steps|ask5",
+     "arm": "chat|count,corpus,corpus2,steps|ask8",
+     "k": 3,
+     "delta": 0.06,
+     "low": -1.75,
+     "high": 1.98,
+     "separated": false
+    },
+    {
+     "base": "chat|count,corpus,corpus2",
+     "arm": "chat|count,corpus,corpus2,steps",
+     "k": 3,
+     "delta": 3.9,
+     "low": 1.99,
+     "high": 5.8,
+     "separated": true,
+     "rows": 750
+    },
+    {
+     "base": "chat|count,corpus,corpus2",
+     "arm": "chat|count,corpus,corpus2,steps",
+     "k": 1,
+     "delta": 3.32,
+     "low": 1.86,
+     "high": 4.82,
+     "separated": true,
+     "rows": 750
+    }
+   ],
+   "because2": "the intervals are paired percentile bootstraps over questions, 2,000 resamples, seed 20261124, from `pnpm bench:nvbench2:compare`. A 250-row comparison resolves about ±2 points of F1@3, which is why the whole ask sweep is inside the noise and why the steps arm had to be re-measured on 750 rows before it was believed."
   }
  }
 }

@@ -18030,7 +18030,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | BIRD dev | the same questions | R-VES | **partial** | 56.63 over 600 of 1,532 questions, floor 57.96 |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
-| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **31.12** F1@3 (reasoning tier), 22.39 on chat; ceiling 84.96, baseline 58.96, 9 arms |
+| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **26.28** F1@3 (chat, shipped rules), 31.12 on the reasoning tier; ceiling 84.96, baseline 58.96, 10 arms |
 | VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
 
 ### nvBench 2.0: nine arms, one prompt question, and where the 36 points still are
@@ -18136,8 +18136,9 @@ because a model copies an example far more reliably than it follows a descriptio
 example lifted from the split would be a few-shot prompt fitted to the corpus (ADR 0001).
 
 It reads **22.39 F1@3** against 15.88: 1,607 charts of which 433 are gold, against 827 of which 237
-were, for ¥1.70 instead of ¥1.00. Hit@3 rises 30.40 → 39.07. The arm is now `DEFAULT_RULES`, and the
-drift test that re-derives the default from `metrics.json` is what keeps that sentence true.
+were, for ¥1.70 instead of ¥1.00. Hit@3 rises 30.40 → 39.07. The arm was `DEFAULT_RULES` for a round,
+until `steps` read 26.28 over the same questions with an interval that excludes zero; the drift test
+that re-derives the default from `metrics.json` is what moved it and what keeps the sentence true.
 
 Two things about the run that are about the harness rather than the prompt, both found by running it:
 
@@ -18187,7 +18188,7 @@ reasoning tier costs ¥4.58 for those 250 questions against ¥0.57 for the chat 
 rows, 8× the bill for 9 points; over the full split it is ¥13.80 against ¥1.70. That is the trade the
 product makes per call, and the reason the tier is a parameter rather than a default.
 
-### Where 22.39 sits, and what the 36 points are made of
+### Where 26.28 sits, and what the 31 points are made of
 
 The corpus publishes the systems it compares, and until this round this file quoted two of them. The
 fuller table (arXiv:2503.12880v2, Table 3 and §4.2) changes what the next arm should be:
@@ -18200,8 +18201,8 @@ fuller table (arXiv:2503.12880v2, Table 3 and §4.2) changes what the next arm s
 | GPT-4o-Step *(prompted)* | **no** | **60.78** | 60.66 | the same prompt with step-wise reasoning |
 | GPT-4o *(prompted)* | no | 58.96 | 59.03 | the zero-shot baseline this file quotes |
 | Qwen2.5-7B-Step *(prompted)* | no | — | 64.08 | |
-| **this repository** | **no** | **22.39** | 22.39 | chat tier, 750 questions, ¥1.70 |
-| **this repository** | **no** | **31.12** | 31.12 | reasoning tier, 750 questions, ¥13.80 |
+| **this repository** | **no** | **26.28** | 26.28 | chat tier, 750 questions, ¥2.59 — `count,corpus,corpus2,steps` |
+| **this repository** | **no** | **31.12** | 31.12 | reasoning tier, 750 questions, ¥13.80 — without `steps`, which buys nothing there |
 
 Two things to read off it. First, the gap is not explained by training: a **prompted** Qwen3-235B with
 step-wise reasoning reads 77.78 F1@5, 18.8 points above the GPT-4o prompting baseline and 45 above our
@@ -18211,9 +18212,57 @@ its candidates, which filter the question names) and only then emit the set. Eve
 direct-prompting counterpart, on both model families, which is the strongest evidence in the table that
 the step decomposition is the lever rather than the model.
 
-That is the next arm (`steps`), and it is a prompt change rather than a fine-tune, which is the only
-kind of change a repository that does not train can make. The 22.39 above is a floor and it is stated
-as one: it is what the corpus's construction is worth *without* the step decomposition the leaders use.
+That was the next arm (`steps`), and it is a prompt change rather than a fine-tune, which is the only
+kind of change a repository that does not train can make. It is measured now and it is worth +3.90
+(separated), so 26.28 is a floor rather than a claim: the corpus's construction plus its step
+decomposition, with a chat tier and no training, against 60.78 for GPT-4o-Step and 81.50 for the
+trained system — the remaining 34 points are what a stronger model and a step-*trained* decoder buy.
+
+### What a difference has to survive
+
+`steps` was written, dispatched, and then **not believed** — which turned out to be the useful part.
+
+Five dispatches of it, at four different asks — one of them drawn twice — read 27.46, 29.50, 28.84,
+28.34 and 28.89 F1@3 over the same 250 questions, and the ordering by ask was not monotone: the arm asked for five beat the
+arm asked for six, which cannot be a property of asking. A mean cannot answer that. So the arm now
+ships the per-question vector it was averaged from, and `eval/nvbench2/compare.ts` resamples the
+questions with a seeded PRNG and prints the difference with its percentile interval:
+
+```console
+$ pnpm bench:nvbench2:compare --base ask3.json --arm ask8.json --k 3
+F1@3: 27.46% → 28.89% (+1.44%, 95% [-0.55%, 3.30%], inside the noise) over 250 paired questions, 2000 resamples
+```
+
+| comparison | Δ F1@3 | 95% interval | verdict |
+| --- | ---: | --- | --- |
+| ask 3 → 5 (250 questions) | +1.38 | [−0.66, +3.47] | inside the noise |
+| ask 3 → 6 (250 questions) | +0.88 | [−0.94, +2.86] | inside the noise |
+| ask 3 → 8 (250 questions) | +1.44 | [−0.55, +3.30] | inside the noise |
+| ask 5 → 8 (250 questions) | +0.06 | [−1.75, +1.98] | inside the noise |
+| `steps`, reasoning tier, 250 questions | +0.70 | [−1.49, +2.92] | inside the noise |
+| **`steps`, chat tier, 750 questions** | **+3.90** | **[+1.99, +5.80]** | **separated from zero** |
+
+Three conclusions, none of which the means alone could produce:
+
+1. **The ask sweep is noise.** Five settings between 3 and 8 charts span 1.4 points, and no interval
+   clears zero. The arm is not being helped by being asked for more; it is being asked for roughly the
+   same thing five ways. So `--ask` stayed equal to `k`, and ±2 points is the resolution one dispatch
+   of 250 questions has — which is also why the `steps` arm was re-measured over all 750 before it was
+   published, and why every `corpus2` reading in this file is a full split.
+2. **`steps` is real on the cheap tier.** Over 750 questions the same rules read 22.39 → 26.28, +3.90
+   with an interval of [+1.99, +5.80], and F1@1 moves +3.32 [+1.86, +4.82]. It costs completion tokens —
+   96 → 198 per question, ¥1.70 → ¥2.59 for the split — because the preamble is ~60 tokens and the arm
+   now answers 2.80 charts per question instead of 2.19.
+3. **`steps` is a substitute for reasoning, not a complement.** On the reasoning tier the same rule is
+   worth +0.70 over 250 questions, inside the noise, for 1.47× the bill (¥4.58 → ¥6.73). The tier was
+   already doing the decomposition, in its own words, before it wrote the array. That is the first
+   interaction this file has measured rather than assumed: the prompt and the tier are *not* fully
+   additive, they overlap where they both resolve the ambiguity.
+
+The product path follows the measurement and not symmetry: `DEFAULT_RULES` is
+`count,corpus,corpus2,steps` because that is the highest full-split arm, and a caller paying for a
+reasoning tier is documented to drop `steps` because on that tier it buys nothing measurable for half
+again the bill.
 
 Five of nine carry a number over the denominator their leaderboard reports, and two of those five are
 counts rather than accuracies. A sixth — R-VES — carries a number over 600 of its leaderboard's 1,532
