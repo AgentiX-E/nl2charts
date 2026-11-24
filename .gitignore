@@ -11,3 +11,8 @@ eval/out/
 eval/.cache/
 coverage-eval/
 .scratch/
+
+# Python bytecode: `eval/nvbench2/diff.py` imports the vendored reference at run time, and the
+# interpreter writes its cache next to the source. It is a build artefact, not a fixture.
+__pycache__/
+*.pyc

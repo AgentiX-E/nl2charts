@@ -24,6 +24,11 @@ import os
 import sys
 import tempfile
 
+# Importing the vendored reference would otherwise leave `__pycache__` inside the checkout: it is a
+# build artefact of a measurement, and a measurement that writes into the tree it measures is the
+# kind of side effect a repository notices months later.
+sys.dont_write_bytecode = True
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REFERENCE = os.path.join(HERE, "reference")
 
