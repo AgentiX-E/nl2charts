@@ -597,6 +597,27 @@ export function timeoutMsOf(raw: string | undefined): number {
   return value;
 }
 
+/**
+ * How many times one call is attempted, from `NVBENCH2_RETRIES`.
+ *
+ * The provider defaults to a single attempt, which is right for a run that costs a fraction of a yuan
+ * and wrong for one that does not: a connection reset two minutes into a 750-question reasoning run
+ * throws out of `mapLimit` and takes the whole run with it, and the request that was reset produced no
+ * answer and therefore no bill. Three attempts is not a cost, it is a floor under a transport fault.
+ *
+ * A failure that survives three attempts is still raised rather than recorded as an unanswered row:
+ * a reply that never arrived is not a wrong answer, and scoring it as one would put a network into a
+ * benchmark reading.
+ */
+export function retriesOf(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 3;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`NVBENCH2_RETRIES ${raw} is not a positive whole number of attempts`);
+  }
+  return value;
+}
+
 /** The provider the command line builds, or a sentence saying which variable is missing. */
 export function providerFromEnv(env: Readonly<Record<string, string | undefined>>): LlmProvider {
   const baseUrl = env['LLM_BASE_URL'];
@@ -604,7 +625,13 @@ export function providerFromEnv(env: Readonly<Record<string, string | undefined>
   const model = env['NVBENCH2_MODEL'] ?? 'deepseek-chat';
   if (baseUrl === undefined || baseUrl === '') throw new Error('LLM_BASE_URL is not set');
   if (apiKey === undefined || apiKey === '') throw new Error('LLM_API_KEY is not set');
-  return createHttpProvider({ baseUrl, apiKey, model, timeoutMs: timeoutMsOf(env['NVBENCH2_TIMEOUT_MS']) });
+  return createHttpProvider({
+    baseUrl,
+    apiKey,
+    model,
+    timeoutMs: timeoutMsOf(env['NVBENCH2_TIMEOUT_MS']),
+    retries: retriesOf(env['NVBENCH2_RETRIES']),
+  });
 }
 
 /** How the arm is invoked, and what a bad invocation refuses to do. */

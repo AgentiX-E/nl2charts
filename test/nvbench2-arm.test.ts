@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs,
-  providerFromEnv, runArm, rulesOf, splitDigest, summaryLine, timeoutMsOf, PROMPT_VERSION, SPEC_MARKS,
+  providerFromEnv, retriesOf, runArm, rulesOf, splitDigest, summaryLine, timeoutMsOf, PROMPT_VERSION, SPEC_MARKS,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey } from '../eval/text2vis/content-store.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
@@ -466,6 +466,16 @@ describe('the arm', () => {
     expect(() => timeoutMsOf('-1')).toThrow(/positive whole number/);
     expect(() => timeoutMsOf('90s')).toThrow(/positive whole number/);
     expect(() => timeoutMsOf('1.5')).toThrow(/positive whole number/);
+  });
+
+  it('retries a transport fault before it gives up on a paid run', () => {
+    // A reset connection produced no answer and no bill, so the second attempt is free; a run that
+    // dies on the first one throws away every answer bought before it.
+    expect(retriesOf(undefined)).toBe(3);
+    expect(retriesOf('')).toBe(3);
+    expect(retriesOf('5')).toBe(5);
+    expect(() => retriesOf('0')).toThrow(/positive whole number/);
+    expect(() => retriesOf('2.5')).toThrow(/positive whole number/);
   });
 
   it('sends the same system message for every row, so a prefix cache is a discount', async () => {

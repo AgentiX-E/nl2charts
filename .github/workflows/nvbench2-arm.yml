@@ -70,6 +70,11 @@ on:
         required: false
         default: '60000'
         type: string
+      retries:
+        description: 'Attempts per call; a reset connection produced no answer and no bill'
+        required: false
+        default: '3'
+        type: string
       concurrency:
         description: 'Calls in flight at once'
         required: true
@@ -97,6 +102,7 @@ jobs:
       LLM_BASE_URL: ${{ inputs.provider == 'deepseek' && 'https://api.deepseek.com/v1' || 'https://open.bigmodel.cn/api/paas/v4' }}
       NVBENCH2_MODEL: ${{ inputs.model }}
       NVBENCH2_TIMEOUT_MS: ${{ inputs.timeout_ms }}
+      NVBENCH2_RETRIES: ${{ inputs.retries }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
