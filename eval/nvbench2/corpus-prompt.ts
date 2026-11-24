@@ -142,14 +142,20 @@ export function corpusPromptOf(
 /**
  * The charts a `steps` replica wrote, from the object it was asked for.
  *
- * The step prompt's contract is an object with `step_1` … `step_6` and `final_output`, and its own
- * example writes that object inside a ```json fence. Four shapes are therefore read: the fenced
- * object, a bare object, and either of those with prose before it. Anything else is an answer this
- * repository cannot read, which the caller counts as unparsed rather than as zero — the distinction
- * the rest of the arm already keeps.
+ * The corpus ships **two** step contracts, and they end differently:
  *
- * The last fence is tried first because the worked example contains a fence of its own in the *prompt*,
- * not the reply; a reply that quotes the prompt's example before answering puts its own answer last.
+ * - `simple_step_example` names the array in a top-level `final_output`;
+ * - `step_example`, the worked answer for the long instruction, ends at `step_6.answer`, because the
+ *   sixth step *is* the chart list.
+ *
+ * Both are read here. Missing the second cost one dispatch: the long step replica answered all 750
+ * questions, paid for them, and scored 0.00 with 569 replies recorded as unparsed — the contract was
+ * right and the reader was wrong. A body of zero is not a reading until the parser has been shown the
+ * shape the prompt actually asks for.
+ *
+ * Four wrappings are therefore read: the fenced object, a bare object, and either of those behind
+ * prose. The last fence is tried first because a reply that quotes the instruction's own example
+ * before answering puts its answer last.
  */
 export function finalOutputOf(text: string): unknown[] | undefined {
   const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gu)].map((match) => match[1] ?? '');
@@ -167,6 +173,10 @@ export function finalOutputOf(text: string): unknown[] | undefined {
     if (!isRecordLike(parsed)) continue;
     const output = parsed['final_output'];
     if (Array.isArray(output)) return output;
+    const sixth = parsed['step_6'];
+    if (isRecordLike(sixth) && Array.isArray(sixth['answer']) && sixth['answer'].length > 0) {
+      return sixth['answer'];
+    }
   }
   return undefined;
 }

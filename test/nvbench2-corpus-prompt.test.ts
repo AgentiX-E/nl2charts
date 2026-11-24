@@ -208,6 +208,33 @@ describe('the reply the step contract asks for', () => {
     expect(finalOutputOf(`${wrong}\n${right}`)).toEqual(OUTPUT);
   });
 
+  it('reads the second step contract, which ends at step_6 rather than at final_output', () => {
+    // The corpus writes two step examples and they end differently; reading only the first cost one
+    // dispatch — 750 paid calls recorded as 569 unparsed because the contract was right and the reader
+    // was not.
+    const reply = JSON.stringify({
+      step_1: { answer: { column_list: [], filter_list: [] } },
+      step_6: { reasoning: 'x', answer: OUTPUT },
+    });
+    expect(finalOutputOf(reply)).toEqual(OUTPUT);
+    const fenced = '```json\n' + reply + '\n```';
+    expect(finalOutputOf(fenced)).toEqual(OUTPUT);
+  });
+
+  it('prefers a named final_output when a reply carries both contracts', () => {
+    const both = JSON.stringify({
+      final_output: OUTPUT,
+      step_6: { answer: [{ mark: 'line', encoding: {} }] },
+    });
+    expect(finalOutputOf(both)).toEqual(OUTPUT);
+  });
+
+  it('ignores an empty step_6 answer, which is a step written but not answered', () => {
+    expect(finalOutputOf(JSON.stringify({ step_6: { answer: [] } }))).toBeUndefined();
+    expect(finalOutputOf(JSON.stringify({ step_6: { reasoning: 'x' } }))).toBeUndefined();
+    expect(finalOutputOf(JSON.stringify({ step_6: 'the last step' }))).toBeUndefined();
+  });
+
   it('returns undefined for a reply that is not an object, or does not parse', () => {
     expect(finalOutputOf('I cannot answer that.')).toBeUndefined();
     expect(finalOutputOf('{ this is not json }')).toBeUndefined();
