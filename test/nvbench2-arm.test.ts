@@ -5,14 +5,14 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
-  answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs,
+  answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs, pendingOf,
   DEFAULT_REPLICA, productPrompt, providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest,
   summaryLine, timeoutMsOf, PROMPT_VERSION, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
 import { REPLICAS } from '../eval/nvbench2/corpus-prompt.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
-import type { SplitRow } from '../eval/nvbench2/check.js';
+import { parseSplit, type SplitRow } from '../eval/nvbench2/check.js';
 import type { FieldTypes } from '../eval/nvbench2/judge.js';
 
 const dirs: string[] = [];
@@ -659,11 +659,22 @@ describe('the arm', () => {
 describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
-      split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, ask: 3, concurrency: 6, maxTokens: 900, samples: undefined,
-      rules: ['count', 'corpus', 'corpus2', 'steps'], replica: undefined,
+      split: 'dev', cache: 'eval/.cache/nvbench2', metrics: 'eval/nvbench2/metrics.json', artifact: undefined, limit: undefined, k: 3, ask: 3,
+      concurrency: 6, maxTokens: 900, samples: undefined, rules: ['count', 'corpus', 'corpus2', 'steps'], replica: undefined,
+      budget: 12,
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2', 'steps'], replica: undefined });
+      .toEqual({ split: 'test', cache: 'c', metrics: 'eval/nvbench2/metrics.json', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2', 'steps'], replica: undefined, budget: 12 });
+  });
+
+  it('reads a ceiling in yuan, and refuses an amount that is not money', () => {
+    expect(parseArgs([]).budget).toBe(12);
+    expect(parseArgs(['--budget', '25']).budget).toBe(25);
+    expect(parseArgs(['--budget', '0']).budget).toBe(0);
+    // `none` is a word, not a zero: running a model nobody has priced has to be typed deliberately.
+    expect(parseArgs(['--budget', 'none']).budget).toBe('none');
+    expect(() => parseArgs(['--budget', 'cheap'])).toThrow(/not an amount of money or none/);
+    expect(() => parseArgs(['--budget', '-1'])).toThrow(/not an amount of money or none/);
   });
 
   it('reads --replica, and reads none for the empty string a cleared workflow box sends', () => {
@@ -729,7 +740,9 @@ describe('the command', () => {
     const dir = scratch();
     corpus(dir);
     const artifact = join(dir, 'out', 'arm.json');
-    const code = await main(['--cache', dir, '--artifact', artifact], {}, { provider: fake(JSON.stringify([GOLD])) });
+    // `--budget none`: `fake-model` has no row in `eval/price.ts`, and a dispatch under a name nobody
+    // has priced is refused unless the caller says so — which is the gate this file tests elsewhere.
+    const code = await main(['--cache', dir, '--artifact', artifact, '--budget', 'none'], {}, { provider: fake(JSON.stringify([GOLD])) });
     expect(code).toBe(0);
     const payload = JSON.parse(readFileSync(artifact, 'utf8')) as Record<string, unknown>;
     expect(payload['reading']).toMatchObject({ questions: 1 });
@@ -737,7 +750,7 @@ describe('the command', () => {
     expect(payload['cache']).toMatchObject({ hits: 0, misses: 1 });
     expect(payload['promptVersion']).toBe(PROMPT_VERSION);
     // A second run of the same command reads the answer it already paid for.
-    expect(await main(['--cache', dir, '--artifact', artifact], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
+    expect(await main(['--cache', dir, '--artifact', artifact, '--budget', 'none'], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
     const again = JSON.parse(readFileSync(artifact, 'utf8')) as Record<string, unknown>;
     expect(again['cache']).toMatchObject({ hits: 1, misses: 0 });
     expect(again['replayed']).toBe(1);
@@ -747,13 +760,63 @@ describe('the command', () => {
     const dir = scratch();
     corpus(dir);
     const artifact = join(dir, 'out', 'replica.json');
-    const code = await main(['--cache', dir, '--artifact', artifact, '--replica', 'basic'], {}, { provider: fake(JSON.stringify([GOLD])) });
+    const code = await main(['--cache', dir, '--artifact', artifact, '--replica', 'basic', '--budget', 'none'], {}, { provider: fake(JSON.stringify([GOLD])) });
     expect(code).toBe(0);
     const payload = JSON.parse(readFileSync(artifact, 'utf8')) as Record<string, unknown>;
     expect(payload['replica']).toBe('basic');
     // The rules field still says what the product path would have sent, because an artifact is also a
     // record of the run's configuration; the replica field is what says those rules were not sent.
     expect(payload['rules']).toEqual(['count', 'corpus', 'corpus2', 'steps']);
+  });
+
+  it('counts the questions already paid for, so a re-dispatch knows it is free', async () => {
+    const dir = scratch();
+    corpus(dir);
+    const store = openStore<StoredAnswer>(join(dir, 'answers'), PROMPT_VERSION, (parsed, expect) => answerOf(parsed, expect?.model));
+    const rows = parseSplit(readFileSync(join(dir, 'dev.json'), 'utf8'));
+    const types = { 'a.csv': TYPES };
+    const first = pendingOf({ rows, types, k: 3, rules: DEFAULT_RULES, model: 'deepseek-chat', maxTokens: 900, store });
+    expect(first).toEqual({ questions: 1, paid: 0 });
+    // The store this counts against is the one a run writes to, and a stored answer is a paid answer.
+    await main(['--cache', dir, '--budget', 'none'], {}, { provider: fake(JSON.stringify([GOLD])) });
+    const second = pendingOf({ rows, types, k: 3, rules: DEFAULT_RULES, model: 'fake-model', maxTokens: 900, store });
+    expect(second).toEqual({ questions: 1, paid: 1 });
+    // A wider answer budget is a different request and therefore a different question, which is why the
+    // count is taken from the request rather than from the row.
+    const wider = pendingOf({ rows, types, k: 3, rules: DEFAULT_RULES, model: 'fake-model', maxTokens: 1200, store });
+    expect(wider.paid).toBe(0);
+  });
+
+  it('prices a table it has no types for, and refuses a model it has no price for', async () => {
+    const dir = scratch();
+    corpus(dir);
+    const store = openStore<StoredAnswer>(join(dir, 'answers'), PROMPT_VERSION, (parsed, expect) => answerOf(parsed, expect?.model));
+    const rows = parseSplit(readFileSync(join(dir, 'dev.json'), 'utf8'));
+    // No type map for this table: the run counts the row as unparsed, and the quote still counts it —
+    // quoting only the rows expected to succeed would make a split of unknown tables look free.
+    expect(pendingOf({ rows, types: {}, k: 3, rules: DEFAULT_RULES, model: 'm', maxTokens: 900, store }))
+      .toEqual({ questions: 1, paid: 0 });
+    // An unpriced model is refused rather than run at an unknown price, and the sentence says which.
+    await expect(main(['--cache', dir, '--metrics', join(dir, 'metrics.json')], {}, { provider: fake(JSON.stringify([GOLD])) }))
+      .rejects.toThrow(/ENOENT|no price on file/);
+    writeFileSync(join(dir, 'metrics.json'), JSON.stringify({ arms: { model: 'someone-else', asked: 1, readings: { a: { yuan: 1 } } } }));
+    await expect(main(['--cache', dir, '--metrics', join(dir, 'metrics.json')], {}, { provider: fake(JSON.stringify([GOLD])) }))
+      .rejects.toThrow(/no price on file for fake-model/);
+  });
+
+  it('refuses a dispatch whose quote is over its ceiling, before it spends anything', async () => {
+    const dir = scratch();
+    corpus(dir);
+    const metrics = join(dir, 'metrics.json');
+    // ¥1 a question, measured: the arithmetic the gate is allowed to trust is the arithmetic of a run.
+    writeFileSync(metrics, JSON.stringify({ arms: { model: 'deepseek-chat', asked: 750, readings: { none: { yuan: 750 } } } }));
+    const priced = { ...fake(JSON.stringify([GOLD])), model: 'deepseek-chat' };
+    await expect(main(['--cache', dir, '--metrics', metrics, '--budget', '0.5'], {}, { provider: priced }))
+      .rejects.toThrow(/over the ¥0\.50 ceiling/);
+    // Nothing was bought: the refusal happens before the first call.
+    expect(priced.seen).toHaveLength(0);
+    expect(await main(['--cache', dir, '--metrics', metrics, '--budget', '2'], {}, { provider: priced })).toBe(0);
+    expect(priced.seen).toHaveLength(1);
   });
 
   it('refuses to run without an endpoint rather than inventing one', async () => {
@@ -774,14 +837,14 @@ describe('the command', () => {
     writeFileSync(join(dir, 'dev.json'), JSON.stringify([entry(0), entry(1)]));
     writeFileSync(join(dir, 'metadata.json'), JSON.stringify({ types: { 'a.csv': TYPES } }));
     const artifact = join(dir, 'arm.json');
-    expect(await main(['--cache', dir, '--limit', '1', '--artifact', artifact], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
+    expect(await main(['--cache', dir, '--limit', '1', '--artifact', artifact, '--budget', 'none'], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
     const payload = JSON.parse(readFileSync(artifact, 'utf8')) as Record<string, unknown>;
     expect(payload['asked']).toBe(1);
     expect(payload['cost']).toMatchObject({ calls: 1 });
     // No `--samples` on this command: the field is absent rather than an empty list, so a reader can
     // tell "nothing was kept" from "nothing was answered".
     expect(payload).not.toHaveProperty('samples');
-    expect(await main(['--cache', dir, '--limit', '1', '--samples', '1', '--artifact', artifact], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
+    expect(await main(['--cache', dir, '--limit', '1', '--samples', '1', '--artifact', artifact, '--budget', 'none'], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
     const kept = JSON.parse(readFileSync(artifact, 'utf8')) as Record<string, unknown>;
     expect(kept['samples']).toHaveLength(1);
   });
@@ -789,7 +852,7 @@ describe('the command', () => {
   it('prints the reading when no artifact was named', async () => {
     const dir = scratch();
     corpus(dir);
-    expect(await main(['--cache', dir], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
+    expect(await main(['--cache', dir, '--budget', 'none'], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
   });
 });
 

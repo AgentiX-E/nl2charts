@@ -49,6 +49,7 @@ import { cacheKey, openStore, type CacheIdentity, type ContentStore } from '../t
 import { runIfEntry } from '../entry.js';
 import { parseSplit, resolveTypes, type SplitRow } from './check.js';
 import { corpusPromptOf, finalOutputOf, parseModeOf, REPLICAS, type Replica } from './corpus-prompt.js';
+import { DEFAULT_BUDGET_CNY, quoteLine, quoteOf, refusalOf, unitPriceOf, type Budget, type Quote } from './budget.js';
 import { diagnose, type Diagnostic } from './diagnose.js';
 import { factsOf, type GoldFacts } from './facts.js';
 import { perQuestionOf, readingOf, type Case, type Chart, type FieldTypes, type Reading } from './judge.js';
@@ -868,6 +869,7 @@ export function replicaOf(raw: string | undefined): Replica | undefined {
 export function parseArgs(argv: readonly string[]): {
   split: string;
   cache: string;
+  metrics: string;
   artifact: string | undefined;
   limit: number | undefined;
   k: number;
@@ -877,6 +879,7 @@ export function parseArgs(argv: readonly string[]): {
   samples: number | undefined;
   rules: readonly Rule[];
   replica: Replica | undefined;
+  budget: Budget;
 } {
   const value = (flag: string): string | undefined => {
     const at = argv.indexOf(flag);
@@ -894,9 +897,19 @@ export function parseArgs(argv: readonly string[]): {
   const rawAsk = value('--ask');
   const ask = rawAsk === undefined ? k : Number(rawAsk);
   if (!Number.isInteger(ask) || ask <= 0) throw new Error(`--ask ${String(rawAsk)} is not a positive whole number`);
+  const rawBudget = value('--budget');
+  const budget: Budget = rawBudget === undefined
+    ? DEFAULT_BUDGET_CNY
+    : rawBudget === 'none'
+      ? 'none'
+      : Number(rawBudget);
+  if (budget !== 'none' && (!Number.isFinite(budget) || budget < 0)) {
+    throw new Error(`--budget ${String(rawBudget)} is not an amount of money or none`);
+  }
   return {
     split,
     cache,
+    metrics: value('--metrics') ?? 'eval/nvbench2/metrics.json',
     artifact: value('--artifact'),
     limit,
     k,
@@ -906,6 +919,7 @@ export function parseArgs(argv: readonly string[]): {
     samples: value('--samples') === undefined ? undefined : Number(value('--samples')),
     rules: rulesOf(value('--rules')),
     replica: replicaOf(value('--replica')),
+    budget,
   };
 }
 
@@ -931,6 +945,40 @@ export function summaryLine(report: ArmReport): string {
   return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.reading.questions)} of ${String(report.asked)} scored · ask ${String(report.ask)}${replica} · ${String(report.cost.calls)} calls${failed} · ${price}`;
 }
 
+/**
+ * Which of this dispatch's questions are already paid for.
+ *
+ * The answer store is keyed by the exact request, so a re-dispatch of an unchanged arm costs nothing
+ * and a changed one costs only what changed — but only a count taken *before* the run can say which,
+ * and only then can a ceiling refuse the run instead of a log reader noticing the total afterwards.
+ *
+ * The store is passed in rather than opened here, and `main` opens a second one on the same directory
+ * for this count: the counters on the store a report is written from have to describe the run, and a
+ * pre-flight peek that incremented `hits` by 750 would make every artifact's cache line a fiction.
+ */
+export function pendingOf(input: {
+  readonly rows: readonly SplitRow[];
+  readonly types: Readonly<Record<string, FieldTypes>>;
+  readonly k: number;
+  readonly rules: readonly Rule[];
+  readonly replica?: Replica;
+  readonly model: string;
+  readonly maxTokens: number;
+  readonly store: ContentStore<StoredAnswer>;
+  readonly limit?: number;
+}): { readonly questions: number; readonly paid: number } {
+  const asked = input.limit === undefined ? input.rows : input.rows.slice(0, input.limit);
+  let paid = 0;
+  for (const row of asked) {
+    // A table with no type map is asked anyway (the run counts it as unparsed), so it is priced too:
+    // quoting only the rows that will succeed would make a split of unknown tables look free.
+    const [system, user] = buildSpecPrompt(row, input.types[row.csv] ?? {}, input.k, input.rules, input.replica);
+    const key = cacheKey(identityOf(system, user, input.model, input.maxTokens), PROMPT_VERSION);
+    if (input.store.get(key, { model: input.model }) !== undefined) paid += 1;
+  }
+  return { questions: asked.length, paid };
+}
+
 /** Read the corpus and ask it. The thin half, kept separate so the thick half can be tested. */
 export async function main(
   argv: readonly string[],
@@ -945,6 +993,35 @@ export async function main(
     answerOf(parsed, expect?.model),
   );
   const meter = withCallCounter(deps.provider ?? providerFromEnv(env));
+  // The price of a question is read off the readings already published, not typed here: a table in a
+  // plan said ≈¥3 an arm and the day's invoice was ¥100.01, because the arm was a reasoning tier
+  // reading 13.8 KB and the table was priced at the chat tier's short prompt.
+  const quote = ((): Quote => {
+    const metrics = JSON.parse(readFileSync(args.metrics, 'utf8')) as unknown;
+    const peek = openStore<StoredAnswer>(`${cacheDir}/answers`, PROMPT_VERSION, (parsed, expect) =>
+      answerOf(parsed, expect?.model),
+    );
+    const pending = pendingOf({
+      rows,
+      types,
+      k: args.k,
+      rules: args.rules,
+      ...(args.replica === undefined ? {} : { replica: args.replica }),
+      model: meter.provider.model,
+      maxTokens: args.maxTokens,
+      store: peek,
+      ...(args.limit === undefined ? {} : { limit: args.limit }),
+    });
+    return quoteOf({
+      model: meter.provider.model,
+      questions: pending.questions,
+      paid: pending.paid,
+      unit: unitPriceOf(metrics, meter.provider.model),
+    });
+  })();
+  process.stderr.write(`${quoteLine(quote)}\n`);
+  const refusal = refusalOf(quote, args.budget);
+  if (refusal !== undefined) throw new Error(refusal);
   const report = await runArm({
     split: args.split,
     rows,

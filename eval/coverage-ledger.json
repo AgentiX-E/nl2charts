@@ -616,6 +616,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/nvbench2/budget.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 98.3
+    },
     "eval/nvbench2/check.ts": {
       "lines": 99.19,
       "statements": 99.19,
@@ -632,7 +638,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 95.12
+      "branches": 95.74
     },
     "eval/nvbench2/corpus-text.ts": {
       "lines": 100,

@@ -55,6 +55,11 @@ on:
         required: true
         default: '0'
         type: string
+      budget:
+        description: 'Ceiling in yuan for this dispatch; the run refuses to start if the quote is over it (none = an unpriced model, typed deliberately)'
+        required: true
+        default: '12'
+        type: string
       samples:
         description: 'Keep the first N answered rows verbatim in the artifact (0 keeps none)'
         required: false
@@ -216,7 +221,7 @@ jobs:
           if [ "${{ inputs.samples }}" != "0" ]; then EXTRA="$EXTRA --samples ${{ inputs.samples }}"; fi
           if [ "${{ inputs.replica }}" != "none" ]; then EXTRA="$EXTRA --replica ${{ inputs.replica }}"; fi
           pnpm bench:nvbench2:arm --split "$SPLIT" --k "$K" --concurrency "$CONCURRENCY" $EXTRA \
-            --max-tokens "$MAX_TOKENS" \
+            --max-tokens "$MAX_TOKENS" --budget "${{ inputs.budget }}" \
             --rules "${{ steps.instrument.outputs.list }}" --artifact eval/out/nvbench2-arm.json
 
       # Before the gate, not after: a run that misses its floor has still bought its answers.
