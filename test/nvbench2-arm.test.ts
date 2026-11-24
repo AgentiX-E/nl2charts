@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,7 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, main, mapLimit, parseArgs, parseSpecs, providerFromEnv, runArm,
-  splitDigest, summaryLine, PROMPT_VERSION, SPEC_MARKS,
+  rulesOf, splitDigest, summaryLine, PROMPT_VERSION, SPEC_MARKS,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey } from '../eval/text2vis/content-store.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
@@ -367,6 +368,37 @@ describe('the arm', () => {
     expect(report.diagnostic.agree.field).toBe(1);
   });
 
+  it('freezes the prompt the first dispatch was paid for, because an edit here orphans 750 answers', () => {
+    // Not a snapshot for its own sake: the answer store is content-addressed on this text, so a
+    // changed byte silently turns a ¥0 re-read into a ¥0.7 dispatch. A deliberate change is a
+    // PROMPT_VERSION bump and this digest moving in the same commit.
+    const [system] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, []);
+    expect(createHash('sha256').update(system).digest('hex'))
+      .toBe('07dad132499784741e4f9cd8038f099c997012b283010bf07294c2ba9e4c3999');
+  });
+
+  it('appends each rule before the closing instruction, in the order the rules are declared', () => {
+    const [bare] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, []);
+    const [counted] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['count']);
+    const [varied] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['variants']);
+    const [both] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['count', 'variants']);
+    expect(counted.length).toBeGreaterThan(bare.length);
+    expect(counted).toContain('A count names no column');
+    expect(varied).toContain('a set of charts an analyst would accept');
+    expect(varied).not.toContain('A count names no column');
+    // The closing instruction stays last, or the rules would be read as an afterthought.
+    expect(both.trimEnd().endsWith('no prose, no code fence, no explanation.')).toBe(true);
+    expect(both.indexOf('A count names no column')).toBeLessThan(both.indexOf('a set of charts an analyst'));
+  });
+
+  it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
+    expect(rulesOf(undefined)).toEqual(['count', 'variants']);
+    expect(rulesOf('')).toEqual([]);
+    expect(rulesOf('variants')).toEqual(['variants']);
+    expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
+    expect(() => rulesOf('count,bogus')).toThrow(/bogus/);
+  });
+
   it('sends the same system message for every row, so a prefix cache is a discount', async () => {
     const provider = fake(JSON.stringify([GOLD]));
     await runArm({ split: 'dev', rows: [row(0), row(1)], types: { 'a.csv': TYPES }, provider, k: 3, maxTokens: 900, concurrency: 2 });
@@ -386,9 +418,10 @@ describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, concurrency: 6, maxTokens: 900, samples: undefined,
+      rules: ['count', 'variants'],
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'variants'] });
   });
 
   it('carries the sample count through the command line, and through the run it starts', () => {

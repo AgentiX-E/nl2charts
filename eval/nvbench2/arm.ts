@@ -70,6 +70,37 @@ export const SPEC_CHANNELS = ['x', 'y', 'theta', 'color', 'size'] as const;
 /** Aggregates that appear in the corpus. A model may name any of them. */
 export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
 
+/**
+ * Instructions that can be switched on independently, so a reading can say which one moved it.
+ *
+ * Each rule answers a measured fact about the corpus rather than a guess about the model, and each is
+ * a separate arm because a prompt is a bundle of decisions and a bundle cannot be attributed:
+ *
+ * - `count` — the corpus writes a row count as `{"aggregate": "count"}` with **no** `field`. Its dev
+ *   golds carry 1,890 aggregate slots and never name a column for a count, because a count counts
+ *   rows. Of 40 replies read verbatim, 24 named one anyway; of 783 scored predictions, 157 were equal
+ *   to a gold the moment that column was ignored.
+ * - `variants` — every dev question carries 2 to 5 golds, and the golds of one question differ in
+ *   almost nothing: pairwise, `field` varies 571 times, the channel set 393, two channels 285, and
+ *   the mark only 96. The corpus is enumerating plausible *column assignments*, so `k` candidates
+ *   spent on `k` marks are `k` candidates spent on the wrong axis.
+ */
+export const RULES = ['count', 'variants'] as const;
+export type Rule = (typeof RULES)[number];
+
+/** What each rule adds to the instruction. Wrapped to keep the system message readable in a log. */
+const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
+  count: [
+    'A count names no column: write {"aggregate": "count"} with no "field", because a count counts',
+    'rows rather than a column of them. Name a field only for sum, mean, min and max.',
+  ],
+  variants: [
+    'The array is a set of charts an analyst would accept, not several attempts at one chart: keep the',
+    'mark, the measure and any filter identical across entries, and let the entries differ only in',
+    'which column carries the axis or channel the question does not name. Most plausible first.',
+  ],
+};
+
 /** The identity of one answer: what was said to which model, under which prompt. */
 function identityOf(system: string, user: string, model: string, maxTokens: number): CacheIdentity {
   return {
@@ -96,6 +127,7 @@ export function buildSpecPrompt(
   row: Pick<SplitRow, 'question'>,
   types: FieldTypes,
   k: number,
+  rules: readonly Rule[] = RULES,
 ): readonly [string, string] {
   const system = [
     'You write Vega-Lite specifications that answer questions about one table.',
@@ -107,6 +139,7 @@ export function buildSpecPrompt(
     `(${SPEC_AGGREGATES.join(', ')}) whenever the question asks for a count, a total, or an average.`,
     'When the question restricts the data, add "transform": [{"filter": {"field": "...", "gte": 2}}]',
     'using one of equal, lt, lte, gt, gte, range, oneOf.',
+    ...rules.flatMap((rule) => RULE_TEXT[rule]),
     'Answer with the array and nothing else: no prose, no code fence, no explanation.',
   ].join('\n');
   const fields = Object.entries(types)
@@ -270,6 +303,8 @@ export interface ArmReport {
   readonly model: string;
   readonly k: number;
   readonly promptVersion: number;
+  /** Which instructions the prompt carried — an arm is a set of rules, so an artifact must name it. */
+  readonly rules: readonly Rule[];
   readonly questions: number;
   readonly asked: number;
   readonly replayed: number;
@@ -299,9 +334,14 @@ async function answerOne(
   provider: LlmProvider,
   row: SplitRow,
   types: FieldTypes,
-  options: { readonly k: number; readonly maxTokens: number; readonly cache?: ContentStore<StoredAnswer> },
+  options: {
+    readonly k: number;
+    readonly maxTokens: number;
+    readonly rules: readonly Rule[];
+    readonly cache?: ContentStore<StoredAnswer>;
+  },
 ): Promise<AnsweredRow> {
-  const [system, user] = buildSpecPrompt(row, types, options.k);
+  const [system, user] = buildSpecPrompt(row, types, options.k, options.rules);
   const key = cacheKey(identityOf(system, user, provider.model, options.maxTokens), PROMPT_VERSION);
   const cached = options.cache?.get(key, { model: provider.model });
   if (cached !== undefined) {
@@ -377,6 +417,8 @@ export interface ArmOptions {
   readonly k: number;
   readonly maxTokens: number;
   readonly concurrency: number;
+  /** Which instructions the prompt carries. Absent means every rule, which is the product path. */
+  readonly rules?: readonly Rule[];
   readonly cache?: ContentStore<StoredAnswer>;
   readonly limit?: number;
   /** How many answered rows to keep verbatim, so a reading that surprises can be looked at. */
@@ -392,6 +434,7 @@ export interface ArmOptions {
  */
 export async function runArm(options: ArmOptions): Promise<ArmReport> {
   const asked = options.limit === undefined ? options.rows : options.rows.slice(0, options.limit);
+  const rules = options.rules ?? RULES;
   // One entry per question, produced together with the answer it scores. Written this way so that no
   // lookup by index is needed: `mapLimit` preserves the order it was given, and a `answers[at] ?? []`
   // would be a branch no input can reach — one answer per question, by construction.
@@ -411,6 +454,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
       : await answerOne(options.provider, row, types, {
           k: options.k,
           maxTokens: options.maxTokens,
+          rules,
           ...(options.cache === undefined ? {} : { cache: options.cache }),
         });
     return {
@@ -436,6 +480,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     unparsed: answers.filter((answer) => answer.unparsed).length,
     truncated: answers.filter((answer) => answer.truncated).length,
     reading,
+    rules,
     diagnostic: diagnose(cases, options.k),
     facts: factsOf(asked),
     ...(options.samples === undefined
@@ -470,6 +515,22 @@ export function providerFromEnv(env: Readonly<Record<string, string | undefined>
 }
 
 /** How the arm is invoked, and what a bad invocation refuses to do. */
+/**
+ * The rules a `--rules` value names.
+ *
+ * Absent means all of them — the product path — and the empty string means none, which is the arm
+ * that reproduces the first dispatch byte for byte. Anything else has to be a rule this file knows,
+ * because a typo that silently turned a rule off would be reported as "the rule did not help".
+ */
+export function rulesOf(raw: string | undefined): readonly Rule[] {
+  if (raw === undefined) return RULES;
+  if (raw === '') return [];
+  const named = raw.split(',').map((entry) => entry.trim());
+  const unknown = named.filter((entry) => !(RULES as readonly string[]).includes(entry));
+  if (unknown.length > 0) throw new Error(`--rules ${raw} names ${unknown.join(', ')}, which is not a rule`);
+  return RULES.filter((rule) => named.includes(rule));
+}
+
 export function parseArgs(argv: readonly string[]): {
   split: string;
   cache: string;
@@ -479,6 +540,7 @@ export function parseArgs(argv: readonly string[]): {
   concurrency: number;
   maxTokens: number;
   samples: number | undefined;
+  rules: readonly Rule[];
 } {
   const value = (flag: string): string | undefined => {
     const at = argv.indexOf(flag);
@@ -502,6 +564,7 @@ export function parseArgs(argv: readonly string[]): {
     concurrency: Number(value('--concurrency') ?? '6'),
     maxTokens: Number(value('--max-tokens') ?? '900'),
     samples: value('--samples') === undefined ? undefined : Number(value('--samples')),
+    rules: rulesOf(value('--rules')),
   };
 }
 
@@ -547,6 +610,7 @@ export async function main(
     k: args.k,
     maxTokens: args.maxTokens,
     concurrency: args.concurrency,
+    rules: args.rules,
     cache: store,
     ...(args.limit === undefined ? {} : { limit: args.limit }),
     ...(args.samples === undefined ? {} : { samples: args.samples }),
