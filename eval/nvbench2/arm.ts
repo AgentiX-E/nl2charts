@@ -369,6 +369,8 @@ export interface ArmOptions {
   readonly concurrency: number;
   readonly cache?: ContentStore<StoredAnswer>;
   readonly limit?: number;
+  /** How many answered rows to keep verbatim, so a reading that surprises can be looked at. */
+  readonly samples?: number;
 }
 
 /**
@@ -424,6 +426,16 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     truncated: answers.filter((answer) => answer.truncated).length,
     reading,
     facts: factsOf(asked),
+    ...(options.samples === undefined
+      ? {}
+      : {
+          samples: asked.slice(0, options.samples).map((row, at) => ({
+            csv: row.csv,
+            question: row.question,
+            predictions: answered[at]?.scored.predictions ?? [],
+            golds: row.golds,
+          })),
+        }),
     cost: {
       calls: answers.filter((answer) => answer.called).length,
       promptTokens,
@@ -452,6 +464,7 @@ export function parseArgs(argv: readonly string[]): {
   k: number;
   concurrency: number;
   maxTokens: number;
+  samples: number | undefined;
 } {
   const value = (flag: string): string | undefined => {
     const at = argv.indexOf(flag);
@@ -474,6 +487,7 @@ export function parseArgs(argv: readonly string[]): {
     k,
     concurrency: Number(value('--concurrency') ?? '6'),
     maxTokens: Number(value('--max-tokens') ?? '900'),
+    samples: value('--samples') === undefined ? undefined : Number(value('--samples')),
   };
 }
 
@@ -521,6 +535,7 @@ export async function main(
     concurrency: args.concurrency,
     cache: store,
     ...(args.limit === undefined ? {} : { limit: args.limit }),
+    ...(args.samples === undefined ? {} : { samples: args.samples }),
   });
   const payload = {
     ...report,

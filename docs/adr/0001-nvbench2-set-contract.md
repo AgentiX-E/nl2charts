@@ -1,6 +1,6 @@
 # ADR 0001 — The set-valued contract nvBench 2.0 requires, and what it would take to report an F1@k
 
-- **Status**: accepted, not implemented
+- **Status**: accepted; the comparison is implemented (see *Implementation note*), the arm is dispatched
 - **Date**: 2026-11-22
 - **Deciders**: Lambertyan
 - **Context document**: `docs/benchmarks.md`, the paragraph beginning "nvBench 2.0 is the only absent
@@ -123,6 +123,36 @@ The following are facts about the corpus, not choices, and none of them is known
 | Skip the benchmark because the leaderboard is trained | True of the leaderboard, false of the corpus: a prompting baseline exists and is comparable. Skipping would leave a method gap recorded as a permanent absence. |
 | Implement full Vega-Lite semantics and compile gold specs into SQL | The corpus's charts are not queries over our semantic layer; there is no database behind many of them. Compiling would measure a compiler we do not ship. |
 | Report top-1 accuracy and call it a proxy | A proxy that cannot be compared to any published number is not a reading. |
+
+## Implementation note (2026-11-24)
+
+Two of the four parts landed as written and one landed differently, and the difference is worth
+recording rather than editing away.
+
+**The comparison is the reference's, not a key space of our own.** This ADR proposed reducing a chart
+to a semantic key. `eval/nvbench2/judge.ts` instead ports `reference/{evaluation,utils}.py` — the
+function that produced the leaderboard — and `eval/nvbench2/check.ts` proves the port agrees with the
+reference on both splits, digest for digest and F1 for F1 (dev `cbebd751…`, test `313724c4…`). The
+reason is stated in this ADR's own alternatives table: a bespoke reduction reports a number in a
+different coordinate system, and the two would have to be reconciled by argument. A port cannot
+diverge silently, because the differential test fails when it does.
+
+What the key space would have bought is the enumerated losses — sort, palette, title, axis formatting.
+The reference's `normalize_chart_order` already drops those by construction (it rebuilds `mark`,
+`encoding` with `field/aggregate/bin/sort`, `transform`, and then everything else), so the losses are
+the reference's rather than ours, which is the stronger position for a leaderboard number.
+
+**The `k` candidates are asked for in one call.** This ADR left the choice open and named the trade:
+`k` calls multiply the bill, one call returning `k` charts is a different prompt with its own failure
+modes. `eval/nvbench2/arm.ts` asks once, and the artifact records truncation separately from
+unparseability so the failure mode the ADR feared is visible rather than inferred.
+
+**The three facts are computed, not assumed.** `eval/nvbench2/facts.ts` publishes the `|G|`
+histogram, the expressible share of the gold vocabulary, and the row-restricting share, and
+`facts.ceiling` travels with every reading. On dev the histogram is 2 → 311, 3 → 169, 4 → 158,
+5 → 112, so the metric's own cap is worth 84.96 F1@3 before any model is asked; the six marks the
+gold set uses (`bar`, `arc`, `rect`, `line`, `boxplot`, `point`) all map onto the eleven this
+repository draws; and 778 of 2,321 golds carry a `transform`.
 
 ## What this does not decide
 

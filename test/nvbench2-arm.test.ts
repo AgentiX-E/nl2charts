@@ -258,6 +258,18 @@ describe('the arm', () => {
     expect(report.cost.calls).toBe(1);
   });
 
+  it('keeps the first N answers verbatim when it is asked to, so a surprising reading can be read', async () => {
+    const report = await runArm({
+      split: 'dev', rows: [row(0), row(1)], types: { 'a.csv': TYPES },
+      provider: fake(JSON.stringify([GOLD])), k: 3, maxTokens: 900, concurrency: 1, samples: 1,
+    });
+    const samples = (report as unknown as { samples: { question: string; predictions: unknown[]; golds: unknown[] }[] }).samples;
+    expect(samples).toHaveLength(1);
+    expect(samples[0]?.predictions).toHaveLength(1);
+    expect(samples[0]?.golds).toHaveLength(1);
+    expect(samples[0]?.question).toContain('how much per name');
+  });
+
   it('asks only the first N rows when a limit is given', async () => {
     const report = await runArm({
       split: 'dev',
@@ -353,10 +365,10 @@ describe('the arm', () => {
 describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
-      split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, concurrency: 6, maxTokens: 900,
+      split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, concurrency: 6, maxTokens: 900, samples: undefined,
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200 });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined });
   });
 
   it('refuses a limit or a k that is not a positive whole number', () => {

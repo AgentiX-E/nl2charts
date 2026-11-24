@@ -50,6 +50,11 @@ on:
         required: true
         default: '0'
         type: string
+      samples:
+        description: 'Keep the first N answered rows verbatim in the artifact (0 keeps none)'
+        required: false
+        default: '0'
+        type: string
       concurrency:
         description: 'Calls in flight at once'
         required: true
@@ -143,6 +148,7 @@ jobs:
         run: |
           EXTRA=""
           if [ "$LIMIT" != "0" ]; then EXTRA="--limit $LIMIT"; fi
+          if [ "${{ inputs.samples }}" != "0" ]; then EXTRA="$EXTRA --samples ${{ inputs.samples }}"; fi
           pnpm bench:nvbench2:arm --split "$SPLIT" --k "$K" --concurrency "$CONCURRENCY" $EXTRA \
             --artifact eval/out/nvbench2-arm.json
 
