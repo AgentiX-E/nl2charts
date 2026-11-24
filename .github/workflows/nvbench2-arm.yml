@@ -1,0 +1,197 @@
+name: nvbench2-arm
+
+# nvBench 2.0, answered rather than only judged.
+#
+# `nvbench2-check.yml` establishes that the corpus is scorable and that the ported judge agrees with
+# the reference on both splits. This workflow is the first arm that *answers* it: one call per
+# question, `k` Vega-Lite fragments back, scored by that judge.
+#
+# **Dispatch-only.** 750 calls is a number that moves when the prompt or the model moves, and a
+# `push` trigger would spend it on every commit to `eval/nvbench2/**` in exchange for the same
+# number. The answers are content-addressed, so a second dispatch of an unchanged prompt costs
+# nothing and a prompt edit pays only for the rows whose request changed.
+#
+# **The comparable number is the corpus's prompting baseline, ≈58.96 F1@3**, not the 81.50 a
+# fine-tuned system reads (ADR 0001). This repository does not train, so the honest target is the
+# first one, and the reading is reported beside the corpus's own ceiling — the cap the gold-set sizes
+# impose before any model is asked (`facts.ceiling`).
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Model that answers (a chat tier is the baseline; a reasoning tier is the strong arm)'
+        required: true
+        default: 'deepseek-chat'
+        type: string
+      provider:
+        description: 'Vendor, which decides the host and the key together'
+        required: true
+        default: 'deepseek'
+        type: choice
+        options:
+          - 'deepseek'
+          - 'zhipu'
+      split:
+        description: 'Split to answer'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - 'dev'
+          - 'test'
+      k:
+        description: 'Charts asked for per question (3 and 5 are what the leaderboard reports)'
+        required: true
+        default: '3'
+        type: string
+      limit:
+        description: 'Ask only the first N questions (0 asks every question)'
+        required: true
+        default: '0'
+        type: string
+      concurrency:
+        description: 'Calls in flight at once'
+        required: true
+        default: '6'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nvbench2-arm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  arm:
+    name: what a model answers, judged by the ported judge
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LLM_API_KEY: ${{ inputs.provider == 'deepseek' && secrets.DEEPSEEK_API_KEY || secrets.ZHIPU_API_KEY }}
+      LLM_BASE_URL: ${{ inputs.provider == 'deepseek' && 'https://api.deepseek.com/v1' || 'https://open.bigmodel.cn/api/paas/v4' }}
+      NVBENCH2_MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # `metadata.py` is Python because the reference's type rule is pandas' dtype inference.
+      - name: Install the reference's dependency
+        run: python3 -m pip install --quiet pandas
+      - run: pnpm install --frozen-lockfile
+
+      # The corpus is immutable upstream; caching it keeps a reading from reporting a network as a
+      # score when the network is what failed.
+      - name: Cache the corpus
+        uses: actions/cache@v4
+        with:
+          path: |
+            eval/.cache/nvbench2/dev.json
+            eval/.cache/nvbench2/test.json
+            eval/.cache/nvbench2/database_csv
+          key: nvbench2-corpus-v1
+
+      - name: Fetch the corpus
+        run: node eval/nvbench2/fetch.mjs
+
+      # The type map the judge reverses axes by, rebuilt from the published tables.
+      - name: Rebuild the type map
+        run: pnpm bench:nvbench2:metadata
+
+      # The gate before the spend: every gold parses, every field is typed, and the map agrees with
+      # the corpus's own `column_examples` on all 8,952 field decisions.
+      - name: Check the corpus
+        run: pnpm bench:nvbench2:check
+
+      # The rest of the key, flattened into a slug. The lesson is `text2vis-llm.yml`'s: an input is
+      # free text and a cache key is not, so a value containing a comma is a key GitHub refuses.
+      - name: Name the instrument this run asks with
+        id: instrument
+        env:
+          MODEL: ${{ inputs.model }}
+          SPLIT: ${{ inputs.split }}
+          K: ${{ inputs.k }}
+        run: echo "slug=$(printf '%s-%s-%s' "$MODEL" "$SPLIT" "$K" | tr -c 'A-Za-z0-9._-' _)" >> "$GITHUB_OUTPUT"
+
+      # The answers, keyed by the request rather than by the calendar: model, split, k and the code
+      # that builds the prompt. A change to any of them is a new key and therefore a save; an
+      # unchanged request is an exact hit and needs no save.
+      - name: Keep the answers already paid for
+        id: answers
+        uses: actions/cache/restore@v4
+        with:
+          path: eval/.cache/nvbench2/answers
+          key: nvbench2-answers-${{ steps.instrument.outputs.slug }}-${{ hashFiles('eval/nvbench2/arm.ts', 'eval/nvbench2/facts.ts', 'eval/nvbench2/judge.ts') }}
+          restore-keys: |
+            nvbench2-answers-${{ steps.instrument.outputs.slug }}-
+
+      - name: Ask every question
+        env:
+          K: ${{ inputs.k }}
+          LIMIT: ${{ inputs.limit }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          SPLIT: ${{ inputs.split }}
+        run: |
+          EXTRA=""
+          if [ "$LIMIT" != "0" ]; then EXTRA="--limit $LIMIT"; fi
+          pnpm bench:nvbench2:arm --split "$SPLIT" --k "$K" --concurrency "$CONCURRENCY" $EXTRA \
+            --artifact eval/out/nvbench2-arm.json
+
+      # Before the gate, not after: a run that misses its floor has still bought its answers.
+      - name: Keep what this run paid for
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: eval/.cache/nvbench2/answers
+          key: ${{ steps.answers.outputs.cache-primary-key }}
+
+      - name: Upload the reading
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nvbench2-arm-${{ inputs.model }}-${{ inputs.split }}-k${{ inputs.k }}
+          path: eval/out/nvbench2-arm.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Publish the summary
+        if: always()
+        run: |
+          if [ -f eval/out/nvbench2-arm.json ]; then
+            node -e "
+              const payload = require('./eval/out/nvbench2-arm.json');
+              const pct = (value) => (value * 100).toFixed(2) + '%';
+              const at = (k) => payload.reading.f1[String(k)] === undefined ? '—' : pct(payload.reading.f1[String(k)]);
+              const lines = [
+                '### nvBench 2.0 · ' + payload.split + ' · ' + payload.model,
+                '',
+                '| reading | value |',
+                '| --- | --- |',
+                '| F1@1 | ' + at(1) + ' |',
+                '| F1@3 | ' + at(3) + ' |',
+                '| F1@5 | ' + at(5) + ' |',
+                '| ceiling (gold sets, no arm) | ' + pct(payload.facts.ceiling['3']) + ' |',
+                '| questions | ' + payload.asked + ' |',
+                '| unparsed replies | ' + payload.unparsed + ' |',
+                '| truncated replies | ' + payload.truncated + ' |',
+                '| calls | ' + payload.cost.calls + ' |',
+                '| tokens | ' + payload.cost.promptTokens + ' in / ' + payload.cost.completionTokens + ' out |',
+                '| cost | ' + (payload.cost.yuan === undefined ? 'unpriced' : '¥' + payload.cost.yuan.toFixed(4)) + ' |',
+                '',
+                'The prompting baseline this arm is comparable with is ≈58.96 F1@3; a fine-tuned system',
+                'reads 81.50 and is not a target for a repository that does not train (ADR 0001).'
+              ];
+              require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+            "
+          else
+            echo 'no reading was written, so there is nothing to summarise' >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -610,17 +610,29 @@
       "functions": 100,
       "branches": 99.07
     },
+    "eval/nvbench2/arm.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/nvbench2/check.ts": {
       "lines": 99.14,
       "statements": 99.14,
       "functions": 100,
       "branches": 97.67
     },
+    "eval/nvbench2/facts.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 93.1
+    },
     "eval/nvbench2/judge.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 97.67
+      "branches": 97.72
     },
     "eval/preflight.ts": {
       "lines": 98.69,
