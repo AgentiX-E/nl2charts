@@ -241,10 +241,16 @@ export const BENCHMARKS: readonly Benchmark[] = [
     source: 'https://nvbench2.github.io/ (arXiv:2503.12880)',
     corpus: '7,878 queries and 24,076 visualizations over 780 tables in 153 domains',
     metrics: ['F1@3', 'F1@5'],
-    status: 'instrumented',
+    status: 'measured',
+    reading: {
+      file: 'eval/nvbench2/metrics.json',
+      path: ['arms', 'selected', 'published', 'f1@3'],
+      kind: 'run',
+      note: 'F1@3 over the 750-question dev split, the selected prompt arm on deepseek-chat; the '
+        + 'ceiling is 84.96 and the corpus\'s own prompting baseline 58.96',
+    },
     gap:
-      'Instrumented, not measured: the corpus, the judge and the type map are in place and are the '
-      + 'same objects the leaderboard used, and what is missing is a predictions file. `eval/nvbench2/'
+      'Measured, and the number is a prompt arm rather than a trained system. `eval/nvbench2/'
       + 'fetch.mjs` pulls the two splits and the 803-table archive from jsDelivr (22 MB, pinned by '
       + 'digest; the 27.5 MB train split answers 403 there and is not needed). `eval/nvbench2/'
       + 'metadata.py` rebuilds the `raw_data/nvbench_metadata.json` the reference imports at module '
@@ -259,9 +265,10 @@ export const BENCHMARKS: readonly Benchmark[] = [
       + '`eval/nvbench2/diff.py` is the evidence: the vendored reference and the port produce the same '
       + 'digest over all 1,501 preprocessed gold charts and the same F1@1/3/5 on both splits. The one '
       + 'number worth quoting before any model runs is **818 of 1,501 golds are transpose-equivalent** '
-      + '(381 dev, 437 test) — that is how much of the reading the type map decides. Dispatch is the '
-      + 'remaining step, and the leaderboard is trained-model territory (Step-NL2VIS 81.50 F1@3) against '
-      + 'a zero-shot ceiling of 58.96 (GPT-4o prompting), which is the tier to enter at.',
+      + '(381 dev, 437 test) — that is how much of the reading the type map decides. Nine arms price '
+      + 'the prompt in `metrics.json`; the wall the misses still hit is which column a sentence means '
+      + '(613 of 1,174 misses part on `field`), and the leaderboard is trained-model territory '
+      + '(Step-NL2VIS 81.50 F1@3) against a zero-shot ceiling of 58.96.',
   },
   {
     id: 'viscodebench',

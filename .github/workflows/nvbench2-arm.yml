@@ -58,12 +58,17 @@ on:
       rules:
         description: 'Comma-separated prompt rules: count, variants, values, corpus, corpus2 — or `none`, the first arm'
         required: false
-        default: 'count,corpus'
+        default: 'count,corpus,corpus2'
         type: string
       max_tokens:
         description: 'Answer budget per call; a reasoning tier needs more room than a chat tier'
         required: false
         default: '900'
+        type: string
+      timeout_ms:
+        description: 'Per-call deadline in milliseconds; one call past it aborts the whole run'
+        required: false
+        default: '60000'
         type: string
       concurrency:
         description: 'Calls in flight at once'
@@ -91,6 +96,7 @@ jobs:
       LLM_API_KEY: ${{ inputs.provider == 'deepseek' && secrets.DEEPSEEK_API_KEY || secrets.ZHIPU_API_KEY }}
       LLM_BASE_URL: ${{ inputs.provider == 'deepseek' && 'https://api.deepseek.com/v1' || 'https://open.bigmodel.cn/api/paas/v4' }}
       NVBENCH2_MODEL: ${{ inputs.model }}
+      NVBENCH2_TIMEOUT_MS: ${{ inputs.timeout_ms }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

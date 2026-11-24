@@ -22,6 +22,9 @@ const TREE = {
   'eval/baseline/bird.json': { floors: { minidev: { select: 56 }, dev: { 'select-mixed': 62.5 } } },
   'eval/baseline/bird-ves.json': { rves: 56.56, scored: 600, of: 1532 },
   'eval/text2vis/baseline.json': { top1: 664, render: { rendered: 1418 } },
+  // Held as the manifest reads it: a percent under `arms.selected.published`, because every row of
+  // this table is a percent and the arm's raw fraction stays in `arms.readings`.
+  'eval/nvbench2/metrics.json': { arms: { selected: { published: { 'f1@3': 22.39 } } } },
 };
 
 const row = (patch: Partial<Benchmark> = {}): Benchmark => ({
@@ -197,7 +200,7 @@ describe('the gate', () => {
     expect(exit).toBe(0);
     expect(lines.some((line) => line.includes('text2sql bird-dev: measured, EX = 62.5'))).toBe(true);
     expect(lines.some((line) => line.includes('text2viz text2vis: measured, top-1 = 664'))).toBe(true);
-    expect(lines.at(-1)).toContain('4 of 9 leaderboards carry a number');
+    expect(lines.at(-1)).toContain('5 of 9 leaderboards carry a number');
   });
 
   it('names the failing row and exits non-zero', async () => {
@@ -291,6 +294,6 @@ describe('the defaults the workflow relies on', () => {
     expect(lines).toEqual([]);
     const code = await entryCoverage(fileURLToPath(moduleUrl), moduleUrl, (line) => lines.push(line), []);
     expect(code).toBe(0);
-    expect(lines.at(-1)).toContain('4 of 9 leaderboards carry a number');
+    expect(lines.at(-1)).toContain('5 of 9 leaderboards carry a number');
   });
 });

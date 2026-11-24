@@ -133,6 +133,15 @@
     },
     "predictions": 769,
     "matched": 171,
+    "first": {
+     "mark": 75,
+     "channels": 185,
+     "field": 261,
+     "aggregate": 23,
+     "properties": 18,
+     "transform": 36,
+     "rest": 0
+    },
     "yuan": 0.7568
    },
    "variants": {
@@ -152,6 +161,15 @@
     },
     "predictions": 1313,
     "matched": 125,
+    "first": {
+     "mark": 171,
+     "channels": 295,
+     "field": 648,
+     "aggregate": 41,
+     "properties": 21,
+     "transform": 12,
+     "rest": 0
+    },
     "yuan": 1.0409
    },
    "count+variants": {
@@ -172,6 +190,15 @@
     },
     "predictions": 1121,
     "matched": 246,
+    "first": {
+     "mark": 158,
+     "channels": 274,
+     "field": 360,
+     "aggregate": 22,
+     "properties": 23,
+     "transform": 38,
+     "rest": 0
+    },
     "promptTokens": 278353,
     "yuan": 0.999842
    },
@@ -213,6 +240,15 @@
     },
     "predictions": 769,
     "matched": 164,
+    "first": {
+     "mark": 71,
+     "channels": 204,
+     "field": 266,
+     "aggregate": 18,
+     "properties": 16,
+     "transform": 30,
+     "rest": 0
+    },
     "promptTokens": 314255,
     "yuan": 0.9264
    },
@@ -234,6 +270,15 @@
     },
     "predictions": 827,
     "matched": 237,
+    "first": {
+     "mark": 76,
+     "channels": 174,
+     "field": 258,
+     "aggregate": 19,
+     "properties": 8,
+     "transform": 55,
+     "rest": 0
+    },
     "countFieldless": 38,
     "yuan": 1.0003
    },
@@ -256,19 +301,69 @@
     },
     "predictions": 980,
     "matched": 231,
+    "first": {
+     "mark": 104,
+     "channels": 211,
+     "field": 359,
+     "aggregate": 25,
+     "properties": 13,
+     "transform": 37,
+     "rest": 0
+    },
     "countFieldless": 96,
     "promptTokens": 393103,
     "yuan": 1.1417
+   },
+   "count+corpus+corpus2": {
+    "run": 45344467436,
+    "rules": [
+     "count",
+     "corpus",
+     "corpus2"
+    ],
+    "f1": {
+     "1": 0.1819,
+     "3": 0.2239,
+     "5": 0.2239
+    },
+    "hit": {
+     "1": 0.3587,
+     "3": 0.3907,
+     "5": 0.3907
+    },
+    "predictions": 1607,
+    "matched": 433,
+    "first": {
+     "mark": 124,
+     "channels": 335,
+     "field": 613,
+     "aggregate": 24,
+     "properties": 13,
+     "transform": 65,
+     "rest": 0
+    },
+    "countFieldless": 63,
+    "promptTokens": 561103,
+    "yuan": 1.70075
    }
   },
   "selected": {
    "rules": [
     "count",
-    "corpus"
+    "corpus",
+    "corpus2"
    ],
-   "f1@3": 0.1588,
-   "run": 45335953364,
-   "because": "highest F1@3 of the eight arms; the default in eval/nvbench2/arm.ts is this list"
+   "model": "deepseek-chat",
+   "split": "dev",
+   "run": 45344467436,
+   "published": {
+    "f1@3": 22.39,
+    "hit@3": 39.07,
+    "questions": 750,
+    "ceiling": 84.96,
+    "baseline": 58.96
+   },
+   "because": "highest F1@3 of the nine arms; the default in eval/nvbench2/arm.ts is this list. The figures in `published` are percent, which is the unit eval/benchmarks.ts resolves; every arm's raw fraction stays in `readings`."
   }
  }
 }

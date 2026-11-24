@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs,
-  providerFromEnv, runArm, rulesOf, splitDigest, summaryLine, PROMPT_VERSION, SPEC_MARKS,
+  providerFromEnv, runArm, rulesOf, splitDigest, summaryLine, timeoutMsOf, PROMPT_VERSION, SPEC_MARKS,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey } from '../eval/text2vis/content-store.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
@@ -448,12 +448,24 @@ describe('the arm', () => {
   });
 
   it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
-    expect(rulesOf(undefined)).toEqual(['count', 'corpus']);
+    expect(rulesOf(undefined)).toEqual(['count', 'corpus', 'corpus2']);
     expect(rulesOf('')).toEqual([]);
     expect(rulesOf('variants')).toEqual(['variants']);
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
     expect(rulesOf('corpus2,count')).toEqual(['count', 'corpus2']);
     expect(() => rulesOf('count,bogus')).toThrow(/bogus/);
+  });
+
+  it('reads a per-call deadline, because a reasoning tier outlives a chat tier\'s', () => {
+    // The run that proved this lost 249 paid answers to one 60-second deadline; the fix is a number
+    // the instrument declares, and a number that is not one is refused rather than defaulted.
+    expect(timeoutMsOf(undefined)).toBe(60_000);
+    expect(timeoutMsOf('')).toBe(60_000);
+    expect(timeoutMsOf('180000')).toBe(180_000);
+    expect(() => timeoutMsOf('0')).toThrow(/positive whole number/);
+    expect(() => timeoutMsOf('-1')).toThrow(/positive whole number/);
+    expect(() => timeoutMsOf('90s')).toThrow(/positive whole number/);
+    expect(() => timeoutMsOf('1.5')).toThrow(/positive whole number/);
   });
 
   it('sends the same system message for every row, so a prefix cache is a discount', async () => {
@@ -475,10 +487,10 @@ describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, concurrency: 6, maxTokens: 900, samples: undefined,
-      rules: ['count', 'corpus'],
+      rules: ['count', 'corpus', 'corpus2'],
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus'] });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2'] });
   });
 
   it('carries the sample count through the command line, and through the run it starts', () => {

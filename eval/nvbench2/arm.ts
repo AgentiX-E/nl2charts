@@ -104,12 +104,14 @@ export type Rule = (typeof RULES)[number];
 /**
  * The rules the product path sends, which is the arm the ablation measured best.
  *
- * `count` and `corpus` read 15.88 F1@3 on dev against 5.02 for no rules at all; `variants` (14.64 with
+ * `count`, `corpus` and `corpus2` read 22.39 F1@3 on dev against 5.02 for no rules at all: 15.88 with
+ * `count,corpus`, then +6.51 when the arm was asked for a set instead of a single chart — 1,607 charts
+ * over 750 questions rather than 827, and 433 of them gold rather than 237. `variants` (14.64 with
  * `count`), `values` (4.82 alone) and `count,variants,corpus` (14.44) were each measured and not
  * selected. `test/nvbench2-arm.test.ts` re-derives this from `metrics.json`, so an arm that beats this
  * one without the default following it fails CI rather than drifting quietly.
  */
-export const DEFAULT_RULES: readonly Rule[] = ['count', 'corpus'];
+export const DEFAULT_RULES: readonly Rule[] = ['count', 'corpus', 'corpus2'];
 
 /** What each rule adds to the instruction. Wrapped to keep the system message readable in a log. */
 const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
@@ -189,7 +191,7 @@ export function buildSpecPrompt(
   row: Pick<SplitRow, 'question'> & { readonly examples?: Readonly<Record<string, unknown>> },
   types: FieldTypes,
   k: number,
-  rules: readonly Rule[] = RULES,
+  rules: readonly Rule[] = DEFAULT_RULES,
 ): readonly [string, string] {
   const system = [
     'You write Vega-Lite specifications that answer questions about one table.',
@@ -486,7 +488,7 @@ export interface ArmOptions {
   readonly k: number;
   readonly maxTokens: number;
   readonly concurrency: number;
-  /** Which instructions the prompt carries. Absent means every rule, which is the product path. */
+  /** Which instructions the prompt carries. Absent means the product path, which is `DEFAULT_RULES`. */
   readonly rules?: readonly Rule[];
   readonly cache?: ContentStore<StoredAnswer>;
   readonly limit?: number;
@@ -503,7 +505,7 @@ export interface ArmOptions {
  */
 export async function runArm(options: ArmOptions): Promise<ArmReport> {
   const asked = options.limit === undefined ? options.rows : options.rows.slice(0, options.limit);
-  const rules = options.rules ?? RULES;
+  const rules = options.rules ?? DEFAULT_RULES;
   // One entry per question, produced together with the answer it scores. Written this way so that no
   // lookup by index is needed: `mapLimit` preserves the order it was given, and a `answers[at] ?? []`
   // would be a branch no input can reach — one answer per question, by construction.
@@ -573,6 +575,28 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
   };
 }
 
+/**
+ * The per-call deadline, from `NVBENCH2_TIMEOUT_MS`.
+ *
+ * Sixty seconds is the provider's default, and it was enough while the arm was answering with a chat
+ * tier: a reply of 800 completion tokens arrives in about two seconds. A reasoning tier spends 700 to
+ * 1,900 tokens thinking before it writes the array, and one call past the deadline threw out of
+ * `mapLimit` and took the whole run with it — 249 answers already paid for, and no reading, because a
+ * run that dies before the artifact is written reports nothing. The deadline is an environment
+ * variable rather than a constant for the reason the model is: it is a property of the instrument.
+ *
+ * Raising it is safe in the direction that matters. It bounds a hang, and a call that finishes early
+ * does so whatever the deadline was.
+ */
+export function timeoutMsOf(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 60_000;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`NVBENCH2_TIMEOUT_MS ${raw} is not a positive whole number of milliseconds`);
+  }
+  return value;
+}
+
 /** The provider the command line builds, or a sentence saying which variable is missing. */
 export function providerFromEnv(env: Readonly<Record<string, string | undefined>>): LlmProvider {
   const baseUrl = env['LLM_BASE_URL'];
@@ -580,16 +604,17 @@ export function providerFromEnv(env: Readonly<Record<string, string | undefined>
   const model = env['NVBENCH2_MODEL'] ?? 'deepseek-chat';
   if (baseUrl === undefined || baseUrl === '') throw new Error('LLM_BASE_URL is not set');
   if (apiKey === undefined || apiKey === '') throw new Error('LLM_API_KEY is not set');
-  return createHttpProvider({ baseUrl, apiKey, model });
+  return createHttpProvider({ baseUrl, apiKey, model, timeoutMs: timeoutMsOf(env['NVBENCH2_TIMEOUT_MS']) });
 }
 
 /** How the arm is invoked, and what a bad invocation refuses to do. */
 /**
  * The rules a `--rules` value names.
  *
- * Absent means all of them — the product path — and the empty string means none, which is the arm
- * that reproduces the first dispatch byte for byte. Anything else has to be a rule this file knows,
- * because a typo that silently turned a rule off would be reported as "the rule did not help".
+ * Absent means `DEFAULT_RULES` — the product path, which is the arm the ablation selected — and the
+ * empty string means none, which is the arm that reproduces the first dispatch byte for byte. Anything
+ * else has to be a rule this file knows, because a typo that silently turned a rule off would be
+ * reported as "the rule did not help".
  */
 export function rulesOf(raw: string | undefined): readonly Rule[] {
   if (raw === undefined) return DEFAULT_RULES;
