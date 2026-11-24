@@ -18030,8 +18030,40 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | BIRD dev | the same questions | R-VES | **partial** | 56.63 over 600 of 1,532 questions, floor 57.96 |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
-| nvBench 2.0 | 7,878 queries / 24,076 visualizations | F1@3, F1@5 | **instrumented** | — |
+| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **5.02** F1@3 (ceiling 84.96, baseline 58.96) |
 | VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
+
+### nvBench 2.0: the first arm, and why 5.02 is a claim about the prompt rather than about the model
+
+`nvbench2-arm` (`eval/nvbench2/arm.ts`, run `45317785657`) asked one model, once per question, for
+three Vega-Lite fragments and judged the reply with the ported reference:
+
+| reading | value | what it is read against |
+| --- | --- | --- |
+| F1@1 | 5.04 | ceiling@1 **52.32** — the same number the corpus reads against itself |
+| F1@3 | **5.02** | ceiling@3 **84.96**, prompting baseline **58.96**, trained Step-NL2VIS 81.50 |
+| hit@1 | 9.87 | 74 of 750 questions had a correct chart somewhere in the reply |
+| unparsed / truncated | 0 / 0 | the reply format is not what failed |
+| cost | ¥0.693 | 749 calls, 201,103 prompt / 36,352 completion tokens |
+
+The ceiling column is not decoration. `facts.ceiling` is `E[2·min(k,|G|)/(k+|G|)]` over the split's
+own gold-set sizes — 311 questions with two golds, 169 with three, 158 with four, 112 with five — and
+at k=1 it reproduces the reference's gold-against-gold reading to five decimals (0.523156). A perfect
+top-1 answer scores 52.32 on this metric, not 100, and any reading quoted without that number would
+be read as an accuracy.
+
+The eight-row sample the artifact keeps verbatim says what the loss is. Structure is not the problem:
+marks, aggregates and the row-restricting `transform` all came back as asked, and three of the eight
+matched a gold exactly. The miss is **which column is the axis**. On
+"The average author ID is calculated based on each paper ID" the reply is byte-identical to the first
+gold; on "The average author order … for authors with an order of 2 or higher" it is identical to the
+golds except that it charts the average by `authid` where the corpus accepts `paperid` or `instid`.
+
+That is the corpus's own shape showing through: its golds for one question vary the axis column and
+agree on everything else. A prompt that asks for three *different* charts of one question therefore
+spends its candidates on three marks where it could spend them on three axes. Prompt v2 does the
+latter, and the number to beat is 58.96 — with the same ¥0.7 a dispatch costs, so a plateau here is a
+prompt question and not a budget one.
 
 Four of nine carry a number over the denominator their leaderboard reports, and two of those four are
 counts rather than accuracies. A fifth — R-VES — carries a number over 600 of its leaderboard's 1,532
