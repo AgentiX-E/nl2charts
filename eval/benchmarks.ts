@@ -246,8 +246,9 @@ export const BENCHMARKS: readonly Benchmark[] = [
       file: 'eval/nvbench2/metrics.json',
       path: ['arms', 'selected', 'published', 'f1@3'],
       kind: 'run',
-      note: 'F1@3 over the 750-question dev split, the selected prompt arm on deepseek-chat; the '
-        + 'ceiling is 84.96 and the corpus\'s own prompting baseline 58.96',
+      note: 'F1@3 over the 750-question dev split, the selected prompt arm on deepseek-reasoner; '
+        + '22.39 is the same rules on a chat tier (published.chatF1@3), the ceiling is 84.96 and the '
+        + 'corpus\'s own prompting baseline 58.96',
     },
     gap:
       'Measured, and the number is a prompt arm rather than a trained system. `eval/nvbench2/'
@@ -267,8 +268,9 @@ export const BENCHMARKS: readonly Benchmark[] = [
       + 'number worth quoting before any model runs is **818 of 1,501 golds are transpose-equivalent** '
       + '(381 dev, 437 test) — that is how much of the reading the type map decides. Nine arms price '
       + 'the prompt in `metrics.json`; the wall the misses still hit is which column a sentence means '
-      + '(613 of 1,174 misses part on `field`), and the leaderboard is trained-model territory '
-      + '(Step-NL2VIS 81.50 F1@3) against a zero-shot ceiling of 58.96.',
+      + '(511 of 1,044 misses part on `field`), and the leaderboard is trained-model territory '
+      + '(Step-NL2VIS 81.50 F1@3) with a *prompted* Qwen3-235B-Step at 77.78 F1@5 — which is the '
+      + 'step-wise decomposition this arm does not yet do.',
   },
   {
     id: 'viscodebench',

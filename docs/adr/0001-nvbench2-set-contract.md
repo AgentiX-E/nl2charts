@@ -166,6 +166,20 @@ is worth 15.88 F1@3 with `count`, against 14.64 for our paraphrase and 14.44 for
 enumerations of one freedom compete for the same slots, so the paraphrase was removed from the default
 rather than kept "because it helped once".
 
+**What a set is, once it is measured.** The nine-arm table ended at 15.88 with the arm still answering
+1.10 charts per question against gold sets of 3.09, and the eight sampled replies said why: a question's
+golds are one chart per column it left free, and the arm spent its single chart on a column the question
+had already named — twice on the same column in one sample. The rule that states the construction
+(`corpus2`) reads 22.39. It carries a worked example, which this ADR's "no few-shot" clause needs to be
+read against: the example is an **invented four-column table**, not a question from the split, so it
+teaches the shape of an answer rather than the answers of the corpus. Lifted examples would be fit to
+the split; a constructed one teaches a construction.
+
+**What a system is.** The arms above are one model. Two prompts × two tiers on the same 250 questions
+read 15.31 / 24.56 for `count,corpus` and 23.53 / 32.63 for the shipped rules — the prompt is worth
+about +8 at either tier and the tier about +9 at either prompt. A reading without its model is
+therefore a reading of half a system, and every arm in `metrics.json` names the model it used.
+
 **What the comparison tolerates.** `compareAspects` in `eval/nvbench2/diagnose.ts` names the seven
 groups of keys the reference compares, and the one that surprised us is `properties`: dev's 6,044
 channel slots carry no `type`, so a reply written from the Vega-Lite documentation is unequal to a gold

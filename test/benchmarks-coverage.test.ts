@@ -24,7 +24,7 @@ const TREE = {
   'eval/text2vis/baseline.json': { top1: 664, render: { rendered: 1418 } },
   // Held as the manifest reads it: a percent under `arms.selected.published`, because every row of
   // this table is a percent and the arm's raw fraction stays in `arms.readings`.
-  'eval/nvbench2/metrics.json': { arms: { selected: { published: { 'f1@3': 22.39 } } } },
+  'eval/nvbench2/metrics.json': { arms: { selected: { published: { 'f1@3': 31.12 } } } },
 };
 
 const row = (patch: Partial<Benchmark> = {}): Benchmark => ({

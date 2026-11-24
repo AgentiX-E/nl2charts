@@ -18030,10 +18030,10 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | BIRD dev | the same questions | R-VES | **partial** | 56.63 over 600 of 1,532 questions, floor 57.96 |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
-| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **15.88** F1@3 (ceiling 84.96, baseline 58.96, 8 arms) |
+| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **31.12** F1@3 (reasoning tier), 22.39 on chat; ceiling 84.96, baseline 58.96, 9 arms |
 | VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
 
-### nvBench 2.0: eight arms, one prompt question, and where the 43 points still are
+### nvBench 2.0: nine arms, one prompt question, and where the 36 points still are
 
 `nvbench2-arm` (`eval/nvbench2/arm.ts`) asks one model, once per question, for `k` Vega-Lite
 fragments and judges the reply with the ported reference. The prompt is a bundle of rules, each
@@ -18049,6 +18049,7 @@ switchable, so a reading can say which one moved it rather than whether "the new
 | A5 | `count,variants` | 12.90 | 14.64 | 25.87 | 1,121 | 246 | ¥1.00 |
 | **A6** | **`count,corpus`** | **15.22** | **15.88** | **30.13** | 827 | 237 | ¥1.00 |
 | A7 | `count,variants,corpus` | 13.03 | 14.44 | 25.73 | 980 | 231 | ¥1.14 |
+| **A8** | **`count,corpus,corpus2`** | **18.19** | **22.39** | **35.87** | 1,607 | 433 | ¥1.70 |
 
 The comparable references, and they do not move: ceiling@3 **84.96** (the gold sets are 2–5 charts
 each, so this metric caps recall at `k/|G|`), the corpus's own prompting baseline **58.96**, and the
@@ -18077,10 +18078,30 @@ Three of these arms exist because the alternatives were plausible:
 What the misses are made of is now measured rather than inferred. `eval/nvbench2/diagnose.ts`
 decomposes every scored prediction against its nearest gold in the seven groups of keys the reference
 compares — `mark`, `channels`, `field`, `aggregate`, `properties`, `transform`, `rest` — and reports
-both which groups agreed and which parted first. For A0 that is `field` 416, `channels` 171, `mark` 82,
-`aggregate` 21, `properties` 12, `transform` 9; for A6 it is `field` 258, `channels` 174, `mark` 76,
-`transform` 55. Structure is not the wall for a model that has been told the constraint table; the
-wall is still which column a sentence means.
+both which groups agreed and which parted first. Every arm carries its decomposition in
+`metrics.json` now, because the decomposition is what chooses the next arm and one arm of it is a
+table nothing can be compared with:
+
+| arm | predictions | matched | `field` | `channels` | `mark` | `transform` | `aggregate` | `properties` | one convention away |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| A0 — | 783 | 72 | 416 | 171 | 82 | 9 | 21 | 12 | — |
+| A1 `count` | 769 | 171 | 261 | 185 | 75 | 36 | 23 | 18 | 61 |
+| A2 `variants` | 1,313 | 125 | 648 | 295 | 171 | 12 | 41 | 21 | 211 |
+| A4 `count,values` | 769 | 164 | 266 | 204 | 71 | 30 | 18 | 16 | 68 |
+| A5 `count,variants` | 1,121 | 246 | 360 | 274 | 158 | 38 | 22 | 23 | 88 |
+| A6 `count,corpus` | 827 | 237 | 258 | 174 | 76 | 55 | 19 | 8 | 38 |
+| A7 `count,variants,corpus` | 980 | 231 | 359 | 211 | 104 | 37 | 25 | 13 | 96 |
+| **A8 `count,corpus,corpus2`** | **1,607** | **433** | **613** | **335** | **124** | **65** | **24** | **13** | **63** |
+
+The last column is the probe, not a comparison: how many misses are equal to a gold once the `field`
+of a `count` channel is dropped on both sides. It is reported and never applied — the judge is the
+reference's, so the miss stands — and its job is to say what the next prompt should stop writing.
+
+Read down the `matched` column rather than across the breaks: the break counts grow with the number of
+charts, so an arm that answers more is charged for more misses. Structure is not the wall for a model
+that has been told the constraint table; the wall is still which column a sentence means, and A8's
+613 does not contradict that — 1,607 charts part on the column they got wrong, and 433 of them are
+the column the gold chose.
 
 Two facts about the corpus that a reader of the leaderboard should have, both computed here:
 
@@ -18091,20 +18112,123 @@ Two facts about the corpus that a reader of the leaderboard should have, both co
   the type map `metadata.py` rebuilds is load-bearing rather than decorative; the port that reverses
   axes without it would score a chart its author got right as wrong.
 
-The 43 points between A6 and the prompting baseline are a prompt-and-model question, not a budget one:
-one dispatch of the whole dev split is ¥1.00, so a prompt hypothesis can be tested for less than a
-coffee. The next hypothesis is written down and priced: the corpus's baseline prompt asks for **1 to 5**
-charts and its own examples are single-chart completions, while A6 asks for at most three — a k and a
-wording question that A2 and A7 both say matters.
+### A8: the arm was asked for one chart, and answered one
 
-Four of nine carry a number over the denominator their leaderboard reports, and two of those four are
-counts rather than accuracies. A fifth — R-VES — carries a number over 600 of its leaderboard's 1,532
+The 43 points between A6 and the prompting baseline were a prompt-and-model question, not a budget one,
+and the hypothesis was written down before it was paid for: the corpus's baseline prompt asks for
+**1 to 5** charts and its own examples are single-chart completions, while A6 asked for *at most three,
+most likely first* — which the model reads as one.
+
+The eight sampled replies from A6 said the rest. A6 answered 827 charts over 750 questions, 1.10 each,
+while the gold sets carry 3.09; and the golds of a question are not rival guesses but **one chart per
+column the question left free**. Three of the eight:
+
+| question | A6's chart | the gold set |
+| --- | --- | --- |
+| *the average author order, line chart, order ≥ 2* | `x=authid` | `x=paperid`, `x=instid`, `x=authid` |
+| *a heat map of the number of entries by institution ID* | `x=instid, y=authid` | `x=instid, y=authid` / `y=authorder` / `y=paperid` |
+| *the total author ID, bar chart, authors 60.85–61.73* | `x=authid, y=authid` | `y=authid, x=paperid` / `x=instid` / `x=authorder` |
+
+The first is right and scored zero for answering with one of three; the third puts one column on two
+channels, which a chart cannot do. `corpus2` states the construction — distinct columns, the measure on
+the aggregated channel, one chart per column still free — and shows it once on an invented table,
+because a model copies an example far more reliably than it follows a description, and because an
+example lifted from the split would be a few-shot prompt fitted to the corpus (ADR 0001).
+
+It reads **22.39 F1@3** against 15.88: 1,607 charts of which 433 are gold, against 827 of which 237
+were, for ¥1.70 instead of ¥1.00. Hit@3 rises 30.40 → 39.07. The arm is now `DEFAULT_RULES`, and the
+drift test that re-derives the default from `metrics.json` is what keeps that sentence true.
+
+Two things about the run that are about the harness rather than the prompt, both found by running it:
+
+- **A reasoning tier outlives the provider's 60-second default.** The first `deepseek-reasoner` run of
+  A8 threw out of `mapLimit` on one call and took the whole run with it: 249 answers already bought,
+  no artifact, no reading. The deadline is `NVBENCH2_TIMEOUT_MS` now — an instrument property like the
+  model name — and a value that is not a positive whole number is refused rather than defaulted.
+- **`--rules` with no value now means the product path**, not every rule. "Every rule" was an arm no
+  reading selected, and a caller who omitted the flag was sending a prompt nobody had measured.
+- **The provider's default is one attempt**, which is right for a run that costs a fraction of a yuan
+  and wrong for one that does not: a second reasoning run died two minutes in on `ECONNRESET` and took
+  750 questions with it. `NVBENCH2_RETRIES` is 3 now. The reset request produced no answer and so no
+  bill, which is why retrying is free — and why three attempts is a floor under a transport fault
+  rather than a cost. A failure that survives them is still raised, not recorded as an empty reply: a
+  reply that never arrived is not a wrong answer. The cache did its half already — `if: always()`
+  saved 33 of the dead run's answers, which the rerun replayed for free — so what was missing was not
+  paying twice, it was keeping the reading.
+
+### The tier, measured on the same rows
+
+A leaderboard compares systems, and a system is a prompt **and** a model. Every reading above is
+`deepseek-chat`, so "we are 36 points behind a prompting baseline" is a sentence that mixes two
+effects. The factorial below separates them: two prompts × two models, on the same 250 dev questions,
+under the same instruction and the same judge. The chat readings for those rows are replays of answers
+already paid for (`calls: 0`), so the only difference within a column is the model.
+
+| rules | `deepseek-chat` | `deepseek-reasoner` | what the tier is worth |
+| --- | ---: | ---: | ---: |
+| `count,corpus` | 15.31 (275 charts, 78 gold) | 24.56 (315, 127) | **+9.25** |
+| `count,corpus,corpus2` | 23.53 (550, 151) | **32.63** (548, 207) | **+9.10** |
+| **what the rule is worth** | **+8.22** | **+8.07** | |
+
+The two effects are additive and independent: the prompt is worth about +8 points at either tier and
+the tier about +9 at either prompt. That is the strongest form this repository can report the
+requirement in — a strong model that is better on *both* prompts, rather than a strong model that
+happens to be better on the one it was tuned against.
+
+It also says the prompt work is not a consolation prize for a cheap model. `corpus2` lifts the
+reasoning tier by the same 8 points it lifts the chat tier, and the reasoning tier's gains are not
+bought by answering fewer charts: it emits 548 charts over those 250 questions against the chat
+tier's 550, and hits 207 golds against 151.
+
+Two footnotes a reader of this table needs. The 250 rows are the first 250 of dev, not a random
+sample, and the full-split reading of the same rules is **31.12** on the reasoning tier and 22.39 on
+the chat tier — so the prefix was representative to within 1.5 points rather than kind. And the
+reasoning tier costs ¥4.58 for those 250 questions against ¥0.57 for the chat tier's share of the same
+rows, 8× the bill for 9 points; over the full split it is ¥13.80 against ¥1.70. That is the trade the
+product makes per call, and the reason the tier is a parameter rather than a default.
+
+### Where 22.39 sits, and what the 36 points are made of
+
+The corpus publishes the systems it compares, and until this round this file quoted two of them. The
+fuller table (arXiv:2503.12880v2, Table 3 and §4.2) changes what the next arm should be:
+
+| system | trained? | F1@3 | F1@5 | note |
+| --- | --- | ---: | ---: | --- |
+| Step-Text2Vis (the corpus's own) | yes — SFT + step-wise DPO | **81.50** | 80.88 | P@1 99.20; the leaderboard's SOTA |
+| Qwen3-235B-Step *(prompted)* | **no** | — | **77.78** | step-wise prompting alone |
+| Qwen2.5-7B-SFT | yes | — | 75.30 | recall bought with precision |
+| GPT-4o-Step *(prompted)* | **no** | **60.78** | 60.66 | the same prompt with step-wise reasoning |
+| GPT-4o *(prompted)* | no | 58.96 | 59.03 | the zero-shot baseline this file quotes |
+| Qwen2.5-7B-Step *(prompted)* | no | — | 64.08 | |
+| **this repository** | **no** | **22.39** | 22.39 | chat tier, 750 questions, ¥1.70 |
+| **this repository** | **no** | **31.12** | 31.12 | reasoning tier, 750 questions, ¥13.80 |
+
+Two things to read off it. First, the gap is not explained by training: a **prompted** Qwen3-235B with
+step-wise reasoning reads 77.78 F1@5, 18.8 points above the GPT-4o prompting baseline and 45 above our
+reasoning arm. Second, the technique that separates them is named in the corpus's title: **step-wise
+reasoning** — resolve the ambiguity one step at a time (which channel is ambiguous, which columns are
+its candidates, which filter the question names) and only then emit the set. Every `-Step` row beats its
+direct-prompting counterpart, on both model families, which is the strongest evidence in the table that
+the step decomposition is the lever rather than the model.
+
+That is the next arm (`steps`), and it is a prompt change rather than a fine-tune, which is the only
+kind of change a repository that does not train can make. The 22.39 above is a floor and it is stated
+as one: it is what the corpus's construction is worth *without* the step decomposition the leaders use.
+
+Five of nine carry a number over the denominator their leaderboard reports, and two of those five are
+counts rather than accuracies. A sixth — R-VES — carries a number over 600 of its leaderboard's 1,532
 questions, which is a real reading and not that row, so the table states the denominator rather than
-letting the reader assume one. Two more — WikiSQL and nvBench 2.0 — have a corpus, a judge and a split
-that reads clean, and no dispatch over them, which is a different absence from a corpus nobody can
-fetch: the first needs a run, the second needs a fetcher. The remaining two are not a scandal; they
-are a to-do list with prices, which is the only kind of to-do list this document has ever been able
-to act on.
+letting the reader assume one. A seventh — WikiSQL — has a corpus, a judge and a split that reads
+clean, and no dispatch over it, which is a different absence from a corpus nobody can fetch: the first
+needs a run, the second needs a fetcher. The remaining two are not a scandal; they are a to-do list
+with prices, which is the only kind of to-do list this document has ever been able to act on.
+
+That sentence used to be written with nvBench 2.0 in the "corpus but no dispatch" group, and it was
+wrong in a way worth keeping: `eval/benchmarks.ts` still called the row `instrumented` while this
+document had been quoting 15.88 for a round. A row that claims no reading is a row the gate cannot
+check, so the table in `eval/benchmarks.ts` and the table above disagreed and neither was failing.
+The row is `measured` now, cited at `arms.selected.published.f1@3`, and `pnpm bench:coverage` prints
+22.39 beside the other eight.
 
 Two things about the `number` column, both learned by watching it be misquoted. A printed line now
 carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 56.63 (600 of 1532)` —
