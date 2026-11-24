@@ -400,9 +400,11 @@
     "chatF1@3": 26.28,
     "model": "deepseek-reasoner with the shipped rules (32.23) and deepseek-chat with the same rules (26.28)",
     "f1@1": 24.44,
-    "reasonerWithoutSteps": 31.07
+    "reasonerWithoutSteps": 31.07,
+    "corpusPromptF1@3": 29.49,
+    "corpusPromptGap": "+2.74 [0.46, 4.91]"
    },
-   "because": "the shipped rules are the highest full-split arm in `readings` and the published figure is those rules on the reasoning tier over dev 750. `steps` is worth +3.90 [+1.99, +5.80] on the chat tier, where it is the difference between 22.39 and 26.28, and +1.11 at the reasoning tier, which is not separated at 750 rows because the tier already resolves the ambiguity in its own words; `published.reasonerWithoutSteps` is the same rules with `steps` dropped, and `published.chatF1@3` is the chat tier. Percent, the unit eval/benchmarks.ts resolves; every arm's raw fraction stays in `readings`."
+   "because": "the shipped rules are the highest full-split arm in `readings` and the published figure is those rules on the reasoning tier over dev 750. `steps` is worth +3.90 [+1.99, +5.80] on the chat tier, where it is the difference between 22.39 and 26.28, and +1.11 at the reasoning tier, which is not separated at 750 rows because the tier already resolves the ambiguity in its own words; `published.reasonerWithoutSteps` is the same rules with `steps` dropped, and `published.chatF1@3` is the chat tier. Percent, the unit eval/benchmarks.ts resolves; every arm's raw fraction stays in `readings`. The default is also the answer to the obvious objection — that our number is a prompt artefact — because the corpus's own published prompts were sent as they were published: the full basic prompt reads 29.49 and the six-step one 25.63, against 32.23 for the shipped rules, and both gaps are separated from zero (`replicas`). No replica beat the shipped arm, so `DEFAULT_REPLICA` stays unset."
   },
   "tiers": {
    "rows": 250,
@@ -631,5 +633,279 @@
    ],
    "because2": "the intervals are paired percentile bootstraps over questions, 2,000 resamples, seed 20261124, from `pnpm bench:nvbench2:compare`. A 250-row comparison resolves about ±2 points of F1@3, which is why the whole ask sweep is inside the noise and why the steps arm had to be re-measured on 750 rows before it was believed."
   }
+ },
+ "replicas": {
+  "question": "The corpus publishes the prompt that produced its own 58.96 F1@3. Sent byte for byte, on the model this repository measures with, how far behind does it read?",
+  "source": "code/prompt_experiment/{basic,step}_prompt.py in the corpus checkout, lifted with `ast` in eval/nvbench2/corpus-text.ts, with each string's length asserted in test/nvbench2-corpus-prompt.test.ts. An arm is `--replica <name>`; it replaces the instruction and the input rendering wholesale, so it is a different instrument from the rule arms in `arms.readings` and is kept out of that table.",
+  "model": "deepseek-reasoner",
+  "split": "dev",
+  "k": 3,
+  "promptVersion": 1,
+  "asked": 750,
+  "comparedWith": "arms.selected — `count,corpus,corpus2,steps` on deepseek-reasoner, run 45369172462, 32.23 F1@3",
+  "readings": {
+   "basic": {
+    "run": 45388169748,
+    "model": "deepseek-reasoner",
+    "split": "dev",
+    "k": 3,
+    "instructionChars": 1691,
+    "f1": {
+     "1": 2.23,
+     "3": 3.27,
+     "5": 3.27
+    },
+    "hit": {
+     "1": 4.4,
+     "3": 6.4,
+     "5": 6.4
+    },
+    "precision": {
+     "3": 4.16,
+     "5": 4.16
+    },
+    "recall": {
+     "3": 3.06,
+     "5": 3.06
+    },
+    "predictions": 1681,
+    "matched": 69,
+    "truncated": 93,
+    "unparsed": 0,
+    "yuan": 13.02,
+    "calls": 748,
+    "cacheHits": 2,
+    "first": {
+     "mark": 343,
+     "channels": 253,
+     "field": 548,
+     "aggregate": 34,
+     "properties": 416,
+     "transform": 18,
+     "rest": 0
+    },
+    "vsShipped": {
+     "base": 32.23,
+     "arm": 3.27,
+     "delta": -28.96,
+     "low": -31.54,
+     "high": -26.42,
+     "separated": true,
+     "questions": 750,
+     "resamples": 2000,
+     "verdict": "separated from zero"
+    }
+   },
+   "basicFull": {
+    "run": 45395483157,
+    "model": "deepseek-reasoner",
+    "split": "dev",
+    "k": 3,
+    "instructionChars": 4921,
+    "f1": {
+     "1": 23.12,
+     "3": 29.49,
+     "5": 29.49
+    },
+    "hit": {
+     "1": 45.2,
+     "3": 51.73,
+     "5": 51.73
+    },
+    "precision": {
+     "3": 42.71,
+     "5": 42.71
+    },
+    "recall": {
+     "3": 25.78,
+     "5": 25.78
+    },
+    "predictions": 1344,
+    "matched": 545,
+    "truncated": 47,
+    "unparsed": 0,
+    "yuan": 14.58,
+    "calls": 748,
+    "cacheHits": 2,
+    "first": {
+     "mark": 202,
+     "channels": 155,
+     "field": 310,
+     "aggregate": 24,
+     "properties": 35,
+     "transform": 73,
+     "rest": 0
+    },
+    "vsShipped": {
+     "base": 32.23,
+     "arm": 29.49,
+     "delta": -2.74,
+     "low": -4.91,
+     "high": -0.46,
+     "separated": true,
+     "questions": 750,
+     "resamples": 2000,
+     "verdict": "separated from zero"
+    }
+   },
+   "steps": {
+    "run": 45400181617,
+    "model": "deepseek-reasoner",
+    "split": "dev",
+    "k": 3,
+    "instructionChars": 6577,
+    "f1": {
+     "1": 17.51,
+     "3": 25.13,
+     "5": 25.13
+    },
+    "hit": {
+     "1": 33.73,
+     "3": 42.27,
+     "5": 42.27
+    },
+    "precision": {
+     "3": 30.31,
+     "5": 30.31
+    },
+    "recall": {
+     "3": 24.01,
+     "5": 24.01
+    },
+    "predictions": 1465,
+    "matched": 513,
+    "truncated": 170,
+    "unparsed": 0,
+    "yuan": 27.2,
+    "calls": 78,
+    "cacheHits": 672,
+    "first": {
+     "mark": 162,
+     "channels": 158,
+     "field": 427,
+     "aggregate": 25,
+     "properties": 80,
+     "transform": 100,
+     "rest": 0
+    },
+    "extraKeys": {
+     "type": 62,
+     "bin": 4,
+     "sort": 5
+    },
+    "vsShipped": {
+     "base": 32.23,
+     "arm": 25.13,
+     "delta": -7.1,
+     "low": -9.61,
+     "high": -4.44,
+     "separated": true,
+     "questions": 750,
+     "resamples": 2000,
+     "verdict": "separated from zero"
+    }
+   },
+   "stepsFull": {
+    "run": 45409391876,
+    "model": "deepseek-reasoner",
+    "split": "dev",
+    "k": 3,
+    "instructionChars": 13833,
+    "f1": {
+     "1": 19.42,
+     "3": 25.63,
+     "5": 25.63
+    },
+    "hit": {
+     "1": 38.13,
+     "3": 43.6,
+     "5": 43.6
+    },
+    "precision": {
+     "3": 36.38,
+     "5": 36.38
+    },
+    "recall": {
+     "3": 22.15,
+     "5": 22.15
+    },
+    "predictions": 1122,
+    "matched": 479,
+    "truncated": 181,
+    "unparsed": 0,
+    "yuan": 50.29,
+    "calls": 0,
+    "cacheHits": 750,
+    "first": {
+     "mark": 150,
+     "channels": 122,
+     "field": 236,
+     "aggregate": 15,
+     "properties": 37,
+     "transform": 83,
+     "rest": 0
+    },
+    "extraKeys": {
+     "sort": 8,
+     "type": 7,
+     "timeUnit": 10
+    },
+    "vsShipped": {
+     "base": 32.23,
+     "arm": 25.63,
+     "delta": -6.59,
+     "low": -9.13,
+     "high": -4.06,
+     "separated": true,
+     "questions": 750,
+     "resamples": 2000,
+     "verdict": "separated from zero"
+    }
+   }
+  },
+  "pairs": {
+   "basicFull over basic": {
+    "base": 3.27,
+    "arm": 29.49,
+    "delta": 26.22,
+    "low": 23.95,
+    "high": 28.58,
+    "separated": true,
+    "questions": 750,
+    "resamples": 2000,
+    "verdict": "separated from zero"
+   },
+   "stepsFull over steps": {
+    "base": 25.13,
+    "arm": 25.63,
+    "delta": 0.51,
+    "low": -1.91,
+    "high": 3.03,
+    "separated": false,
+    "questions": 750,
+    "resamples": 2000,
+    "verdict": "inside the noise"
+   },
+   "stepsFull over basicFull": {
+    "base": 29.49,
+    "arm": 25.63,
+    "delta": -3.85,
+    "low": -6.19,
+    "high": -1.62,
+    "separated": true,
+    "questions": 750,
+    "resamples": 2000,
+    "verdict": "separated from zero"
+   }
+  },
+  "because": "Our own instruction reads above all four of the corpus's, on the same model, same split and same judge, and every one of the four gaps is separated from zero. The 29.5 points between the corpus's published 58.96 and its own basic prompt re-read here (29.49) are therefore a model-tier difference rather than a prompt difference, and the 2.74 that separates our prompt from theirs is the only part of the gap a prompt can be shown to explain. `basicFull over basic` is the single most informative pair: the bare basic prompt omits the encoding vocabulary (`field`/`aggregate`/`sort`/`bin`/`timeUnit`) that the full one lists, and that omission alone is 26.22 points, with `properties` failures falling from 416 to 35 on the same answers. `stepsFull over steps` is inside the noise: the corpus's second step contract, which ends at `step_6.answer` instead of `final_output`, changes nothing measurable, so a reader may keep either. `stepsFull over basicFull` is the scaffold's cost: adding the six steps to a prompt that already works subtracts 3.85, and 181 of 750 replies stop at the 3,000-token ceiling against 47 without the steps, so part of that deficit is the budget rather than the instruction.",
+  "retired": [
+   {
+    "replica": "stepsFull",
+    "run": 45400207758,
+    "reading": 0,
+    "why": "The first stepsFull dispatch read 0.00 F1@3 with 569 of 750 replies unparsed and ¥50.33 spent. The prompt was not at fault: `finalOutputOf` read the last fenced block for `final_output`, and this prompt ends with `step_6.answer`, so a correct answer parsed as no answer. The reading was withheld rather than published, the parser was given both contracts (`76648e10`, with three tests), and the arm was re-dispatched with 750 of 750 answers served from the cache and 0 API calls: `readings.stepsFull` is that re-read of the same paid bytes, 25.63."
+   }
+  ]
  }
 }

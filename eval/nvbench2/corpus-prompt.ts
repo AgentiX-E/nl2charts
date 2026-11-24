@@ -53,10 +53,14 @@ import type { SplitRow } from './check.js';
 /**
  * Which of the corpus's prompts a run sends.
  *
- * `basic` and `steps` are the two strings `prompt_experiment/*.py` actually concatenate. `stepsFull`
- * is the long form of the six steps, which that script defines but does not send, and which is the
- * only one of the three that states the channel-type table — the candidate explanation this
- * replication is built to test, one dispatch away from the pair it belongs to.
+ * `basic` and `steps` are the two strings `prompt_experiment/*.py` actually concatenate, and they are
+ * the two that matters for attribution: `basic` sends `simple_prompt` with its examples, which never
+ * says which keys an `encoding` may carry, while `basicFull` sends `prompt`, which does — 3.27 against
+ * 29.49 on the same model, so a replication that stopped at the shorter one would have recorded the
+ * corpus's instruction as a model failure. `stepsFull` is the long form of the six steps, which that
+ * script defines and does not send, and the only one of the four that states the channel-type table;
+ * it reads 25.63, which is +0.51 over `steps` and inside the noise, so the second step contract is a
+ * choice rather than an improvement. All four are measured in `metrics.json` `replicas`.
  */
 export const REPLICAS = ['basic', 'basicFull', 'steps', 'stepsFull'] as const;
 export type Replica = (typeof REPLICAS)[number];

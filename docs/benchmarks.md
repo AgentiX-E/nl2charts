@@ -18225,6 +18225,60 @@ same kind of prompt and 81.50 for the trained system. The remaining 29 points ar
 and a step-*trained* decoder buy, and the 18.8 points between GPT-4o and a prompted Qwen3-235B say the
 model is the larger half of it.
 
+### The four prompts, sent as they were published
+
+The 26 points between 32.23 and 58.96 have been read in this file as a capability gap for three
+rounds, and they could not be: three variables sat on that one number at once — two instructions, two
+models, and a ported judge. So the instruction was taken out of the equation. `--replica
+basic|basicFull|steps|stepsFull` sends the strings `HKUSTDial/nvBench-2.0` sends, extracted from its
+`prompt_experiment/*.py` with `ast` rather than retyped, pinned by character count in
+`test/nvbench2-corpus-prompt.test.ts`, and accompanied by the corpus's own **input contract** — `Data
+Schema` / `Value Example` / `Unique Value Num` / `NL Query`, printed the way its f-strings print them,
+because feeding their instruction to our column list would test a system neither of us ran.
+
+| instruction | whose | F1@1 | F1@3 | hit@3 | P@3 | R@3 | charts | truncated | cost |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| shipped rules (`count,corpus,corpus2,steps`) | ours | **24.44** | **32.23** | 53.60 | 42.40 | 28.99 | 1,518 | 12 | ¥19.72 |
+| full basic prompt (`prompt`) | corpus | 23.12 | 29.49 | 51.73 | 42.71 | 25.78 | 1,344 | 47 | ¥14.58 |
+| full six-step prompt (`step_example`) | corpus | 19.42 | 25.63 | 43.60 | 36.38 | 22.15 | 1,122 | 181 | ¥50.29 |
+| six-step prompt (`simple_step_example`) | corpus | 17.51 | 25.13 | 42.27 | 30.31 | 24.01 | 1,465 | 170 | ¥27.20 |
+| basic prompt (`simple_prompt`) | corpus | 2.23 | 3.27 | 6.40 | 4.16 | 3.06 | 1,681 | 93 | ¥13.02 |
+
+Same 750 dev questions, same model (deepseek-reasoner), same judge. Paired bootstrap intervals
+against the shipped prompt: full basic **−2.74** [−4.91, −0.46], full six-step **−6.59** [−9.13, −4.06],
+six-step **−7.10** [−9.61, −4.44], basic **−28.96** [−31.54, −26.42] — all four separated from zero, and
+all four *below* it. On one model, this repository's instruction is the best of the four, so the
+remaining gap to 58.96 is the model tier the corpus used (GPT-4o) rather than the prompt. That is a
+narrower claim than "we are competitive", and it is the one the numbers support.
+
+The two step prompts are the exception to reading down that table: they are one scaffold in two
+lengths, and the long one is **+0.51** [−1.91, +3.03] over the short one — inside the noise. The
+scaffold itself, though, costs: the full six-step prompt is **−3.85** [−6.19, −1.62] against the full
+basic prompt, and 181 of its 750 replies stop at the 3,000-token ceiling against 47, so part of that
+deficit is the budget rather than the instruction. A reader who wants the corpus's own best published
+variant should know which of the two it is asking about: the short one is what its `__main__` sends,
+the long one is what it defines and does not send.
+
+**One reading in this table was thrown away before it was published.** The first full six-step
+dispatch read **0.00** F1@3 with 569 of 750 replies unparsed, and ¥50.33 spent. The prompt was not at
+fault: the reader took the last fenced block for `final_output`, this prompt ends at `step_6.answer`,
+and a correct answer parsed as no answer. The reply contract is a property of the prompt, so
+`parseModeOf` is derived from the replica rather than passed beside it — and now so is the *ending*:
+`finalOutputOf` reads either contract (`76648e10`, three tests). The arm was re-dispatched against the
+answers already paid for: **750 of 750 cache hits, 0 API calls, ¥0**, and the 25.63 above is that
+re-read of the same bytes. A score of zero is a claim about a model, and it deserves the same
+suspicion as a score of sixty.
+
+**The 26 points inside the corpus's own file are the interesting part.** `basic_prompt.py` holds two
+instructions: `simple_prompt`, which its `__main__` concatenates, and `prompt`, which adds one clause —
+`encoding` carries **only** `field`, `aggregate`, `sort`, `bin` and `timeUnit`. Sent on its own, the
+short one reads 3.27. The replies say why: a reasoning tier writes Vega-Lite's `"type"` into every
+channel, the golds never carry that key, and the reference's deep comparison is key-exact, so every
+chart is a different chart. `diagnostic.extraKeys` now counts that directly — 416 misses on an extra
+key for the short prompt, 35 for the full one — and stripping `type` from the same twenty replies
+moves matching from 2/55 to 12/55. The clause is worth **+26.22** [23.95, 28.58] on identical input.
+A replication that had stopped at the file's own call would have recorded that as a model failure.
+
 ### What a difference has to survive
 
 `steps` was written, dispatched, and then **not believed** — which turned out to be the useful part.

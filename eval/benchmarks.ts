@@ -246,10 +246,12 @@ export const BENCHMARKS: readonly Benchmark[] = [
       file: 'eval/nvbench2/metrics.json',
       path: ['arms', 'selected', 'published', 'f1@3'],
       kind: 'run',
-      note: 'F1@3 over the 750-question dev split, `count,corpus,corpus2,steps` on deepseek-chat, '
-        + '¥2.59 for the split; the same rules on the reasoning tier read 31.12 without `steps` '
-        + 'because the decomposition is inside the noise there (+0.70, 95% [-1.49, 2.92]) for 1.47x the '
-        + 'bill. Ceiling 84.96, the corpus\'s own prompting baseline 58.96',
+      note: 'F1@3 over the 750-question dev split on deepseek-reasoner with `count,corpus,corpus2,steps`: '
+        + '32.23, against 26.28 for the chat tier with the same rules. The corpus supplied the control '
+        + 'rather than a comparison: its own prompts, sent byte for byte on the same model, read 29.49 '
+        + '(full basic, -2.74, 95% [-4.91, -0.46]) and 25.63 (six steps), so the 29.5 points between its '
+        + 'published 58.96 and its own prompt re-read here belong to the model tier and not to the '
+        + 'prompt. Ceiling 84.96',
     },
     gap:
       'Measured, and the number is a prompt arm rather than a trained system. `eval/nvbench2/'
@@ -271,10 +273,14 @@ export const BENCHMARKS: readonly Benchmark[] = [
       + 'the prompt in `metrics.json`, and every claim of a gain between them now carries a paired '
       + 'bootstrap interval: the ask sweep is inside the noise, `steps` clears it (+3.90, 95% '
       + '[1.99, 5.80] over 750 questions) and is worth nothing measurable on the reasoning tier, where '
-      + 'the decomposition is already happening. The wall the misses still hit is which column a '
-      + 'sentence means (794 of 1,534 misses part on `field`), and what separates this arm from the '
-      + 'leaderboard is now model strength and a step-trained decoder rather than the prompt: a '
-      + '*prompted* Qwen3-235B-Step reads 77.78 F1@5 and Step-NL2VIS 81.50 F1@3 with SFT.',
+      + 'the decomposition is already happening. Four more arms send the corpus\'s own prompts instead '
+      + '(`metrics.json` `replicas`), which is what turns "our prompt may be the problem" into a '
+      + 'measurement: none of the four reads above the shipped arm, and the corpus\'s full basic prompt '
+      + 'reads 29.49, so the part of the gap a prompt explains is small and known. The wall the misses '
+      + 'still hit is which column a sentence means (794 of 1,534 misses part on `field`), and what '
+      + 'separates this arm from the leaderboard is now model strength and a step-trained decoder rather '
+      + 'than the prompt: a *prompted* Qwen3-235B-Step reads 77.78 F1@5 and Step-NL2VIS 81.50 F1@3 with '
+      + 'SFT.',
   },
   {
     id: 'viscodebench',

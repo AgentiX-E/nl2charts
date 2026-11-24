@@ -10,6 +10,7 @@ import {
   summaryLine, timeoutMsOf, PROMPT_VERSION, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
+import { REPLICAS } from '../eval/nvbench2/corpus-prompt.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
 import type { SplitRow } from '../eval/nvbench2/check.js';
 import type { FieldTypes } from '../eval/nvbench2/judge.js';
@@ -581,6 +582,31 @@ describe('the arm', () => {
     };
     expect(fixture.arms.selected.replica ?? null).toBe(DEFAULT_REPLICA ?? null);
     expect(productPrompt(row(0), TYPES, 3)).toEqual(buildSpecPrompt(row(0), TYPES, 3, DEFAULT_RULES));
+  });
+
+  it('ships a corpus prompt only if a corpus prompt beat the shipped one, and says so in metrics', () => {
+    // The same link as above, made checkable in the direction the experiment can go: a replica that
+    // reads *higher* than the shipped arm, with an interval that excludes zero, must be the one the
+    // product sends. Without this, the ablation can find that the corpus's prompt wins and the product
+    // keeps our own prompt forever, because nothing but prose connects the two.
+    const fixture = JSON.parse(readFileSync('eval/nvbench2/metrics.json', 'utf8')) as {
+      replicas: {
+        readings: Record<string, { vsShipped: { delta: number; low: number; high: number; separated: boolean; questions: number } }>;
+      };
+    };
+    const measured = Object.keys(fixture.replicas.readings);
+    // Every prompt the instrument can send is measured, so a fifth replica cannot be added to the
+    // module and left out of the table the product's default is read from.
+    expect([...measured].sort()).toEqual([...REPLICAS].sort());
+    const winners = measured.filter((name) => {
+      const { delta, separated } = fixture.replicas.readings[name]!.vsShipped;
+      return separated && delta > 0;
+    });
+    expect(winners).toEqual(DEFAULT_REPLICA === undefined ? [] : [DEFAULT_REPLICA]);
+    // A comparison that does not say how many questions it paired is not a comparison.
+    for (const name of measured) {
+      expect(fixture.replicas.readings[name]!.vsShipped.questions).toBe(750);
+    }
   });
 
   it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
