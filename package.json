@@ -125,7 +125,8 @@
     "bench:nvbench2:metadata": "python3 eval/nvbench2/metadata.py eval/.cache/nvbench2/database_csv --out eval/.cache/nvbench2/metadata.json",
     "bench:nvbench2:check": "tsx eval/nvbench2/check.ts",
     "bench:nvbench2:arm": "tsx eval/nvbench2/arm.ts",
-    "bench:nvbench2:diff": "python3 eval/nvbench2/diff.py --cache eval/.cache/nvbench2"
+    "bench:nvbench2:diff": "python3 eval/nvbench2/diff.py --cache eval/.cache/nvbench2",
+    "bench:nvbench2:compare": "tsx eval/nvbench2/compare.ts"
   },
   "devDependencies": {
     "@agentix-e/nl2charts-ai": "workspace:*",

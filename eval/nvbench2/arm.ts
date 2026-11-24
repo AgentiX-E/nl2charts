@@ -50,7 +50,7 @@ import { runIfEntry } from '../entry.js';
 import { parseSplit, resolveTypes, type SplitRow } from './check.js';
 import { diagnose, type Diagnostic } from './diagnose.js';
 import { factsOf, type GoldFacts } from './facts.js';
-import { readingOf, type Case, type Chart, type FieldTypes, type Reading } from './judge.js';
+import { perQuestionOf, readingOf, type Case, type Chart, type FieldTypes, type Reading } from './judge.js';
 
 /**
  * Bumped when the instruction, the mark list or the reply format changes meaning.
@@ -59,6 +59,9 @@ import { readingOf, type Case, type Chart, type FieldTypes, type Reading } from 
  * covers what a hash cannot see — a reply format whose *meaning* changed while its bytes did not.
  */
 export const PROMPT_VERSION = 1;
+
+/** The widths every reading is reported at, because the leaderboard reports these two. */
+const SCORED_KS = [1, 3, 5] as const;
 
 /** The marks the corpus uses, which is also the list the model is offered. */
 export const SPEC_MARKS = ['bar', 'line', 'point', 'rect', 'arc', 'boxplot'] as const;
@@ -431,6 +434,15 @@ export interface ArmReport {
   readonly truncated: number;
   readonly reading: Reading;
   /**
+   * The same reading, one question at a time.
+   *
+   * Travels with the artifact because means cannot be compared without it: the standard error of a
+   * difference between two arms is a function of how many questions they disagreed on, and
+   * `eval/nvbench2/compare.ts` needs the paired vector to say whether a gap survives the noise.
+   * Aligned with the counted questions, so index `i` is the same question in two arms over one split.
+   */
+  readonly perQuestion: ReturnType<typeof perQuestionOf>;
+  /**
    * Where the misses stop agreeing with their nearest gold.
    *
    * Travels with the reading because the reading alone cannot be acted on: "5% right" is compatible
@@ -595,7 +607,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
   });
   const answers = answered.map((entry) => entry.answer);
   const cases: Case[] = answered.map((entry) => entry.scored);
-  const reading = readingOf(cases, [1, 3, 5]);
+  const reading = readingOf(cases, SCORED_KS);
   const promptTokens = answers.reduce((sum, answer) => sum + answer.promptTokens, 0);
   const completionTokens = answers.reduce((sum, answer) => sum + answer.completionTokens, 0);
   const bill = billOf(options.provider.model, { promptTokens, completionTokens });
@@ -612,6 +624,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     unparsed: answers.filter((answer) => answer.unparsed).length,
     truncated: answers.filter((answer) => answer.truncated).length,
     reading,
+    perQuestion: perQuestionOf(cases, SCORED_KS),
     rules,
     diagnostic: diagnose(cases, options.k),
     facts: factsOf(asked),

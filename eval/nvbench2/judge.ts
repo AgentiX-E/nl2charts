@@ -292,7 +292,54 @@ export function preprocess(charts: readonly unknown[], types: FieldTypes): (Char
  */
 export function readingOf(cases: readonly Case[], ks: readonly number[] = [1, 3, 5],
   matches: (left: unknown, right: unknown) => boolean = compareCharts): Reading {
-  const sums = ks.map(() => ({ hit: 0, recall: 0, precision: 0, f1: 0 }));
+  const per = perQuestionOf(cases, ks, matches);
+  // Summed from the per-question values in the order the questions were asked, which is the order
+  // the single-pass loop summed them in: the aggregate and its own decomposition are the same
+  // arithmetic, so a reading can never disagree with the vector a paired test compares.
+  const mean = (values: readonly number[]): number => {
+    if (values.length === 0) return 0;
+    let sum = 0;
+    for (const value of values) sum += value;
+    return sum / values.length;
+  };
+  return {
+    hit: Object.fromEntries(ks.map((k) => [k, mean(per.hit[String(k)] ?? [])])),
+    recall: Object.fromEntries(ks.map((k) => [k, mean(per.recall[String(k)] ?? [])])),
+    precision: Object.fromEntries(ks.map((k) => [k, mean(per.precision[String(k)] ?? [])])),
+    f1: Object.fromEntries(ks.map((k) => [k, mean(per.f1[String(k)] ?? [])])),
+    questions: per.questions,
+  };
+}
+
+/** One question's four numbers at one k. */
+export interface Score {
+  readonly hit: number;
+  readonly recall: number;
+  readonly precision: number;
+  readonly f1: number;
+}
+
+/**
+ * The same metrics, one question at a time.
+ *
+ * A reading is an average over questions, and an average cannot be compared with another average:
+ * the standard error of a difference between two arms is a function of how many questions they
+ * disagreed on, not of how far the two means are. So the arm ships the vector as well as the mean —
+ * 750 numbers cost nothing and are what makes a paired bootstrap possible (`eval/nvbench2/compare.ts`).
+ *
+ * The vector is aligned with the questions that were counted: a question whose gold list is empty is
+ * skipped in both, so two arms over the same split have vectors of the same length and index `i`
+ * means the same question in both.
+ */
+export function perQuestionOf(cases: readonly Case[], ks: readonly number[] = [1, 3, 5],
+  matches: (left: unknown, right: unknown) => boolean = compareCharts): {
+  readonly questions: number;
+  readonly hit: Readonly<Record<string, readonly number[]>>;
+  readonly recall: Readonly<Record<string, readonly number[]>>;
+  readonly precision: Readonly<Record<string, readonly number[]>>;
+  readonly f1: Readonly<Record<string, readonly number[]>>;
+} {
+  const vectors = ks.map(() => ({ hit: [] as number[], recall: [] as number[], precision: [] as number[], f1: [] as number[] }));
   let counted = 0;
   for (const item of cases) {
     const predictions = preprocess(item.predictions, item.types);
@@ -300,7 +347,7 @@ export function readingOf(cases: readonly Case[], ks: readonly number[] = [1, 3,
     if (golds.length === 0) continue;
     counted += 1;
     for (const [kIndex, k] of ks.entries()) {
-      const sum = sums[kIndex]!;
+      const vector = vectors[kIndex]!;
       const top = predictions.slice(0, k);
       const matchedGold = new Set<number>();
       const matchedPrediction = new Set<number>();
@@ -318,22 +365,20 @@ export function readingOf(cases: readonly Case[], ks: readonly number[] = [1, 3,
       }
       const recallAt = intersection / golds.length;
       const precisionAt = top.length > 0 ? intersection / top.length : 0;
-      sum.hit += intersection > 0 ? 1 : 0;
-      sum.recall += recallAt;
-      sum.precision += precisionAt;
-      sum.f1 += precisionAt + recallAt > 0 ? (2 * (precisionAt * recallAt)) / (precisionAt + recallAt) : 0;
+      vector.hit.push(intersection > 0 ? 1 : 0);
+      vector.recall.push(recallAt);
+      vector.precision.push(precisionAt);
+      vector.f1.push(precisionAt + recallAt > 0 ? (2 * (precisionAt * recallAt)) / (precisionAt + recallAt) : 0);
     }
   }
-  const column = (pick: (sum: { hit: number; recall: number; precision: number; f1: number }) => number):
-    Record<number, number> => Object.fromEntries(ks.map((k, index) => [
-    k, counted > 0 ? pick(sums[index]!) / counted : 0,
-  ]));
+  const byK = (pick: (vector: { hit: number[]; recall: number[]; precision: number[]; f1: number[] }) => number[]):
+    Record<string, number[]> => Object.fromEntries(ks.map((k, index) => [String(k), pick(vectors[index]!)]));
   return {
-    hit: column((sum) => sum.hit),
-    recall: column((sum) => sum.recall),
-    precision: column((sum) => sum.precision),
-    f1: column((sum) => sum.f1),
     questions: counted,
+    hit: byK((vector) => vector.hit),
+    recall: byK((vector) => vector.recall),
+    precision: byK((vector) => vector.precision),
+    f1: byK((vector) => vector.f1),
   };
 }
 
