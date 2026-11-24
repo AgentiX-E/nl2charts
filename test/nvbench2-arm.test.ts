@@ -134,6 +134,31 @@ describe('the reply', () => {
   it('treats a channel list as one channel object, not as a list of fields', () => {
     expect(chartOf({ mark: 'bar', encoding: { x: [{ field: 'name' }] } })).toBeUndefined();
   });
+
+  it('answers from after the ANSWER marker, because a steps block may carry brackets', () => {
+    // The steps preamble is prose the model writes in its own words, and a model that lists
+    // candidates writes `[region, product]`. Reading from the first bracket would then parse the
+    // steps block and score a reply that had a correct array three lines later as empty.
+    const steps = [
+      'STEPS:',
+      '1. ambiguity: the free axis',
+      '2. candidates: [region, product, month]',
+      '3. measure: mean price, bar, price >= 2',
+      'ANSWER:',
+      JSON.stringify([GOLD]),
+    ].join('\n');
+    expect(parseSpecs(steps, 3)).toEqual([GOLD]);
+    // The marker is a place to start reading, not a second answer: two markers mean the last one.
+    const twice = `ANSWER:\nnot json\nANSWER:\n${JSON.stringify([GOLD])}`;
+    expect(parseSpecs(twice, 3)).toEqual([GOLD]);
+    // And a reply whose steps are the only brackets is still empty, not a parse of the steps.
+    const noAnswer = 'STEPS:\n1. candidates: [region, product]\nANSWER:\nnone of them fit.';
+    expect(parseSpecs(noAnswer, 3)).toEqual([]);
+    // A marker with no array behind it is a mention, not a statement: a model that repeats the word
+    // after its answer must not turn a good reply into an empty one.
+    const mentioned = `ANSWER:\n${JSON.stringify([GOLD])}\nANSWER: the array above.`;
+    expect(parseSpecs(mentioned, 3)).toEqual([GOLD]);
+  });
 });
 
 describe('the stored answer', () => {
@@ -434,6 +459,29 @@ describe('the arm', () => {
     expect(buildSpecPrompt({ question: 'q' }, types, 3, ['values'])[1]).toContain('amount (quantitative)');
   });
 
+  it('asks for the ambiguity before the charts only when the steps rule is on', () => {
+    const [bare] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['count', 'corpus', 'corpus2']);
+    const [stepped] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['count', 'corpus', 'corpus2', 'steps']);
+    expect(bare).not.toContain('STEPS:');
+    expect(stepped).toContain('STEPS:');
+    // The contract is two parts, and the closing sentence has to say so: a prompt whose rules ask
+    // for a preamble and whose last line asks for "the array and nothing else" is two prompts.
+    expect(stepped.trimEnd().endsWith('Write both parts and nothing else: no prose outside them, no code fence, no explanation.')).toBe(true);
+    expect(stepped).not.toContain('Answer with the array and nothing else');
+    // The array is still the answer, so the format the parser reads has not moved.
+    expect(stepped).toContain('Return a JSON array of at most 3 charts');
+    // The steps are the model's own words, so they may not be the parse's input: the rule says so.
+    expect(stepped).toContain('with no brackets');
+    // Step two is the enumeration the corpus's gold sets are, which is the whole point of the arm.
+    expect(stepped).toContain('every column of the table that could carry it');
+    // The example answers in two parts, so the format the prompt teaches is the format the parser
+    // reads: an example that taught a shape the harness drops would be a prompt bug, not a model one.
+    const taught = parseSpecs(stepped.slice(stepped.indexOf('Worked example')), 3);
+    expect(taught).toHaveLength(3);
+    expect(taught.map((chart) => (chart['encoding'] as Record<string, { field?: string }>)['x']?.field))
+      .toEqual(['region', 'product', 'month']);
+  });
+
   it('ships the rules the ablation measured best, so the product path cannot drift from the experiment', () => {
     // The one link between an arm and the product that a test can hold: whatever `metrics.json` says
     // reads highest IS what a caller who names no rules gets. A better arm with no default change
@@ -453,6 +501,7 @@ describe('the arm', () => {
     expect(rulesOf('variants')).toEqual(['variants']);
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
     expect(rulesOf('corpus2,count')).toEqual(['count', 'corpus2']);
+    expect(rulesOf('steps')).toEqual(['steps']);
     expect(() => rulesOf('count,bogus')).toThrow(/bogus/);
   });
 

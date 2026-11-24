@@ -56,7 +56,7 @@ on:
         default: '0'
         type: string
       rules:
-        description: 'Comma-separated prompt rules: count, variants, values, corpus, corpus2 — or `none`, the first arm'
+        description: 'Comma-separated prompt rules: count, variants, values, corpus, corpus2, steps — or `none`'
         required: false
         default: 'count,corpus,corpus2'
         type: string

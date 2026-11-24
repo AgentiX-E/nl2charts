@@ -97,8 +97,15 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
  *   follows a description. The corpus's own baseline prompt opens with *recommend 1 to 5 different
  *   charts*, and the selected arm's 827 predictions over 750 questions is 1.10: the arm was asked
  *   for one chart and answered one.
+ * - `steps` — the construction is a *decision* before it is an answer, and the arm was going straight
+ *   to the answer. Every `-Step` variant on the corpus's own table beats its direct-prompting
+ *   counterpart (GPT-4o 58.96 → 60.78, Qwen2.5-7B 47.17 → 64.08 F1@5), which is the corpus's
+ *   evidence that the decomposition is the lever. Here the decision is cheap to name: which channel
+ *   the question leaves free, which columns could carry it, and which measure, mark and filter it
+ *   does name. Asked as a preamble, it makes the enumeration explicit instead of implicit, and step
+ *   two is exactly the set the golds are.
  */
-export const RULES = ['count', 'variants', 'values', 'corpus', 'corpus2'] as const;
+export const RULES = ['count', 'variants', 'values', 'corpus', 'corpus2', 'steps'] as const;
 export type Rule = (typeof RULES)[number];
 
 /**
@@ -144,6 +151,14 @@ const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
     'question names sits on the channel it names, and every column still free is a chart of its own on',
     'the remaining axis, most plausible first. No chart puts one column on two channels.',
   ],
+  steps: [
+    'Decide before you answer. Start a line "STEPS:" and then three numbered lines, each one short and',
+    'written in plain words with no brackets and no JSON: 1) the ambiguity, which is the channel the',
+    'question leaves free; 2) its candidates, every column of the table that could carry it, in the',
+    'order you would try them; 3) the measure, the mark and the filter the question does name. Then a',
+    'line "ANSWER:" and the array. The array holds one chart per candidate column of step 2, so the',
+    'two parts agree: a column you did not list in step 2 is not a chart.',
+  ],
 };
 
 /**
@@ -155,12 +170,27 @@ const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
  * table is invented rather than taken from the split — a borrowed example would be a few-shot prompt
  * fitted to the corpus, and ADR 0001 is what forbids that.
  */
-const SET_EXAMPLE: readonly string[] = [
+const SET_EXAMPLE_HEAD: readonly string[] = [
   'Worked example. Columns: product (category), region (category), month (temporal), price (quantitative).',
   'Question: show the average price per region in a bar chart.',
+];
+
+/** The same example answered in the two parts `steps` asks for, so the two rules cannot disagree. */
+const SET_EXAMPLE_STEPS: readonly string[] = [
+  'STEPS:',
+  '1. ambiguity: the x axis, because the question names the measure and only one of the columns.',
+  '2. candidates: region, product, month.',
+  '3. measure: mean of price; mark: bar; filter: none.',
+  'ANSWER:',
+];
+
+const SET_EXAMPLE_BODY: readonly string[] = [
   '[{"mark": "bar", "encoding": {"x": {"field": "region"}, "y": {"field": "price", "aggregate": "mean"}}},',
   ' {"mark": "bar", "encoding": {"x": {"field": "product"}, "y": {"field": "price", "aggregate": "mean"}}},',
   ' {"mark": "bar", "encoding": {"x": {"field": "month"}, "y": {"field": "price", "aggregate": "mean"}}}]',
+];
+
+const SET_EXAMPLE_TAIL: readonly string[] = [
   'The first chart is the one the question asked for; the other two put the same measure on the same',
   'channel and give the free axis each column the question did not name.',
 ];
@@ -204,8 +234,13 @@ export function buildSpecPrompt(
     'When the question restricts the data, add "transform": [{"filter": {"field": "...", "gte": 2}}]',
     'using one of equal, lt, lte, gt, gte, range, oneOf.',
     ...rules.flatMap((rule) => RULE_TEXT[rule]),
-    ...(rules.includes('corpus2') ? SET_EXAMPLE : []),
-    'Answer with the array and nothing else: no prose, no code fence, no explanation.',
+    ...(rules.includes('corpus2')
+      ? [...SET_EXAMPLE_HEAD, ...(rules.includes('steps') ? SET_EXAMPLE_STEPS : []),
+        ...SET_EXAMPLE_BODY, ...SET_EXAMPLE_TAIL]
+      : []),
+    ...(rules.includes('steps')
+      ? ['Write both parts and nothing else: no prose outside them, no code fence, no explanation.']
+      : ['Answer with the array and nothing else: no prose, no code fence, no explanation.']),
   ].join('\n');
   const samples = row.examples ?? {};
   const fields = Object.entries(types)
@@ -290,12 +325,21 @@ export function parseSpecs(text: string, k: number): Chart[] {
     .replace(/^```[a-z]*\s*/i, '')
     .replace(/```$/, '')
     .trim();
-  const start = cleaned.indexOf('[');
-  const end = cleaned.lastIndexOf(']');
+  // `steps` renames where the answer begins, and the marker is honoured whether or not the rule that
+  // asked for it was on: a reply is read for the answer it contains, and the marker is a statement
+  // about which part that is. It narrows the search — it does not add a second candidate, because the
+  // bracket pair after the last marker is still the only pair tried.
+  const marker = cleaned.lastIndexOf('ANSWER:');
+  const afterMarker = marker === -1 ? '' : cleaned.slice(marker + 'ANSWER:'.length);
+  // A marker with no array behind it is a mention rather than a statement — a model that repeats the
+  // word after its answer must not turn a good reply into an empty one — so the whole text is read.
+  const body = afterMarker.lastIndexOf(']') > afterMarker.indexOf('[') ? afterMarker : cleaned;
+  const start = body.indexOf('[');
+  const end = body.lastIndexOf(']');
   if (start === -1 || end < start) return [];
   let parsed: unknown;
   try {
-    parsed = JSON.parse(cleaned.slice(start, end + 1));
+    parsed = JSON.parse(body.slice(start, end + 1));
   } catch {
     return [];
   }
