@@ -106,7 +106,10 @@ describe('the interval', () => {
   });
 
   it('refuses a pairing it cannot make and a resample count it cannot honour', () => {
-    expect(() => compare([1, 2], [1, 2, 3], { k: 3 })).toThrow(/not the same corpus/);
+    // The message has to name the cause and the fix: unequal lengths here are almost always a failed
+    // row, and the arithmetic cannot be repaired — the short arm has to be dispatched again.
+    expect(() => compare([1, 2], [1, 2, 3], { k: 3 })).toThrow(/failed to answer some rows/);
+    expect(() => compare([1, 2], [1, 2, 3], { k: 3 })).toThrow(/re-dispatch the short arm/);
     expect(() => compare([], [], { k: 3 })).toThrow(/nothing to compare/);
     expect(() => compare([1], [1], { k: 3, resamples: 50 })).toThrow(/at least 100/);
     expect(() => compare([1], [1], { k: 3, resamples: 2.5 })).toThrow(/at least 100/);

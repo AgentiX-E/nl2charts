@@ -140,7 +140,14 @@ export function compare(base: readonly number[], arm: readonly number[], options
   readonly seed?: number;
 }): Comparison {
   if (base.length !== arm.length) {
-    throw new Error(`the vectors are ${String(base.length)} and ${String(arm.length)} questions, so they are not the same corpus`);
+    // Almost always a failed row: an arm that lost calls to a deadline scores the questions it did
+    // answer and counts the rest, so its vector is shorter and a paired difference would divide the
+    // two arms by different denominators. The fix is not arithmetic, it is the re-dispatch — the
+    // answers already bought are replayed from the store, and only the failures are paid for again.
+    throw new Error(`the vectors are ${String(base.length)} and ${String(arm.length)} questions: an arm `
+      + 'that failed to answer some rows scores the rest and counts the failures, so the two arms are '
+      + 'divided by different denominators and no question is paired — re-dispatch the short arm, where '
+      + 'the answers already bought are replayed and only the failed rows are paid for');
   }
   if (base.length === 0) throw new Error('the vectors are empty, so there is nothing to compare');
   const resamples = options.resamples ?? 2000;
