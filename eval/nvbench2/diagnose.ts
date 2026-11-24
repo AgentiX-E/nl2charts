@@ -45,6 +45,12 @@ export const ASPECTS = ['mark', 'channels', 'field', 'aggregate', 'properties', 
 /** One group of keys. */
 export type Aspect = (typeof ASPECTS)[number];
 
+/** The four repairable causes of a `field`-first miss, plus the one that is a missing answer. */
+export const FIELD_REPAIRS = ['elsewhere', 'misplaced', 'unused', 'offSchema', 'absent'] as const;
+
+/** One cause of a `field`-first miss. */
+export type FieldRepair = (typeof FIELD_REPAIRS)[number];
+
 /**
  * One prediction against one gold: which groups agree, and either "everything does" or the first
  * group that does not.
@@ -67,6 +73,24 @@ export interface Diagnostic {
   readonly agree: Readonly<Record<Aspect, number>>;
   /** Of the unmatched, the group each parted on first. */
   readonly first: Readonly<Record<Aspect, number>>;
+  /**
+   * Of the misses that part on `field`, what the closest repair is.
+   *
+   * `first.field` is the size of a face, not of a job: 465 of the shipped reasoning arm's 1,518
+   * scored predictions stop agreeing at the column, and four different causes hide behind that one
+   * count. A prediction whose column another gold of the same question puts on the same channel is
+   * a tie-break problem (`elsewhere`) — one more chart or a better ranking fixes it. A column the
+   * gold uses on a different channel is a `misplaced` assignment. A column the table has and no gold
+   * uses is `unused`, the semantic gap a prompt has not moved. A column the table does not have is
+   * `offSchema`, a hallucination rather than a choice. A channel the prediction leaves blank while
+   * the gold names one is `absent`.
+   *
+   * The distinction is the whole of the next decision: `elsewhere` and `misplaced` are repairable by
+   * the same machinery that already exists, `unused` is not repairable by a prompt at all (three
+   * prompt changes moved `first.field` from 794 to 800 while `channels` fell 482 to 414), and
+   * `offSchema` is a schema-linking bug with a cheap fix. Reported per miss and never applied.
+   */
+  readonly fieldRepair: Readonly<Record<FieldRepair, number>>;
   /**
    * How many misses are one convention away from a hit: equal to some gold once the `field` of a
    * `count` channel is dropped on both sides.
@@ -226,6 +250,57 @@ export function nearest(prediction: Chart, golds: readonly Chart[]): Chart {
 }
 
 /**
+ * The column one channel names, or `undefined` when the channel names none.
+ *
+ * A channel may be absent, may hold a non-object (which `normalizeOrder` leaves as `{}`), or may
+ * hold an object with no `field` — a count, or a half-written reply. All three mean "this channel
+ * names no column", and `first.field` compares them through the same string, so the repair counter
+ * has to see them the same way.
+ */
+function fieldAt(chart: Chart, channel: string): string | undefined {
+  const encoding = chart.encoding;
+  if (!isRecord(encoding)) return undefined;
+  const slot = encoding[channel];
+  if (!isRecord(slot)) return undefined;
+  const field = slot['field'];
+  return typeof field === 'string' ? field : undefined;
+}
+
+/**
+ * Why two charts that both name columns part on `field`, as the cheapest thing that would repair it.
+ *
+ * Returns `undefined` when they agree on every channel's column — the caller only asks after
+ * `compareAspects` has said `field` parted, so that answer is unreachable in a run and is still a
+ * value rather than a throw: a branch no input can reach is a branch a test cannot hold, and the
+ * alternative is asserting an invariant this function does not own.
+ *
+ * The order of the tests is the order of certainty. A blank channel is not a choice. A column the
+ * table does not have is not a choice either. After those two, a column that another gold of the
+ * same question uses on the same channel is the corpus's own multi-answer structure showing
+ * through, and a column some gold uses on another channel is an assignment error. Everything left
+ * is a column no gold uses, and that is the only bucket a prompt could ever be blamed for.
+ */
+export function fieldRepairOf(
+  candidate: Chart,
+  closest: Chart,
+  golds: readonly Chart[],
+  types: Readonly<Record<string, unknown>>,
+): FieldRepair | undefined {
+  const encoding = candidate.encoding;
+  if (!isRecord(encoding)) return undefined;
+  const parted = Object.keys(encoding)
+    .sort()
+    .find((channel) => fieldAt(candidate, channel) !== fieldAt(closest, channel));
+  if (parted === undefined) return undefined;
+  const field = fieldAt(candidate, parted);
+  if (field === undefined) return 'absent';
+  if (!Object.prototype.hasOwnProperty.call(types, field)) return 'offSchema';
+  if (golds.some((gold) => gold !== closest && fieldAt(gold, parted) === field)) return 'elsewhere';
+  if (golds.some((gold) => slotsOf(gold).some(([, slot]) => slot['field'] === field))) return 'misplaced';
+  return 'unused';
+}
+
+/**
  * Decompose a split's misses.
  *
  * `k` is passed rather than the whole prediction list because a reading is taken over the top `k`:
@@ -235,6 +310,7 @@ export function nearest(prediction: Chart, golds: readonly Chart[]): Chart {
 export function diagnose(cases: readonly Case[], k: number): Diagnostic {
   const agree = emptyCounts();
   const first = emptyCounts();
+  const fieldRepair = emptyRepairs();
   const extraKeys: Record<string, number> = {};
   let predictions = 0;
   let matched = 0;
@@ -254,6 +330,10 @@ export function diagnose(cases: readonly Case[], k: number): Diagnostic {
       }
       for (const aspect of ASPECTS) if (comparison.aspects[aspect]) agree[aspect] += 1;
       first[comparison.first] += 1;
+      if (comparison.first === 'field') {
+        const repair = fieldRepairOf(candidate, closest, golds, item.types);
+        if (repair !== undefined) fieldRepair[repair] += 1;
+      }
       if (comparison.first === 'properties') {
         for (const key of extraKeysOf(candidate, closest)) extraKeys[key] = (extraKeys[key] ?? 0) + 1;
       }
@@ -261,9 +341,13 @@ export function diagnose(cases: readonly Case[], k: number): Diagnostic {
       if (golds.some((gold) => canonical(withoutCountFields(gold)) === stripped)) countFieldless += 1;
     }
   }
-  return { predictions, matched, agree, first, countFieldless, extraKeys };
+  return { predictions, matched, agree, first, fieldRepair, countFieldless, extraKeys };
 }
 
 function emptyCounts(): Record<Aspect, number> {
   return Object.fromEntries(ASPECTS.map((aspect) => [aspect, 0])) as Record<Aspect, number>;
+}
+
+function emptyRepairs(): Record<FieldRepair, number> {
+  return Object.fromEntries(FIELD_REPAIRS.map((repair) => [repair, 0])) as Record<FieldRepair, number>;
 }

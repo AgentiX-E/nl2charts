@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ASPECTS, compareAspects, diagnose, nearest, withoutCountFields, type Aspect,
+  ASPECTS, FIELD_REPAIRS, compareAspects, diagnose, fieldRepairOf, nearest, withoutCountFields, type Aspect,
 } from '../eval/nvbench2/diagnose.js';
 import { canonical, normalizeOrder, type Case, type Chart, type FieldTypes } from '../eval/nvbench2/judge.js';
 
@@ -251,5 +251,102 @@ describe('the key a miss carries and the gold does not', () => {
     // The omission parts on `aggregate`, which is its own group and its own counter.
     expect(diagnostic.first.aggregate).toBe(1);
     expect(diagnostic.extraKeys).toEqual({});
+  });
+});
+
+describe('why a field parted, as a repair path', () => {
+  // The `first.field` counter says 465 of 1,518 scored predictions on the shipped reasoning arm stop
+  // agreeing with their nearest gold at the column. That number is the size of the face, not of the
+  // work: four different causes hide behind it, and only two of them are a prompt's to fix. So every
+  // field-first miss is counted by the *closest* repair rather than by the group alone.
+  const withX = (field: string): Chart => ({
+    mark: 'line',
+    encoding: { y: { field: 'authorder', aggregate: 'mean' }, x: { field } },
+  });
+
+  it('calls a column that another gold of the same question puts on the same channel `elsewhere`', () => {
+    // Two golds, one per free column. The prediction chose the second gold's column, so it is right
+    // for the question and wrong for the gold it was compared with — the corpus's own multi-answer
+    // structure showing through. `fieldRepairOf` is exercised directly here because `preprocess`
+    // reverses axes on two quantitative channels, which would move the columns into each other and
+    // hide the case this test is about.
+    const closest = normal({ mark: 'line', encoding: { x: { field: 'paperid' }, y: { field: 'authorder', aggregate: 'mean' } } });
+    const other = normal({ mark: 'line', encoding: { x: { field: 'name' }, y: { field: 'authorder', aggregate: 'mean' } } });
+    expect(fieldRepairOf(other, closest, [closest, other], TYPES)).toBe('elsewhere');
+  });
+
+  it('calls a column that a gold uses on another channel `misplaced`', () => {
+    const closest = normal({ mark: 'line', encoding: { x: { field: 'paperid' }, y: { field: 'name' } } });
+    const candidate = normal({ mark: 'line', encoding: { x: { field: 'name' }, y: { field: 'name' } } });
+    expect(fieldRepairOf(candidate, closest, [closest], TYPES)).toBe('misplaced');
+  });
+
+  it('calls a column the table has and no gold uses `unused`', () => {
+    const diagnostic = diagnose([{ predictions: [withX('name')], golds: [GOLD], types: TYPES }], 1);
+    expect(diagnostic.first.field).toBe(1);
+    expect(diagnostic.fieldRepair.unused).toBe(1);
+  });
+
+  it('calls a column the table does not have `offSchema` — a hallucination, not a choice', () => {
+    const diagnostic = diagnose([{ predictions: [withX('ghost')], golds: [GOLD], types: TYPES }], 1);
+    expect(diagnostic.first.field).toBe(1);
+    expect(diagnostic.fieldRepair.offSchema).toBe(1);
+  });
+
+  it('calls a channel that names no column `absent`, because the gold names one', () => {
+    const bare: Chart = { mark: 'line', encoding: { y: { field: 'authorder', aggregate: 'mean' }, x: {} } };
+    const diagnostic = diagnose([{ predictions: [bare], golds: [GOLD], types: TYPES }], 1);
+    expect(diagnostic.first.field).toBe(1);
+    expect(diagnostic.fieldRepair.absent).toBe(1);
+  });
+
+  it('reports nothing on a miss that parts before the field', () => {
+    const wrongMark: Chart = { ...GOLD, mark: 'bar' };
+    const diagnostic = diagnose([{ predictions: [wrongMark], golds: [GOLD], types: TYPES }], 1);
+    expect(diagnostic.first.mark).toBe(1);
+    expect(Object.values(diagnostic.fieldRepair).reduce((sum, n) => sum + n, 0)).toBe(0);
+  });
+
+  it('reports nothing on a hit, and every cause is zero on an empty split', () => {
+    const hit = diagnose([{ predictions: [GOLD], golds: [GOLD], types: TYPES }], 1);
+    expect(Object.values(hit.fieldRepair).reduce((sum, n) => sum + n, 0)).toBe(0);
+    const empty = diagnose([], 3);
+    expect(Object.keys(empty.fieldRepair)).toEqual([...FIELD_REPAIRS]);
+    expect(Object.values(empty.fieldRepair).every((n) => n === 0)).toBe(true);
+  });
+
+  it('sums the four causes to the field-first count over a split', () => {
+    const diagnostic = diagnose([
+      { predictions: [withX('name')], golds: [GOLD], types: TYPES },
+      { predictions: [withX('ghost')], golds: [GOLD], types: TYPES },
+      { predictions: [withX('paperid')], golds: [GOLD], types: TYPES },
+    ], 1);
+    expect(diagnostic.first.field).toBe(2);
+    expect(Object.values(diagnostic.fieldRepair).reduce((sum, n) => sum + n, 0)).toBe(2);
+  });
+
+  it('says nothing when the two charts agree on every field, which is what `first` already guarantees', () => {
+    const same = normal({ mark: 'bar', encoding: { x: { field: 'paperid' } } });
+    expect(fieldRepairOf(same, normal(GOLD), [normal(GOLD)], TYPES)).toBeUndefined();
+  });
+
+  it('treats a chart with no encoding, or a channel holding a bare string, as naming no column', () => {
+    const gold = normal({ mark: 'line', encoding: { x: { field: 'paperid' } } });
+    // No encoding at all: there is no channel to part on.
+    expect(fieldRepairOf(normal({ mark: 'line' }), gold, [gold], TYPES)).toBeUndefined();
+    // A channel the reply wrote as a bare string: the reference normalises it to `{}`, so it names
+    // no column, and the gold does.
+    const bare = normal({ mark: 'line', encoding: { x: 'paperid' as unknown as Record<string, unknown> } });
+    expect(fieldRepairOf(bare, gold, [gold], TYPES)).toBe('absent');
+    // A gold with no encoding is a gold that names no column; it must not throw while looking.
+    const empty: Chart = normal({ mark: 'line' });
+    expect(fieldRepairOf(bare, gold, [gold, empty], TYPES)).toBe('absent');
+    // `normalizeOrder` rewrites both of those shapes, so the guard has to be tested on the shapes
+    // that reach it before it: an encoding that is not an object, and a channel holding an array.
+    expect(fieldRepairOf({ mark: 'line', encoding: 'x' }, gold, [gold], TYPES)).toBeUndefined();
+    expect(fieldRepairOf({ mark: 'line', encoding: { x: ['paperid'] } }, gold, [gold], TYPES)).toBe('absent');
+    // A gold whose encoding is not an object is still a gold the counter has to look at.
+    const badGold = { mark: 'line', encoding: 'x' };
+    expect(fieldRepairOf(gold, badGold, [badGold], TYPES)).toBe('unused');
   });
 });
