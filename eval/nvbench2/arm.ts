@@ -89,8 +89,16 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
  *   list that carries three values per column is the corpus's own disambiguation, and it is part of
  *   the schema rather than of the gold: 310 of 750 questions have golds that differ only in one
  *   channel's field, over a median of 5 columns, so telling the columns apart is the whole game.
+ * - `corpus2` — where the misses stop agreeing. Over the 590 misses of the selected arm, 258 part on
+ *   `field` and 174 on the channel set, against 76 on the mark; the gold sets of a question are not
+ *   rival guesses but **one chart per remaining column**, which is why `variants` was the right idea
+ *   in the wrong words. The rule states the construction — distinct columns, one chart per column
+ *   left free — and shows it once, because a model copies an example far more reliably than it
+ *   follows a description. The corpus's own baseline prompt opens with *recommend 1 to 5 different
+ *   charts*, and the selected arm's 827 predictions over 750 questions is 1.10: the arm was asked
+ *   for one chart and answered one.
  */
-export const RULES = ['count', 'variants', 'values', 'corpus'] as const;
+export const RULES = ['count', 'variants', 'values', 'corpus', 'corpus2'] as const;
 export type Rule = (typeof RULES)[number];
 
 /**
@@ -127,7 +135,33 @@ const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
     'When a phrase in the question could name more than one column, each candidate column is a chart',
     'of its own: those are what the entries of the array are for.',
   ],
+  corpus2: [
+    'Return a set of charts rather than one: the question is ambiguous, and the array is the readings',
+    'it allows. Two charts of the set are different when a different column carries a channel. Build',
+    'the set the way the corpus does: the measure sits on the aggregated channel, each column the',
+    'question names sits on the channel it names, and every column still free is a chart of its own on',
+    'the remaining axis, most plausible first. No chart puts one column on two channels.',
+  ],
 };
+
+/**
+ * The construction, shown once rather than described.
+ *
+ * `corpus2` is the only rule that carries an example, and it carries one because of what the shape
+ * of the gold sets is: the set of a question is *every remaining column on the free axis*, which is
+ * a mechanical statement a single worked case makes unambiguous and a sentence makes arguable. The
+ * table is invented rather than taken from the split — a borrowed example would be a few-shot prompt
+ * fitted to the corpus, and ADR 0001 is what forbids that.
+ */
+const SET_EXAMPLE: readonly string[] = [
+  'Worked example. Columns: product (category), region (category), month (temporal), price (quantitative).',
+  'Question: show the average price per region in a bar chart.',
+  '[{"mark": "bar", "encoding": {"x": {"field": "region"}, "y": {"field": "price", "aggregate": "mean"}}},',
+  ' {"mark": "bar", "encoding": {"x": {"field": "product"}, "y": {"field": "price", "aggregate": "mean"}}},',
+  ' {"mark": "bar", "encoding": {"x": {"field": "month"}, "y": {"field": "price", "aggregate": "mean"}}}]',
+  'The first chart is the one the question asked for; the other two put the same measure on the same',
+  'channel and give the free axis each column the question did not name.',
+];
 
 /** The identity of one answer: what was said to which model, under which prompt. */
 function identityOf(system: string, user: string, model: string, maxTokens: number): CacheIdentity {
@@ -168,6 +202,7 @@ export function buildSpecPrompt(
     'When the question restricts the data, add "transform": [{"filter": {"field": "...", "gte": 2}}]',
     'using one of equal, lt, lte, gt, gte, range, oneOf.',
     ...rules.flatMap((rule) => RULE_TEXT[rule]),
+    ...(rules.includes('corpus2') ? SET_EXAMPLE : []),
     'Answer with the array and nothing else: no prose, no code fence, no explanation.',
   ].join('\n');
   const samples = row.examples ?? {};

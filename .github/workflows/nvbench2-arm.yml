@@ -56,9 +56,14 @@ on:
         default: '0'
         type: string
       rules:
-        description: 'Comma-separated prompt rules: count, variants, values — or `none`, the first arm'
+        description: 'Comma-separated prompt rules: count, variants, values, corpus, corpus2 — or `none`, the first arm'
         required: false
         default: 'count,corpus'
+        type: string
+      max_tokens:
+        description: 'Answer budget per call; a reasoning tier needs more room than a chat tier'
+        required: false
+        default: '900'
         type: string
       concurrency:
         description: 'Calls in flight at once'
@@ -69,8 +74,12 @@ on:
 permissions:
   contents: read
 
+# One group per arm rather than per ref: two arms of the same commit are independent readings, and
+# queueing them behind each other buys nothing while halving the rate a hypothesis can be tested at.
+# The same arm twice still queues, because two dispatches of one arm share the answer cache and the
+# second would race the first for its keys.
 concurrency:
-  group: nvbench2-arm-${{ github.ref }}
+  group: nvbench2-arm-${{ github.ref }}-${{ inputs.model }}-${{ inputs.split }}-k${{ inputs.k }}-${{ inputs.rules }}
   cancel-in-progress: false
 
 jobs:
@@ -158,11 +167,13 @@ jobs:
           LIMIT: ${{ inputs.limit }}
           CONCURRENCY: ${{ inputs.concurrency }}
           SPLIT: ${{ inputs.split }}
+          MAX_TOKENS: ${{ inputs.max_tokens }}
         run: |
           EXTRA=""
           if [ "$LIMIT" != "0" ]; then EXTRA="--limit $LIMIT"; fi
           if [ "${{ inputs.samples }}" != "0" ]; then EXTRA="$EXTRA --samples ${{ inputs.samples }}"; fi
           pnpm bench:nvbench2:arm --split "$SPLIT" --k "$K" --concurrency "$CONCURRENCY" $EXTRA \
+            --max-tokens "$MAX_TOKENS" \
             --rules "${{ steps.instrument.outputs.list }}" --artifact eval/out/nvbench2-arm.json
 
       # Before the gate, not after: a run that misses its floor has still bought its answers.
@@ -190,25 +201,40 @@ jobs:
               const payload = require('./eval/out/nvbench2-arm.json');
               const pct = (value) => (value * 100).toFixed(2) + '%';
               const at = (k) => payload.reading.f1[String(k)] === undefined ? '—' : pct(payload.reading.f1[String(k)]);
+              const d = payload.diagnostic;
+              const aspects = ['mark', 'channels', 'field', 'aggregate', 'properties', 'transform', 'rest'];
+              const perQuestion = (d.predictions / payload.asked).toFixed(2);
               const lines = [
                 '### nvBench 2.0 · ' + payload.split + ' · ' + payload.model,
                 '',
                 '| reading | value |',
                 '| --- | --- |',
+                '| rules | ' + (payload.rules.length === 0 ? 'none' : payload.rules.join(', ')) + ' |',
                 '| F1@1 | ' + at(1) + ' |',
                 '| F1@3 | ' + at(3) + ' |',
                 '| F1@5 | ' + at(5) + ' |',
                 '| ceiling (gold sets, no arm) | ' + pct(payload.facts.ceiling['3']) + ' |',
                 '| questions | ' + payload.asked + ' |',
+                '| charts per question | ' + perQuestion + ' |',
                 '| unparsed replies | ' + payload.unparsed + ' |',
                 '| truncated replies | ' + payload.truncated + ' |',
                 '| calls | ' + payload.cost.calls + ' |',
                 '| tokens | ' + payload.cost.promptTokens + ' in / ' + payload.cost.completionTokens + ' out |',
                 '| cost | ' + (payload.cost.yuan === undefined ? 'unpriced' : '¥' + payload.cost.yuan.toFixed(4)) + ' |',
                 '',
+                'Where the misses stop agreeing, over ' + d.predictions + ' predictions of which ' + d.matched + ' matched:',
+                '',
+                '| first break | misses |',
+                '| --- | --- |',
+              ].concat(aspects.map((a) => '| ' + a + ' | ' + d.first[a] + ' |')).concat([
+                '',
+                '| probe | misses one convention away |',
+                '| --- | --- |',
+                '| equal once a count names no field | ' + d.countFieldless + ' |',
+                '',
                 'The prompting baseline this arm is comparable with is ≈58.96 F1@3; a fine-tuned system',
                 'reads 81.50 and is not a target for a repository that does not train (ADR 0001).'
-              ];
+              ]);
               require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
             "
           else

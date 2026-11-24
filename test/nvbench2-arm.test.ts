@@ -394,6 +394,30 @@ describe('the arm', () => {
     expect(both.indexOf('A count names no column')).toBeLessThan(both.indexOf('a set of charts an analyst'));
   });
 
+  it('shows a worked set only to the arm that asks for one, and the example is a readable reply', () => {
+    const [bare] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['count', 'corpus']);
+    const [set] = buildSpecPrompt({ question: 'q' }, { a: 'quantitative' }, 3, ['count', 'corpus', 'corpus2']);
+    expect(bare).not.toContain('Worked example');
+    expect(set).toContain('Return a set of charts rather than one');
+    expect(set).toContain('Worked example');
+    // The closing instruction stays last with the example in front of it, or the example reads as
+    // the thing to answer with rather than as the shape of an answer.
+    expect(set.trimEnd().endsWith('no prose, no code fence, no explanation.')).toBe(true);
+    expect(set.indexOf('Worked example')).toBeLessThan(set.indexOf('Answer with the array'));
+    // The example is a reply this arm has to be able to read. If the parser would drop one of its
+    // three charts, the prompt is teaching a format the harness does not accept.
+    const charts = parseSpecs(set.slice(set.indexOf('Worked example')), 3);
+    expect(charts).toHaveLength(3);
+    const axes = charts.map((chart) => {
+      // The encoding of a chart `parseSpecs` returned is the object `chartOf` built, so this is a
+      // shape the parse guarantees rather than a guess about the reply.
+      const encoding = chart['encoding'] as Readonly<Record<string, { readonly field?: string }>>;
+      return encoding['x']?.field;
+    });
+    expect(axes).toEqual(['region', 'product', 'month']);
+    expect(charts.every((chart) => chart['mark'] === 'bar')).toBe(true);
+  });
+
   it('lists a column with its sample values only when the values rule is on', () => {
     const row = { question: 'q', examples: { amount: [1, 2, 3], name: ['a', 'b', 'c'] } };
     const types = { amount: 'quantitative', name: 'category' } as const;
@@ -428,6 +452,7 @@ describe('the arm', () => {
     expect(rulesOf('')).toEqual([]);
     expect(rulesOf('variants')).toEqual(['variants']);
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
+    expect(rulesOf('corpus2,count')).toEqual(['count', 'corpus2']);
     expect(() => rulesOf('count,bogus')).toThrow(/bogus/);
   });
 
