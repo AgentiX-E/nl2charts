@@ -126,6 +126,21 @@ export type Rule = (typeof RULES)[number];
  */
 export const DEFAULT_RULES: readonly Rule[] = ['count', 'corpus', 'corpus2', 'steps'];
 
+/**
+ * Which replica the product path sends, if the ablation found one better than our own prompt.
+ *
+ * `undefined` means this repository's instruction, and it is the shipped value until a replica
+ * separates from it on a full split. The point of the constant is that the *product* has a place to
+ * put the answer: a reading that says the corpus's prompt is better and a product that cannot send it
+ * is the split between experiment and delivery that this file exists to close. `test/nvbench2-arm.test.ts`
+ * reads `metrics.json` and refuses a default that disagrees with what the ablation selected, in either
+ * direction — a better replica nobody shipped fails, and a shipped replica nobody measured fails.
+ *
+ * Deliberately not a default argument of `buildSpecPrompt`: an arm that forgot to name its replica
+ * would then silently send one, and an ablation of our own rules would be measuring theirs.
+ */
+export const DEFAULT_REPLICA: Replica | undefined = undefined;
+
 /** What each rule adds to the instruction. Wrapped to keep the system message readable in a log. */
 const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
   count: [
@@ -274,6 +289,21 @@ export function buildSpecPrompt(
     .join(', ');
   const user = [`Table columns: ${fields}`, `Question: ${row.question}`].join('\n');
   return [system, user];
+}
+
+/**
+ * The prompt the product path sends: the shipped rules, and the shipped replica if one was selected.
+ *
+ * One function rather than a caller assembling the two constants, so that "what the product sends" is a
+ * single expression a test can compare with the measurement — and so that a change to either constant
+ * is a change to the product rather than a change to a constant beside it.
+ */
+export function productPrompt(
+  row: Pick<SplitRow, 'question'> & Partial<Pick<SplitRow, 'columns' | 'examples' | 'counts'>>,
+  types: FieldTypes,
+  k: number,
+): readonly [string, string] {
+  return buildSpecPrompt(row, types, k, DEFAULT_RULES, DEFAULT_REPLICA);
 }
 
 /** The same array without its repeats, in the order the model wrote them. */

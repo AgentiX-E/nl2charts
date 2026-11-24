@@ -46,6 +46,47 @@ export const CORPUS_BASIC_EXAMPLES = `# EXAMPLE Vega-Lite Chart: (mark can be ba
 - {"mark": "line", "encoding": {"x": {"field": "product", "sort": "-y"}, "y": {"aggregate": "count"}}, "transform": [{"filter": {"field": "date", "lte": {"year": 2000}}}]}
 `;
 
+/**
+ * `prompt` of `basic_prompt.py`: the same baseline with the channel and transform vocabulary spelled out.
+ *
+ * This is the string that says `encoding` carries *only* `field`, `aggregate`, `sort`, `bin` and
+ * `timeUnit` — the clause that stops a model from writing Vega-Lite's `"type"` into a channel. Its
+ * absence in `simple_prompt` is not a detail: a reasoning tier that writes `{"field": "authid",
+ * "type": "ordinal"}` produces a chart the reference's deep comparison calls a different chart, and
+ * the reading that follows is about the key, not about the chart.
+ */
+export const CORPUS_BASIC_FULL = `You are a good data visualization expert. Given an ambiguous/incomplete Natural Language Query and a Data Table, please recommend 1 to 5 different charts corresponding for the ambiguous/incomplete NL Query. Ensure the following constraints are respected:
+# Output format(JSON array): 
+#OUTPUT:[
+{vega chart 1},
+{vega chart 2},
+ ...]
+# Each Vega chart must only include the following three keys(mark, encoding, transform):
+## mark (chart type)
+- Possible chart type=(bar, line, arc, point, rect, boxplot). Note that 'arc' is identical to the pie chart, and 'rect' is identical to the heatmap chart.
+- If the NL Query mentions one exact chart type, select the single chart type.
+- Else if the NL Query does not mention the chart type, but indicate a data analysis task in (trend;distribution;correlation), infer the possible chart types by (task:chart)=(trend:[bar,line]; distribution:[bar,arc,line,boxplot]; correlation:[point,heatmap]).
+- Otherwise, when no hints for chart type are mentioned in the NL query, all chart types are possible.
+## encoding (with only \`field\`, \`aggregate\`, \`sort\`, \`bin\` and \`timeUnit\` within the channels in the encoding)
+- Note that, there are obligatory or optional channels, follow the defination (chart:channel)=(bar:[x*,y*,color]; line:[x*,y*,color]; arc:[color*,theta*]; point:[x*,y*,color,size]; rect:[x*,y*,color*]; boxplot:[x*,y*]), where the channels with * obligatory, the channels without * are optional.
+- In the encoding channels, you can use \`field\` to Refer the column name in the data table, e.g., {"x":{"field": "sales"}}.
+- In the encoding channels, you can use three kind of operations=(aggregat;bin;sort):
+-- \`aggregate\`: Includes three types: 'sum', 'mean', 'count'.
+--- e.g., {"field": "price","aggregate": "mean"} means compute the average price.
+--- e.g., {"field": "price","aggregate": "sum"} means compute the total price.
+--- For \`count\`, it is treated as a special computed column, which will occupy a Quantitative (Q) channel, and it must not include a \`field\`. e.g., {"x": {"field": "product"}, "y": {"aggregate": "count"}} means the y-axis will represent the count of rows for each product.
+-- \`sort\`: If sort is explicitly requested in the NL query, \`sort\` should be done within the encoding using channels like \`x\`, \`-x\`, \`y\`, \`-y\`, \`theta\`, or \`-theta\`. 
+--- e.g., {"x":{"field": "product", "sort": "y"}, "y":{"field":"price"}}. This means the x-axis (showing products) is sorted according to the y-values in ascending order, where y represents price.
+--- e.g., {"theta":{"field": "price"}, "color":{"field":"product", "sort": "-theta"}} menas the color (showing products) is sorted according to the theta-values in descending order.
+-- \`bin\`: Used for  Quantitative Columns indicating the binned size.
+--- e.g. {"field": "price", "bin": {"maxbins": 10}}, which means the price will be grouped to 10 bins. 
+--- Bin operation on Temporal Columns is called the timeUnit, e.g. {"field": "date", "timeUnit": "year"}, which means unit(bin) the date by year.
+- Note that there may be none, one, or more operations in the NL query.
+## transform
+- The \`transform\` field should only include \`filter\` if explicitly mentioned in the NL query. Otherwise, omit the \`transform\` in vega chart.
+- e.g., if the NL query specifies filters like "price > 10" and "product is either pen or paper", the transform will look like this: "transform": [{"filter":  {"field": "price", "gte": 10}}, {"filter":  {"field": "product", "oneof": [pen, paper]}}] 
+- Note that there may be none, one, or more filter in the NL query.`;
+
 /** `simple_prompt` of `step_prompt.py`: the six steps as that file's own call composes them. */
 export const CORPUS_STEP = `You are a good data visualization expert. Given an ambiguous/incomplete Natural Language Query, a Data Table, your task is to to generate 1 to 5 different visualization charts corresponding for the ambiguous/incomplete NL Query. Please think step by step.
 # Instructions:

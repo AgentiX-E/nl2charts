@@ -6,8 +6,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs,
-  providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest, summaryLine, timeoutMsOf,
-  PROMPT_VERSION, SPEC_MARKS, type StoredAnswer,
+  DEFAULT_REPLICA, productPrompt, providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest,
+  summaryLine, timeoutMsOf, PROMPT_VERSION, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
@@ -572,6 +572,17 @@ describe('the arm', () => {
     expect(DEFAULT_RULES).toContain('count');
   });
 
+  it('ships the replica the ablation selected, and nothing else', () => {
+    // The same link as the rules above, for the other half of the instrument: if a replica of the
+    // corpus's prompt beats our own on a full split, the product has to be able to send it, and the
+    // place it is recorded must be the place the product reads.
+    const fixture = JSON.parse(readFileSync('eval/nvbench2/metrics.json', 'utf8')) as {
+      arms: { selected: { replica?: string } };
+    };
+    expect(fixture.arms.selected.replica ?? null).toBe(DEFAULT_REPLICA ?? null);
+    expect(productPrompt(row(0), TYPES, 3)).toEqual(buildSpecPrompt(row(0), TYPES, 3, DEFAULT_RULES));
+  });
+
   it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
     expect(rulesOf(undefined)).toEqual(['count', 'corpus', 'corpus2', 'steps']);
     expect(rulesOf('')).toEqual([]);
@@ -635,7 +646,7 @@ describe('the command line', () => {
     expect(parseArgs(['--replica', 'none']).replica).toBeUndefined();
     expect(parseArgs(['--replica', '']).replica).toBeUndefined();
     expect(parseArgs([]).replica).toBeUndefined();
-    expect(() => parseArgs(['--replica', 'chat'])).toThrow(/is not one of basic, steps, stepsFull or none/);
+    expect(() => parseArgs(['--replica', 'chat'])).toThrow(/is not one of basic, basicFull, steps, stepsFull or none/);
     expect(replicaOf('steps')).toBe('steps');
     expect(replicaOf(undefined)).toBeUndefined();
   });

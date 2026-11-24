@@ -225,7 +225,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: nvbench2-arm-${{ inputs.model }}-${{ inputs.split }}-k${{ inputs.k }}
+          # The slug, not the model and the split: four arms of one model and one split differ only
+          # in their prompt, and an artifact named after the model cannot say which prompt it read.
+          name: ${{ steps.instrument.outputs.slug }}
           path: eval/out/nvbench2-arm.json
           if-no-files-found: warn
           retention-days: 90

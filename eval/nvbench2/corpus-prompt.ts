@@ -41,6 +41,7 @@
 import {
   CORPUS_BASIC,
   CORPUS_BASIC_EXAMPLES,
+  CORPUS_BASIC_FULL,
   CORPUS_STEP,
   CORPUS_STEP_EXAMPLE,
   CORPUS_STEP_FULL,
@@ -57,12 +58,13 @@ import type { SplitRow } from './check.js';
  * only one of the three that states the channel-type table — the candidate explanation this
  * replication is built to test, one dispatch away from the pair it belongs to.
  */
-export const REPLICAS = ['basic', 'steps', 'stepsFull'] as const;
+export const REPLICAS = ['basic', 'basicFull', 'steps', 'stepsFull'] as const;
 export type Replica = (typeof REPLICAS)[number];
 
 /** The instruction and worked example each replica sends, before the table is appended. */
 const INSTRUCTION: Readonly<Record<Replica, string>> = {
   basic: CORPUS_BASIC + CORPUS_BASIC_EXAMPLES,
+  basicFull: CORPUS_BASIC_FULL + CORPUS_BASIC_EXAMPLES,
   steps: CORPUS_STEP + CORPUS_STEP_EXAMPLE,
   stepsFull: CORPUS_STEP_FULL + CORPUS_STEP_FULL_EXAMPLE,
 };
@@ -75,7 +77,7 @@ const INSTRUCTION: Readonly<Record<Replica, string>> = {
  * a caller that pairs the wrong reader with a prompt would score a correct answer as unreadable.
  */
 export function parseModeOf(replica: Replica): 'array' | 'finalOutput' {
-  return replica === 'basic' ? 'array' : 'finalOutput';
+  return replica === 'basic' || replica === 'basicFull' ? 'array' : 'finalOutput';
 }
 
 const isRecordLike = (value: unknown): value is Record<string, unknown> =>

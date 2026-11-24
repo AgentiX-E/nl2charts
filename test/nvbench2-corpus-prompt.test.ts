@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CORPUS_BASIC,
   CORPUS_BASIC_EXAMPLES,
+  CORPUS_BASIC_FULL,
   CORPUS_STEP,
   CORPUS_STEP_EXAMPLE,
   CORPUS_STEP_FULL,
@@ -42,6 +43,7 @@ describe('the corpus text, pinned to its source', () => {
     expect(CORPUS_SYSTEM).toHaveLength(63);
     expect(CORPUS_BASIC).toHaveLength(330);
     expect(CORPUS_BASIC_EXAMPLES).toHaveLength(1361);
+    expect(CORPUS_BASIC_FULL).toHaveLength(3560);
     expect(CORPUS_STEP).toHaveLength(3195);
     expect(CORPUS_STEP_EXAMPLE).toHaveLength(3382);
     expect(CORPUS_STEP_FULL).toHaveLength(8936);
@@ -66,6 +68,14 @@ describe('the corpus text, pinned to its source', () => {
     expect(CORPUS_STEP).toContain('Output a chart list of all possible channel mappings');
   });
 
+  it('states the five channel properties in the long basic form, and not in the short one', () => {
+    // The clause that stops a reasoning tier from writing Vega-Lite's `"type"` into a channel, which
+    // the reference's deep comparison then reads as a different chart. Measured: the short form read
+    // 3.27 F1@3 on 750 dev questions, and 25% of its misses diverged first on an extra key.
+    expect(CORPUS_BASIC_FULL).toContain('with only `field`, `aggregate`, `sort`, `bin` and `timeUnit`');
+    expect(CORPUS_BASIC).not.toContain('timeUnit');
+  });
+
   it('keeps the channel-type table in the long form only, which is what separates the two', () => {
     // The published script sends the short form; the table lives in `prompt`, the string the file
     // defines and does not concatenate. Their difference is the experiment `stepsFull` runs.
@@ -80,9 +90,10 @@ describe('the corpus text, pinned to its source', () => {
     expect(CORPUS_STEP_EXAMPLE).toContain('```json');
   });
 
-  it('names the three prompts, and reads each reply by the contract it asked for', () => {
-    expect([...REPLICAS]).toEqual(['basic', 'steps', 'stepsFull']);
+  it('names the four prompts, and reads each reply by the contract it asked for', () => {
+    expect([...REPLICAS]).toEqual(['basic', 'basicFull', 'steps', 'stepsFull']);
     expect(parseModeOf('basic')).toBe('array');
+    expect(parseModeOf('basicFull')).toBe('array');
     expect(parseModeOf('steps')).toBe('finalOutput');
     expect(parseModeOf('stepsFull')).toBe('finalOutput');
   });
@@ -142,6 +153,12 @@ describe('the two prompts', () => {
     const [system, user] = corpusPromptOf('basic', ROW);
     expect(system).toBe(CORPUS_SYSTEM);
     expect(user).toBe(CORPUS_BASIC + CORPUS_BASIC_EXAMPLES + corpusInput(ROW));
+  });
+
+  it('sends the long basic instruction with the same worked charts and input', () => {
+    const [system, user] = corpusPromptOf('basicFull', ROW);
+    expect(system).toBe(CORPUS_SYSTEM);
+    expect(user).toBe(CORPUS_BASIC_FULL + CORPUS_BASIC_EXAMPLES + corpusInput(ROW));
   });
 
   it('sends the short step instruction and its worked answer for the step method', () => {
