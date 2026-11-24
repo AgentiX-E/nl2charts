@@ -89,12 +89,15 @@ on:
 permissions:
   contents: read
 
-# One group per arm rather than per ref: two arms of the same commit are independent readings, and
-# queueing them behind each other buys nothing while halving the rate a hypothesis can be tested at.
-# The same arm twice still queues, because two dispatches of one arm share the answer cache and the
-# second would race the first for its keys.
+# One group per instrument rather than per ref: two arms of one commit are independent readings, and
+# queueing them behind each other halves the rate a hypothesis can be tested at. Every input that makes
+# a different request is therefore in the key — including the ask, whose absence dropped two of four
+# arms dispatched together: GitHub keeps a single *pending* run per group and cancels the older pending
+# one, so the two that lost were the ones differing only in how many charts they asked for, and they
+# came back `cancelled` with no artifact and no reading. The same arm twice still queues, because two
+# dispatches of one arm share the answer cache and the second would race the first for its keys.
 concurrency:
-  group: nvbench2-arm-${{ github.ref }}-${{ inputs.model }}-${{ inputs.split }}-k${{ inputs.k }}-${{ inputs.rules }}
+  group: nvbench2-arm-${{ github.ref }}-${{ inputs.model }}-${{ inputs.split }}-k${{ inputs.k }}-a${{ inputs.ask }}-${{ inputs.rules }}
   cancel-in-progress: false
 
 jobs:

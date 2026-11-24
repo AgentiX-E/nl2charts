@@ -293,20 +293,26 @@ export function preprocess(charts: readonly unknown[], types: FieldTypes): (Char
 export function readingOf(cases: readonly Case[], ks: readonly number[] = [1, 3, 5],
   matches: (left: unknown, right: unknown) => boolean = compareCharts): Reading {
   const per = perQuestionOf(cases, ks, matches);
-  // Summed from the per-question values in the order the questions were asked, which is the order
-  // the single-pass loop summed them in: the aggregate and its own decomposition are the same
-  // arithmetic, so a reading can never disagree with the vector a paired test compares.
-  const mean = (values: readonly number[]): number => {
-    if (values.length === 0) return 0;
-    let sum = 0;
-    for (const value of values) sum += value;
-    return sum / values.length;
+  // Summed from the per-question values in the order the questions were asked, which is the order the
+  // single-pass loop summed them in: the aggregate and its own decomposition are the same arithmetic,
+  // so a reading can never disagree with the vector a paired test compares. The means are taken
+  // positionally because `perQuestionOf` emits exactly one vector per k, in the order asked for — a
+  // lookup by key with a fallback would be a branch no input can reach.
+  const means = (record: Readonly<Record<string, readonly number[]>>): number[] =>
+    Object.values(record).map((vector) => {
+      let sum = 0;
+      for (const value of vector) sum += value;
+      return vector.length === 0 ? 0 : sum / vector.length;
+    });
+  const byK = (record: Readonly<Record<string, readonly number[]>>): Record<number, number> => {
+    const values = means(record);
+    return Object.fromEntries(ks.map((k, index) => [k, values[index] as number]));
   };
   return {
-    hit: Object.fromEntries(ks.map((k) => [k, mean(per.hit[String(k)] ?? [])])),
-    recall: Object.fromEntries(ks.map((k) => [k, mean(per.recall[String(k)] ?? [])])),
-    precision: Object.fromEntries(ks.map((k) => [k, mean(per.precision[String(k)] ?? [])])),
-    f1: Object.fromEntries(ks.map((k) => [k, mean(per.f1[String(k)] ?? [])])),
+    hit: byK(per.hit),
+    recall: byK(per.recall),
+    precision: byK(per.precision),
+    f1: byK(per.f1),
     questions: per.questions,
   };
 }
