@@ -284,6 +284,46 @@ describe('the arm', () => {
     expect(report.cost.calls).toBe(1);
   });
 
+  it('asks for more charts than it scores, because a set cut to the scoring width loses recall', async () => {
+    // Measured: on 250 dev questions the same rules read 27.46 F1@3 when asked for 3 charts and 29.50
+    // when asked for 5 — the model forced to pre-filter to the evaluation width drops candidates the
+    // gold set contains. So the number of charts asked for is a property of the call and k is a
+    // property of the reading, and the two are separate flags.
+    const five = [GOLD, { mark: 'line', encoding: { x: { field: 'name' }, y: { field: 'amount' } } },
+      { mark: 'point', encoding: { x: { field: 'amount' }, y: { field: 'name' } } },
+      { mark: 'bar', encoding: { x: { field: 'amount' }, y: { field: 'amount' } } },
+      { mark: 'line', encoding: { x: { field: 'amount' }, y: { field: 'amount' } } }];
+    const provider = fake(JSON.stringify(five));
+    const report = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider,
+      k: 3, ask: 5, maxTokens: 1200, concurrency: 1, rules: ['count', 'corpus', 'corpus2'],
+    });
+    expect(report.ask).toBe(5);
+    expect(report.k).toBe(3);
+    // The prompt named the ask, not the scoring width, or the call would come back with three.
+    expect(provider.seen[0]).toContain('at most 5 charts');
+    // Five charts were kept and reported; the reading and the diagnostic are over the top three,
+    // which is what this question's gold set is scored against.
+    expect(report.produced).toBe(5);
+    expect(report.diagnostic.predictions).toBe(3);
+    // One gold, five charts: precision 1/3 and recall 1 at k=3, so F1 is 0.50; at k=5 the same hit
+    // over five slots is 0.33. Asking wider is not a free widening — it pays only when the extra
+    // charts are golds, which is a claim about the corpus (2 to 5 golds per question) and not about
+    // this fixture, and the two numbers are here so the trade is visible rather than assumed.
+    expect(report.reading.f1[3]).toBeCloseTo(0.5, 6);
+    expect(report.reading.f1[5]).toBeCloseTo(1 / 3, 6);
+  });
+
+  it('asks for exactly k when no ask is given, so one flag is still enough', async () => {
+    const provider = fake(JSON.stringify([GOLD]));
+    const report = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider,
+      k: 3, maxTokens: 1200, concurrency: 1, rules: ['count'],
+    });
+    expect(report.ask).toBe(3);
+    expect(provider.seen[0]).toContain('at most 3 charts');
+  });
+
   it('keeps the first N answers verbatim when it is asked to, so a surprising reading can be read', async () => {
     const report = await runArm({
       split: 'dev', rows: [row(0), row(1)], types: { 'a.csv': TYPES },
@@ -357,7 +397,7 @@ describe('the arm', () => {
 
   it('prints a reading at the precision a bill is read at, and says `unpriced` when the model has no row', async () => {
     const base = await runArm({ split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(JSON.stringify([GOLD])), k: 3, maxTokens: 900, concurrency: 1 });
-    expect(summaryLine(base)).toBe('nvbench2 arm: dev F1@3 1.0000 · 1 asked · 1 calls · unpriced');
+    expect(summaryLine(base)).toBe('nvbench2 arm: dev F1@3 1.0000 · 1 questions · ask 3 · 1 calls · unpriced');
     const priced = { ...base, model: 'deepseek-chat', cost: { ...base.cost, yuan: 0.00042 } };
     expect(summaryLine(priced)).toContain('deepseek-chat' === priced.model ? '' : '¥');
     expect(summaryLine({ ...priced, reading: { ...priced.reading, f1: { 1: 1 } } })).toContain('F1@3 —');
@@ -545,16 +585,26 @@ describe('the arm', () => {
 describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
-      split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, concurrency: 6, maxTokens: 900, samples: undefined,
+      split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, ask: 3, concurrency: 6, maxTokens: 900, samples: undefined,
       rules: ['count', 'corpus', 'corpus2'],
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2'] });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2'] });
   });
 
   it('carries the sample count through the command line, and through the run it starts', () => {
     expect(parseArgs(['--samples', '4']).samples).toBe(4);
     expect(parseArgs(['--samples', '4']).limit).toBeUndefined();
+  });
+
+  it('reads --ask separately from --k, and refuses an ask that is not a positive whole number', () => {
+    const both = parseArgs(['--k', '3', '--ask', '5', '--rules', 'steps']);
+    expect(both.k).toBe(3);
+    expect(both.ask).toBe(5);
+    // Absent means the scoring width, because a caller who names one number means it for both.
+    expect(parseArgs(['--k', '4']).ask).toBe(4);
+    expect(() => parseArgs(['--ask', '0'])).toThrow(/positive whole number/);
+    expect(() => parseArgs(['--ask', 'many'])).toThrow(/positive whole number/);
   });
 
   it('refuses a limit or a k that is not a positive whole number', () => {

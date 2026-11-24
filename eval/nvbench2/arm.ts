@@ -417,11 +417,15 @@ export interface ArmReport {
   readonly split: string;
   readonly model: string;
   readonly k: number;
+  /** How many charts each call was asked for. Absent from an older artifact, which asked for `k`. */
+  readonly ask: number;
   readonly promptVersion: number;
   /** Which instructions the prompt carried — an arm is a set of rules, so an artifact must name it. */
   readonly rules: readonly Rule[];
   readonly questions: number;
   readonly asked: number;
+  /** Charts produced in total. The reading is over their first `k`; this is what the ask returned. */
+  readonly produced: number;
   readonly replayed: number;
   readonly unparsed: number;
   readonly truncated: number;
@@ -450,21 +454,21 @@ async function answerOne(
   row: SplitRow,
   types: FieldTypes,
   options: {
-    readonly k: number;
+    readonly ask: number;
     readonly maxTokens: number;
     readonly rules: readonly Rule[];
     readonly cache?: ContentStore<StoredAnswer>;
   },
 ): Promise<AnsweredRow> {
-  const [system, user] = buildSpecPrompt(row, types, options.k, options.rules);
+  const [system, user] = buildSpecPrompt(row, types, options.ask, options.rules);
   const key = cacheKey(identityOf(system, user, provider.model, options.maxTokens), PROMPT_VERSION);
   const cached = options.cache?.get(key, { model: provider.model });
   if (cached !== undefined) {
     return {
       index: row.index,
-      charts: cached.truncated ? [] : parseSpecs(cached.reply, options.k),
+      charts: cached.truncated ? [] : parseSpecs(cached.reply, options.ask),
       truncated: cached.truncated,
-      unparsed: !cached.truncated && parseSpecs(cached.reply, options.k).length === 0,
+      unparsed: !cached.truncated && parseSpecs(cached.reply, options.ask).length === 0,
       replayed: true,
       called: false,
       promptTokens: cached.usage?.promptTokens ?? 0,
@@ -481,7 +485,7 @@ async function answerOne(
   });
   const reply = response.text;
   const truncated = response.finishReason === 'length';
-  const charts = truncated ? [] : parseSpecs(reply, options.k);
+  const charts = truncated ? [] : parseSpecs(reply, options.ask);
   const usage: TokenCounts = {
     promptTokens: response.usage?.promptTokens ?? 0,
     completionTokens: response.usage?.completionTokens ?? 0,
@@ -529,7 +533,17 @@ export interface ArmOptions {
   readonly rows: readonly SplitRow[];
   readonly types: Readonly<Record<string, FieldTypes>>;
   readonly provider: LlmProvider;
+  /** How wide the reading is scored. Precision's denominator is `min(k, charts)` and its ceiling k. */
   readonly k: number;
+  /**
+   * How many charts the prompt asks for. Absent means `k`.
+   *
+   * Separate from `k` because a set cut to the scoring width loses recall: over 250 dev questions the
+   * same rules read 27.46 F1@3 asked for three charts and 29.50 asked for five, since a model told
+   * "at most 3" drops candidates the gold set contains rather than ordering them. The ask is a
+   * property of the call, `k` is a property of the reading, and a run has to be able to say both.
+   */
+  readonly ask?: number;
   readonly maxTokens: number;
   readonly concurrency: number;
   /** Which instructions the prompt carries. Absent means the product path, which is `DEFAULT_RULES`. */
@@ -550,6 +564,7 @@ export interface ArmOptions {
 export async function runArm(options: ArmOptions): Promise<ArmReport> {
   const asked = options.limit === undefined ? options.rows : options.rows.slice(0, options.limit);
   const rules = options.rules ?? DEFAULT_RULES;
+  const ask = options.ask ?? options.k;
   // One entry per question, produced together with the answer it scores. Written this way so that no
   // lookup by index is needed: `mapLimit` preserves the order it was given, and a `answers[at] ?? []`
   // would be a branch no input can reach — one answer per question, by construction.
@@ -567,7 +582,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
           completionTokens: 0,
         }
       : await answerOne(options.provider, row, types, {
-          k: options.k,
+          ask,
           maxTokens: options.maxTokens,
           rules,
           ...(options.cache === undefined ? {} : { cache: options.cache }),
@@ -588,9 +603,11 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     split: options.split,
     model: options.provider.model,
     k: options.k,
+    ask,
     promptVersion: PROMPT_VERSION,
     questions: asked.length,
     asked: asked.length,
+    produced: answers.reduce((sum, answer) => sum + answer.charts.length, 0),
     replayed: answers.filter((answer) => answer.replayed).length,
     unparsed: answers.filter((answer) => answer.unparsed).length,
     truncated: answers.filter((answer) => answer.truncated).length,
@@ -702,6 +719,7 @@ export function parseArgs(argv: readonly string[]): {
   artifact: string | undefined;
   limit: number | undefined;
   k: number;
+  ask: number;
   concurrency: number;
   maxTokens: number;
   samples: number | undefined;
@@ -720,12 +738,16 @@ export function parseArgs(argv: readonly string[]): {
   }
   const k = Number(value('--k') ?? '3');
   if (!Number.isInteger(k) || k <= 0) throw new Error(`--k ${String(value('--k'))} is not a positive whole number`);
+  const rawAsk = value('--ask');
+  const ask = rawAsk === undefined ? k : Number(rawAsk);
+  if (!Number.isInteger(ask) || ask <= 0) throw new Error(`--ask ${String(rawAsk)} is not a positive whole number`);
   return {
     split,
     cache,
     artifact: value('--artifact'),
     limit,
     k,
+    ask,
     concurrency: Number(value('--concurrency') ?? '6'),
     maxTokens: Number(value('--max-tokens') ?? '900'),
     samples: value('--samples') === undefined ? undefined : Number(value('--samples')),
@@ -750,7 +772,7 @@ export function summaryLine(report: ArmReport): string {
   const f1 = report.reading.f1[3];
   const reading = f1 === undefined ? '—' : f1.toFixed(4);
   const price = report.cost.yuan === undefined ? 'unpriced' : formatYuan(report.cost.yuan);
-  return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.asked)} asked · ${String(report.cost.calls)} calls · ${price}`;
+  return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.asked)} questions · ask ${String(report.ask)} · ${String(report.cost.calls)} calls · ${price}`;
 }
 
 /** Read the corpus and ask it. The thin half, kept separate so the thick half can be tested. */
@@ -773,6 +795,7 @@ export async function main(
     types,
     provider: meter.provider,
     k: args.k,
+    ask: args.ask,
     maxTokens: args.maxTokens,
     concurrency: args.concurrency,
     rules: args.rules,

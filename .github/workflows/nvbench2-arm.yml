@@ -41,9 +41,14 @@ on:
           - 'dev'
           - 'test'
       k:
-        description: 'Charts asked for per question (3 and 5 are what the leaderboard reports)'
+        description: 'Scoring width: which F1@k the reading is over (3 and 5 are what the leaderboard reports)'
         required: true
         default: '3'
+        type: string
+      ask:
+        description: 'Charts asked for per call; 0 means the scoring width. Wider than k pays only when the extra charts are golds'
+        required: false
+        default: '0'
         type: string
       limit:
         description: 'Ask only the first N questions (0 asks every question)'
@@ -151,11 +156,16 @@ jobs:
           MODEL: ${{ inputs.model }}
           SPLIT: ${{ inputs.split }}
           K: ${{ inputs.k }}
+          ASK: ${{ inputs.ask }}
           RULES: ${{ inputs.rules }}
         run: |
           # `count,variants` is an arm and so is `count`: the slug names it, so two arms do not share
           # a cache entry and a save from one cannot hide from the other.
           arm="$(printf '%s' "${RULES:-none}" | tr ',' '+')"
+          # The ask is part of the instrument, but only when it differs from the scoring width: an ask
+          # equal to k is the same request as before, and giving it a new slug would throw away the
+          # answers already paid for under the old one.
+          if [ "$ASK" != "0" ] && [ "$ASK" != "$K" ]; then arm="$arm+ask$ASK"; fi
           echo "slug=$(printf '%s-%s-%s-%s' "$MODEL" "$SPLIT" "$K" "$arm" | tr -c 'A-Za-z0-9._-' _)" >> "$GITHUB_OUTPUT"
           # `none` rather than the empty string, because a dispatch input left empty falls back to its
           # default and an arm that says "no rules" must not quietly run with both of them.
@@ -183,6 +193,8 @@ jobs:
         run: |
           EXTRA=""
           if [ "$LIMIT" != "0" ]; then EXTRA="--limit $LIMIT"; fi
+          ASK="${{ inputs.ask }}"
+          if [ "$ASK" != "0" ]; then EXTRA="$EXTRA --ask $ASK"; fi
           if [ "${{ inputs.samples }}" != "0" ]; then EXTRA="$EXTRA --samples ${{ inputs.samples }}"; fi
           pnpm bench:nvbench2:arm --split "$SPLIT" --k "$K" --concurrency "$CONCURRENCY" $EXTRA \
             --max-tokens "$MAX_TOKENS" \
@@ -227,6 +239,8 @@ jobs:
                 '| F1@5 | ' + at(5) + ' |',
                 '| ceiling (gold sets, no arm) | ' + pct(payload.facts.ceiling['3']) + ' |',
                 '| questions | ' + payload.asked + ' |',
+                '| charts asked for | ' + (payload.ask ?? payload.k) + ' |',
+                '| charts produced | ' + payload.produced + ' |',
                 '| charts per question | ' + perQuestion + ' |',
                 '| unparsed replies | ' + payload.unparsed + ' |',
                 '| truncated replies | ' + payload.truncated + ' |',
