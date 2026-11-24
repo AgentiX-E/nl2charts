@@ -90,7 +90,7 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
  *   the schema rather than of the gold: 310 of 750 questions have golds that differ only in one
  *   channel's field, over a median of 5 columns, so telling the columns apart is the whole game.
  */
-export const RULES = ['count', 'variants', 'values'] as const;
+export const RULES = ['count', 'variants', 'values', 'corpus'] as const;
 export type Rule = (typeof RULES)[number];
 
 /** What each rule adds to the instruction. Wrapped to keep the system message readable in a log. */
@@ -107,6 +107,15 @@ const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
   values: [
     'Each column is listed with sample values. Use them to tell columns apart: a question about',
     'amounts asks for the column whose values are amounts, not the one whose name resembles it.',
+  ],
+  corpus: [
+    'Channels are constrained by the mark. Follow (mark:channels)=(bar:[x,y,(color)];',
+    'line:[x,y,(color)]; arc:[color,theta]; point:[x,y,(color),(size)]; rect:[x,y,(color)];',
+    'boxplot:[x,y]), where a parenthesised channel is optional and every other one is required.',
+    'When the question names a chart type, use that type. When it names none, infer from the task:',
+    'trend suggests bar or line, distribution bar or arc or line or boxplot, correlation point or rect.',
+    'When a phrase in the question could name more than one column, each candidate column is a chart',
+    'of its own: those are what the entries of the array are for.',
   ],
 };
 

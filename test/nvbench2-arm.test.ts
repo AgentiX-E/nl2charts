@@ -411,7 +411,7 @@ describe('the arm', () => {
   });
 
   it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
-    expect(rulesOf(undefined)).toEqual(['count', 'variants', 'values']);
+    expect(rulesOf(undefined)).toEqual(['count', 'variants', 'values', 'corpus']);
     expect(rulesOf('')).toEqual([]);
     expect(rulesOf('variants')).toEqual(['variants']);
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
@@ -437,10 +437,10 @@ describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, concurrency: 6, maxTokens: 900, samples: undefined,
-      rules: ['count', 'variants', 'values'],
+      rules: ['count', 'variants', 'values', 'corpus'],
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'variants', 'values'] });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'variants', 'values', 'corpus'] });
   });
 
   it('carries the sample count through the command line, and through the run it starts', () => {
