@@ -65,6 +65,11 @@ on:
         required: false
         default: 'count,corpus,corpus2'
         type: string
+      replica:
+        description: 'Send the corpus''s own prompt instead: none, basic, steps, stepsFull. Rules are ignored when set'
+        required: false
+        default: 'none'
+        type: string
       max_tokens:
         description: 'Answer budget per call; a reasoning tier needs more room than a chat tier'
         required: false
@@ -97,7 +102,7 @@ permissions:
 # came back `cancelled` with no artifact and no reading. The same arm twice still queues, because two
 # dispatches of one arm share the answer cache and the second would race the first for its keys.
 concurrency:
-  group: nvbench2-arm-${{ github.ref }}-${{ inputs.model }}-${{ inputs.split }}-k${{ inputs.k }}-a${{ inputs.ask }}-${{ inputs.rules }}
+  group: nvbench2-arm-${{ github.ref }}-${{ inputs.model }}-${{ inputs.split }}-k${{ inputs.k }}-a${{ inputs.ask }}-${{ inputs.rules }}-r${{ inputs.replica }}
   cancel-in-progress: false
 
 jobs:
@@ -161,6 +166,7 @@ jobs:
           K: ${{ inputs.k }}
           ASK: ${{ inputs.ask }}
           RULES: ${{ inputs.rules }}
+          REPLICA: ${{ inputs.replica }}
         run: |
           # `count,variants` is an arm and so is `count`: the slug names it, so two arms do not share
           # a cache entry and a save from one cannot hide from the other.
@@ -169,6 +175,9 @@ jobs:
           # equal to k is the same request as before, and giving it a new slug would throw away the
           # answers already paid for under the old one.
           if [ "$ASK" != "0" ] && [ "$ASK" != "$K" ]; then arm="$arm+ask$ASK"; fi
+          # A replica replaces the instruction, so its name belongs in the slug for the same reason a
+          # rule's does: two prompts must not share one answer store.
+          if [ "$REPLICA" != "none" ] && [ "$REPLICA" != "" ]; then arm="replica-$REPLICA"; fi
           echo "slug=$(printf '%s-%s-%s-%s' "$MODEL" "$SPLIT" "$K" "$arm" | tr -c 'A-Za-z0-9._-' _)" >> "$GITHUB_OUTPUT"
           # `none` rather than the empty string, because a dispatch input left empty falls back to its
           # default and an arm that says "no rules" must not quietly run with both of them.
@@ -182,7 +191,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: eval/.cache/nvbench2/answers
-          key: nvbench2-answers-${{ steps.instrument.outputs.slug }}-${{ hashFiles('eval/nvbench2/arm.ts', 'eval/nvbench2/facts.ts', 'eval/nvbench2/judge.ts') }}
+          key: nvbench2-answers-${{ steps.instrument.outputs.slug }}-${{ hashFiles('eval/nvbench2/arm.ts', 'eval/nvbench2/facts.ts', 'eval/nvbench2/judge.ts', 'eval/nvbench2/corpus-text.ts', 'eval/nvbench2/corpus-prompt.ts') }}
           restore-keys: |
             nvbench2-answers-${{ steps.instrument.outputs.slug }}-
 
@@ -199,6 +208,7 @@ jobs:
           ASK="${{ inputs.ask }}"
           if [ "$ASK" != "0" ]; then EXTRA="$EXTRA --ask $ASK"; fi
           if [ "${{ inputs.samples }}" != "0" ]; then EXTRA="$EXTRA --samples ${{ inputs.samples }}"; fi
+          if [ "${{ inputs.replica }}" != "none" ]; then EXTRA="$EXTRA --replica ${{ inputs.replica }}"; fi
           pnpm bench:nvbench2:arm --split "$SPLIT" --k "$K" --concurrency "$CONCURRENCY" $EXTRA \
             --max-tokens "$MAX_TOKENS" \
             --rules "${{ steps.instrument.outputs.list }}" --artifact eval/out/nvbench2-arm.json

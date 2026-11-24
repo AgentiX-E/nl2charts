@@ -48,6 +48,7 @@ import { billOf, formatYuan, type TokenCounts } from '../price.js';
 import { cacheKey, openStore, type CacheIdentity, type ContentStore } from '../text2vis/content-store.js';
 import { runIfEntry } from '../entry.js';
 import { parseSplit, resolveTypes, type SplitRow } from './check.js';
+import { corpusPromptOf, finalOutputOf, parseModeOf, REPLICAS, type Replica } from './corpus-prompt.js';
 import { diagnose, type Diagnostic } from './diagnose.js';
 import { factsOf, type GoldFacts } from './facts.js';
 import { perQuestionOf, readingOf, type Case, type Chart, type FieldTypes, type Reading } from './judge.js';
@@ -221,13 +222,28 @@ function identityOf(system: string, user: string, model: string, maxTokens: numb
  * byte-identical across the run, so a provider's prefix cache is a discount rather than a hope. The
  * fields are listed with the type map's own word for each one, because the reference reverses axes by
  * type and a model that guesses a type produces a chart the corpus calls transposed.
+ *
+ * A `replica` replaces both halves with the corpus's own, which is why it is a parameter rather than a
+ * rule: the rules widen one instruction, and a replica is a different instrument. `k` is not stated to
+ * a replica either — the corpus's instruction asks for one to five charts, and printing our own width
+ * into its sentence would be the divergence the replica exists to remove.
  */
 export function buildSpecPrompt(
-  row: Pick<SplitRow, 'question'> & { readonly examples?: Readonly<Record<string, unknown>> },
+  row: Pick<SplitRow, 'question'> &
+    Partial<Pick<SplitRow, 'columns' | 'examples' | 'counts'>>,
   types: FieldTypes,
   k: number,
   rules: readonly Rule[] = DEFAULT_RULES,
+  replica?: Replica,
 ): readonly [string, string] {
+  if (replica !== undefined) {
+    return corpusPromptOf(replica, {
+      columns: row.columns ?? [],
+      examples: row.examples ?? {},
+      counts: row.counts ?? {},
+      question: row.question,
+    });
+  }
   const system = [
     'You write Vega-Lite specifications that answer questions about one table.',
     `Return a JSON array of at most ${String(k)} charts, most likely first. Every element has exactly these keys:`,
@@ -323,8 +339,32 @@ export function chartOf(entry: unknown): Chart | undefined {
  * for it is a second array — the first `[` and the last `]` are the only pair tried, so a reply
  * containing two answers is read as one malformed answer rather than as two.
  */
-export function parseSpecs(text: string, k: number): Chart[] {
+/**
+ * How a reply says where its charts are.
+ *
+ * `array` is this repository's contract and the corpus's basic one — a JSON array, optionally behind
+ * `ANSWER:` or `#OUTPUT:`. `finalOutput` is the step contract, an object whose `final_output` is the
+ * array; reading it as `array` would find the first `[` of `thinking_steps`, which is a column list
+ * and not a chart list.
+ */
+export type ParseMode = 'array' | 'finalOutput';
+
+/** One candidate array, deduplicated and cut to the width the caller asked for. */
+function chartsOf(entries: readonly unknown[], k: number): Chart[] {
+  const charts: Chart[] = [];
+  for (const entry of entries) {
+    const chart = chartOf(entry);
+    if (chart !== undefined) charts.push(chart);
+  }
+  return dedupe(charts).slice(0, k);
+}
+
+export function parseSpecs(text: string, k: number, mode: ParseMode = 'array'): Chart[] {
   if (k <= 0) return [];
+  if (mode === 'finalOutput') {
+    const output = finalOutputOf(text);
+    return output === undefined ? [] : chartsOf(output, k);
+  }
   const cleaned = text
     .trim()
     .replace(/^```[a-z]*\s*/i, '')
@@ -350,12 +390,7 @@ export function parseSpecs(text: string, k: number): Chart[] {
   }
   // A slice that starts at `[` and parses is an array by construction, so there is no branch here
   // for the non-array case: a reply whose brackets do not enclose valid JSON never reaches this line.
-  const charts: Chart[] = [];
-  for (const entry of parsed as unknown[]) {
-    const chart = chartOf(entry);
-    if (chart !== undefined) charts.push(chart);
-  }
-  return dedupe(charts).slice(0, k);
+  return chartsOf(parsed as unknown[], k);
 }
 
 /** One stored answer: what the model wrote, and what the call was billed for. */
@@ -436,6 +471,14 @@ export interface ArmReport {
   readonly promptVersion: number;
   /** Which instructions the prompt carried — an arm is a set of rules, so an artifact must name it. */
   readonly rules: readonly Rule[];
+  /**
+   * Which of the corpus's own prompts replaced this repository's, when one did.
+   *
+   * Present rather than implied by `rules`, because a replica answers a different question: not "what
+   * is this rule worth" but "what does the arm read when the instruction is the corpus's". Two
+   * artifacts that disagree on this field are not two arms of one ablation.
+   */
+  readonly replica?: Replica;
   readonly questions: number;
   readonly asked: number;
   /** Charts produced in total. The reading is over their first `k`; this is what the ask returned. */
@@ -482,18 +525,21 @@ async function answerOne(
     readonly ask: number;
     readonly maxTokens: number;
     readonly rules: readonly Rule[];
+    readonly replica?: Replica;
     readonly cache?: ContentStore<StoredAnswer>;
   },
 ): Promise<AnsweredRow> {
-  const [system, user] = buildSpecPrompt(row, types, options.ask, options.rules);
+  const [system, user] = buildSpecPrompt(row, types, options.ask, options.rules, options.replica);
+  const mode: ParseMode = options.replica === undefined ? 'array' : parseModeOf(options.replica);
   const key = cacheKey(identityOf(system, user, provider.model, options.maxTokens), PROMPT_VERSION);
   const cached = options.cache?.get(key, { model: provider.model });
   if (cached !== undefined) {
+    const replayed = cached.truncated ? [] : parseSpecs(cached.reply, options.ask, mode);
     return {
       index: row.index,
-      charts: cached.truncated ? [] : parseSpecs(cached.reply, options.ask),
+      charts: replayed,
       truncated: cached.truncated,
-      unparsed: !cached.truncated && parseSpecs(cached.reply, options.ask).length === 0,
+      unparsed: !cached.truncated && replayed.length === 0,
       failed: false,
       replayed: true,
       called: false,
@@ -529,7 +575,7 @@ async function answerOne(
   }
   const reply = response.text;
   const truncated = response.finishReason === 'length';
-  const charts = truncated ? [] : parseSpecs(reply, options.ask);
+  const charts = truncated ? [] : parseSpecs(reply, options.ask, mode);
   const usage: TokenCounts = {
     promptTokens: response.usage?.promptTokens ?? 0,
     completionTokens: response.usage?.completionTokens ?? 0,
@@ -593,6 +639,14 @@ export interface ArmOptions {
   readonly concurrency: number;
   /** Which instructions the prompt carries. Absent means the product path, which is `DEFAULT_RULES`. */
   readonly rules?: readonly Rule[];
+  /**
+   * Send the corpus's own instruction and input instead, and read the reply by its contract.
+   *
+   * Absent means this repository's prompt. `rules` is ignored when this is set — a replica replaces the
+   * instruction rather than widening it — and the artifact records that, so a reading cannot be
+   * mistaken for a rule's contribution.
+   */
+  readonly replica?: Replica;
   readonly cache?: ContentStore<StoredAnswer>;
   readonly limit?: number;
   /** How many answered rows to keep verbatim, so a reading that surprises can be looked at. */
@@ -631,6 +685,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
           ask,
           maxTokens: options.maxTokens,
           rules,
+          ...(options.replica === undefined ? {} : { replica: options.replica }),
           ...(options.cache === undefined ? {} : { cache: options.cache }),
         });
     return {
@@ -663,6 +718,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     reading,
     perQuestion: perQuestionOf(cases, SCORED_KS),
     rules,
+    ...(options.replica === undefined ? {} : { replica: options.replica }),
     diagnostic: diagnose(cases, options.k),
     facts: factsOf(asked),
     ...(options.samples === undefined
@@ -763,6 +819,22 @@ export function rulesOf(raw: string | undefined): readonly Rule[] {
   return RULES.filter((rule) => named.includes(rule));
 }
 
+/**
+ * Which replica a `--replica` value names, if any.
+ *
+ * `none` and the empty string both mean this repository's own prompt, and both are accepted because a
+ * workflow input falls back to its default when left empty: a dispatch that clears the box must not
+ * fail, and it must not turn a replica on by accident either. Any other value has to be one of the two
+ * the corpus published, for the reason `rulesOf` gives about typos.
+ */
+export function replicaOf(raw: string | undefined): Replica | undefined {
+  if (raw === undefined || raw === '' || raw === 'none') return undefined;
+  if (!(REPLICAS as readonly string[]).includes(raw)) {
+    throw new Error(`--replica ${raw} is not one of ${REPLICAS.join(', ')} or none`);
+  }
+  return raw as Replica;
+}
+
 export function parseArgs(argv: readonly string[]): {
   split: string;
   cache: string;
@@ -774,6 +846,7 @@ export function parseArgs(argv: readonly string[]): {
   maxTokens: number;
   samples: number | undefined;
   rules: readonly Rule[];
+  replica: Replica | undefined;
 } {
   const value = (flag: string): string | undefined => {
     const at = argv.indexOf(flag);
@@ -802,6 +875,7 @@ export function parseArgs(argv: readonly string[]): {
     maxTokens: Number(value('--max-tokens') ?? '900'),
     samples: value('--samples') === undefined ? undefined : Number(value('--samples')),
     rules: rulesOf(value('--rules')),
+    replica: replicaOf(value('--replica')),
   };
 }
 
@@ -823,7 +897,8 @@ export function summaryLine(report: ArmReport): string {
   const reading = f1 === undefined ? '—' : f1.toFixed(4);
   const price = report.cost.yuan === undefined ? 'unpriced' : formatYuan(report.cost.yuan);
   const failed = report.failed === 0 ? '' : ` · ${String(report.failed)} failed`;
-  return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.reading.questions)} of ${String(report.asked)} scored · ask ${String(report.ask)} · ${String(report.cost.calls)} calls${failed} · ${price}`;
+  const replica = report.replica === undefined ? '' : ` · replica ${report.replica}`;
+  return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.reading.questions)} of ${String(report.asked)} scored · ask ${String(report.ask)}${replica} · ${String(report.cost.calls)} calls${failed} · ${price}`;
 }
 
 /** Read the corpus and ask it. The thin half, kept separate so the thick half can be tested. */
@@ -850,6 +925,7 @@ export async function main(
     maxTokens: args.maxTokens,
     concurrency: args.concurrency,
     rules: args.rules,
+    ...(args.replica === undefined ? {} : { replica: args.replica }),
     cache: store,
     ...(args.limit === undefined ? {} : { limit: args.limit }),
     ...(args.samples === undefined ? {} : { samples: args.samples }),

@@ -45,6 +45,16 @@ export interface SplitRow {
   readonly golds: readonly unknown[];
   readonly columns: readonly string[];
   readonly examples: Readonly<Record<string, unknown>>;
+  /**
+   * How many distinct values each column holds, when the schema says.
+   *
+   * The corpus ships `unique_value_counts` beside `column_examples`, and its own prompting baseline
+   * prints both. It is the only signal in the schema that separates a category from a measure that
+   * looks like one (`authorder` has three values, `authid` has thirteen), so a replica of that prompt
+   * needs it; an empty object means the row's schema did not carry the field, which is a fact about
+   * the row rather than an error.
+   */
+  readonly counts: Readonly<Record<string, unknown>>;
 }
 
 /** What one split reads as. */
@@ -118,7 +128,19 @@ export function parseSplit(text: string): SplitRow[] {
       throw new Error(`entry ${String(index)} has no table_columns`);
     }
     if (!isRecord(examples)) throw new Error(`entry ${String(index)} has no column_examples`);
-    return { index, csv, question, golds, columns: columns as string[], examples };
+    const counts = shape.unique_value_counts;
+    if (counts !== undefined && !isRecord(counts)) {
+      throw new Error(`entry ${String(index)} has a unique_value_counts that is not an object`);
+    }
+    return {
+      index,
+      csv,
+      question,
+      golds,
+      columns: columns as string[],
+      examples,
+      counts: counts === undefined ? {} : (counts as Record<string, unknown>),
+    };
   });
 }
 

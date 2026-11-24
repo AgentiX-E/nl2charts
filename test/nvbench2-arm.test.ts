@@ -6,9 +6,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs,
-  providerFromEnv, retriesOf, runArm, rulesOf, splitDigest, summaryLine, timeoutMsOf, PROMPT_VERSION, SPEC_MARKS,
+  providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest, summaryLine, timeoutMsOf,
+  PROMPT_VERSION, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
-import { cacheKey } from '../eval/text2vis/content-store.js';
+import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
 import type { SplitRow } from '../eval/nvbench2/check.js';
 import type { FieldTypes } from '../eval/nvbench2/judge.js';
@@ -31,7 +32,7 @@ const TYPES: FieldTypes = { name: 'category', amount: 'quantitative' };
 const GOLD = { mark: 'bar', encoding: { x: { field: 'name' }, y: { field: 'amount' } } };
 
 function row(index: number, golds: unknown[] = [GOLD], csv = 'a.csv'): SplitRow {
-  return { index, csv, question: `how much per name (${String(index)})`, golds, columns: ['name', 'amount'], examples: {} };
+  return { index, csv, question: `how much per name (${String(index)})`, golds, columns: ['name', 'amount'], examples: {}, counts: {} };
 }
 
 /** A provider whose reply is a constant, so the arm's own reading is the only variable. */
@@ -622,10 +623,21 @@ describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, ask: 3, concurrency: 6, maxTokens: 900, samples: undefined,
-      rules: ['count', 'corpus', 'corpus2', 'steps'],
+      rules: ['count', 'corpus', 'corpus2', 'steps'], replica: undefined,
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2', 'steps'] });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus', 'corpus2', 'steps'], replica: undefined });
+  });
+
+  it('reads --replica, and reads none for the empty string a cleared workflow box sends', () => {
+    expect(parseArgs(['--replica', 'basic']).replica).toBe('basic');
+    expect(parseArgs(['--replica', 'stepsFull']).replica).toBe('stepsFull');
+    expect(parseArgs(['--replica', 'none']).replica).toBeUndefined();
+    expect(parseArgs(['--replica', '']).replica).toBeUndefined();
+    expect(parseArgs([]).replica).toBeUndefined();
+    expect(() => parseArgs(['--replica', 'chat'])).toThrow(/is not one of basic, steps, stepsFull or none/);
+    expect(replicaOf('steps')).toBe('steps');
+    expect(replicaOf(undefined)).toBeUndefined();
   });
 
   it('carries the sample count through the command line, and through the run it starts', () => {
@@ -694,6 +706,19 @@ describe('the command', () => {
     expect(again['replayed']).toBe(1);
   });
 
+  it('records the replica an artifact was taken under, so the reading names its instrument', async () => {
+    const dir = scratch();
+    corpus(dir);
+    const artifact = join(dir, 'out', 'replica.json');
+    const code = await main(['--cache', dir, '--artifact', artifact, '--replica', 'basic'], {}, { provider: fake(JSON.stringify([GOLD])) });
+    expect(code).toBe(0);
+    const payload = JSON.parse(readFileSync(artifact, 'utf8')) as Record<string, unknown>;
+    expect(payload['replica']).toBe('basic');
+    // The rules field still says what the product path would have sent, because an artifact is also a
+    // record of the run's configuration; the replica field is what says those rules were not sent.
+    expect(payload['rules']).toEqual(['count', 'corpus', 'corpus2', 'steps']);
+  });
+
   it('refuses to run without an endpoint rather than inventing one', async () => {
     const dir = scratch();
     corpus(dir);
@@ -728,5 +753,110 @@ describe('the command', () => {
     const dir = scratch();
     corpus(dir);
     expect(await main(['--cache', dir], {}, { provider: fake(JSON.stringify([GOLD])) })).toBe(0);
+  });
+});
+
+describe('a replica of the corpus prompt', () => {
+  const STEP_REPLY = JSON.stringify({
+    thinking_steps: { step_1: { answer: { column_list: [{ field: 'name' }], filter_list: [] } } },
+    final_output: [GOLD],
+  });
+
+  it('sends the corpus instruction and input, and not this repository’s', () => {
+    const [system, user] = buildSpecPrompt(row(0), TYPES, 3, ['count', 'corpus2'], 'basic');
+    expect(system).toContain('You only answer with #OUTPUT.');
+    expect(user).toContain('recommend 1 to 5 different charts');
+    expect(user).toContain('#INPUT:');
+    expect(user).toContain("Data Schema: ['name', 'amount']");
+    expect(user).not.toContain('Table columns:');
+    // The rules are ignored rather than applied to the corpus's sentence: a replica is a different
+    // instrument, not a wider one, and a clause from this repository's prompt inside it would be a
+    // prompt neither system published.
+    expect(user).not.toContain('A count names no column');
+    expect(user).not.toContain('at most 3 charts');
+  });
+
+  it('renders a row that carries no schema beyond its question, rather than throwing', () => {
+    const [system, user] = buildSpecPrompt({ question: 'how much per name' }, TYPES, 3, DEFAULT_RULES, 'steps');
+    expect(system).toBeTruthy();
+    expect(user).toContain('Data Schema: []');
+    // The worked example inside the step instruction carries its own `#INPUT:` block, so the assertion
+    // is about the last one — the block built for this question — rather than about the whole prompt.
+    const input = user.slice(user.lastIndexOf('#INPUT:'));
+    expect(input).toContain('NL Query: how much per name');
+    expect(input).not.toContain('Unique Value Num');
+  });
+
+  it('reads a step reply by the object its contract names, and scores the charts inside it', async () => {
+    const report = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(STEP_REPLY),
+      k: 3, maxTokens: 1600, concurrency: 1, replica: 'steps',
+    });
+    expect(report.replica).toBe('steps');
+    expect(report.unparsed).toBe(0);
+    expect(report.produced).toBe(1);
+    expect(report.reading.f1['3']).toBe(1);
+  });
+
+  it('counts a step reply with no final_output as unparsed, not as zero charts on purpose', async () => {
+    const report = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES },
+      provider: fake(JSON.stringify({ step_1: { answer: { column_list: [] } } })),
+      k: 3, maxTokens: 1600, concurrency: 1, replica: 'steps',
+    });
+    expect(report.unparsed).toBe(1);
+    expect(report.reading.f1['3']).toBe(0);
+  });
+
+  it('reads a basic reply as an array, and records which replica produced the reading', async () => {
+    const provider = fake(JSON.stringify([GOLD]));
+    const report = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider,
+      k: 3, maxTokens: 900, concurrency: 1, replica: 'basic',
+    });
+    expect(report.replica).toBe('basic');
+    expect(report.reading.f1['3']).toBe(1);
+    expect(provider.seen[0]).toContain('#OUTPUT:');
+  });
+
+  it('leaves the field absent when no replica was asked for, so an artifact says which instrument ran', async () => {
+    const report = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(JSON.stringify([GOLD])),
+      k: 3, maxTokens: 900, concurrency: 1,
+    });
+    expect(report).not.toHaveProperty('replica');
+    expect(summaryLine(report)).not.toContain('replica');
+  });
+
+  it('names the replica in the one line a job log keeps', async () => {
+    const report = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(STEP_REPLY),
+      k: 3, maxTokens: 1600, concurrency: 1, replica: 'stepsFull',
+    });
+    expect(summaryLine(report)).toContain('· replica stepsFull');
+  });
+
+  it('replays a replica answer from the store rather than buying it twice', async () => {
+    const dir = scratch();
+    const store = openStore<StoredAnswer>(dir, PROMPT_VERSION, (parsed, expect) => answerOf(parsed, expect?.model));
+    const first = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(STEP_REPLY),
+      k: 3, maxTokens: 1600, concurrency: 1, replica: 'steps', cache: store,
+    });
+    expect(first.replayed).toBe(0);
+    const second = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(STEP_REPLY),
+      k: 3, maxTokens: 1600, concurrency: 1, replica: 'steps', cache: store,
+    });
+    expect(second.replayed).toBe(1);
+    expect(second.reading.f1['3']).toBe(first.reading.f1['3']);
+  });
+
+  it('reads nothing out of a final_output contract when the mode is the array one', () => {
+    expect(parseSpecs(STEP_REPLY, 3)).toEqual([]);
+    expect(parseSpecs(STEP_REPLY, 3, 'finalOutput')).toEqual([GOLD]);
+    expect(parseSpecs('{"final_output": []}', 3, 'finalOutput')).toEqual([]);
+    expect(parseSpecs('not json', 3, 'finalOutput')).toEqual([]);
+    expect(parseSpecs(STEP_REPLY, 0, 'finalOutput')).toEqual([]);
   });
 });

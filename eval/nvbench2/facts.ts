@@ -90,11 +90,8 @@ export function factsOf(rows: readonly SplitRow[], ks: readonly number[] = [1, 3
   let golds = 0;
   let transformed = 0;
   let expressible = 0;
-  const ceilings = new Map<number, number>();
-  for (const k of ks) ceilings.set(k, 0);
   for (const row of rows) {
     sizes.push(String(row.golds.length));
-    for (const k of ks) ceilings.set(k, (ceilings.get(k) ?? 0) + ceilingOf(row.golds.length, k));
     for (const gold of row.golds) {
       golds += 1;
       const read = channelsOf(gold);
@@ -106,8 +103,14 @@ export function factsOf(rows: readonly SplitRow[], ks: readonly number[] = [1, 3
       if (isRecord(gold) && gold['transform'] !== undefined) transformed += 1;
     }
   }
+  // Summed per width rather than accumulated into a map while the rows are read: a seeded map makes
+  // every `get` a branch that cannot be false, and a branch no input can reach is a branch a coverage
+  // ledger has to carry as a deficit or a lie.
   const reading: Record<string, number> = {};
-  for (const k of ks) reading[String(k)] = rows.length === 0 ? 0 : (ceilings.get(k) ?? 0) / rows.length;
+  for (const k of ks) {
+    const total = rows.reduce((sum, row) => sum + ceilingOf(row.golds.length, k), 0);
+    reading[String(k)] = rows.length === 0 ? 0 : total / rows.length;
+  }
   return {
     questions: rows.length,
     golds,

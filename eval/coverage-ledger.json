@@ -617,16 +617,28 @@
       "branches": 100
     },
     "eval/nvbench2/check.ts": {
-      "lines": 99.14,
-      "statements": 99.14,
+      "lines": 99.19,
+      "statements": 99.19,
       "functions": 100,
-      "branches": 97.67
+      "branches": 97.76
     },
     "eval/nvbench2/compare.ts": {
       "lines": 100,
       "statements": 100,
       "functions": 100,
       "branches": 97
+    },
+    "eval/nvbench2/corpus-prompt.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 95.12
+    },
+    "eval/nvbench2/corpus-text.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
     },
     "eval/nvbench2/diagnose.ts": {
       "lines": 100,
@@ -638,7 +650,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 93.1
+      "branches": 100
     },
     "eval/nvbench2/judge.ts": {
       "lines": 100,

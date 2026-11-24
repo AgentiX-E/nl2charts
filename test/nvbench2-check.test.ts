@@ -115,6 +115,21 @@ describe('parseSplit', () => {
     expect(rows[0]?.golds).toHaveLength(1);
   });
 
+  it('reads the distinct-value counts, and treats their absence as a row that did not carry them', () => {
+    expect(parseSplit(JSON.stringify([question('a.csv')]))[0]?.counts).toEqual({ amount: 3, name: 3 });
+    const without = { ...question('a.csv'), table_schema: JSON.stringify({ table_columns: ['amount', 'name'], column_examples: { amount: [1] } }) };
+    // An empty object rather than `undefined`: a replica of the corpus's prompt asks the counts for a
+    // line of their own, and "the row did not carry them" is a fact the renderer can print.
+    expect(parseSplit(JSON.stringify([without]))[0]?.counts).toEqual({});
+  });
+
+  it('refuses counts that are present and not an object, rather than reading them as absent', () => {
+    const broken = { ...question('a.csv'), table_schema: JSON.stringify({
+      table_columns: ['amount', 'name'], column_examples: { amount: [1] }, unique_value_counts: [3, 3],
+    }) };
+    expect(() => parseSplit(JSON.stringify([broken]))).toThrow(/unique_value_counts that is not an object/u);
+  });
+
   it('refuses a split that is not a list', () => {
     expect(() => parseSplit('{}')).toThrow(/not an array/u);
   });
