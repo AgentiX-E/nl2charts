@@ -347,6 +347,26 @@ describe('the arm', () => {
     expect(report.reading.f1['1']).toBe(1);
   });
 
+  it('carries the failure decomposition beside the reading, over the same top k', async () => {
+    // A reply written the way the Vega-Lite documentation writes one: every channel carries `type`,
+    // and the corpus's golds never do. The reading must be 0 and the diagnostic must say why.
+    const typed = {
+      mark: 'bar',
+      encoding: {
+        x: { field: 'name', type: 'nominal' },
+        y: { field: 'amount', type: 'quantitative' },
+      },
+    };
+    const report = await runArm({
+      split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(JSON.stringify([typed])), k: 3, maxTokens: 900, concurrency: 1,
+    });
+    expect(report.reading.f1['1']).toBe(0);
+    expect(report.diagnostic.predictions).toBe(1);
+    expect(report.diagnostic.matched).toBe(0);
+    expect(report.diagnostic.first.properties).toBe(1);
+    expect(report.diagnostic.agree.field).toBe(1);
+  });
+
   it('sends the same system message for every row, so a prefix cache is a discount', async () => {
     const provider = fake(JSON.stringify([GOLD]));
     await runArm({ split: 'dev', rows: [row(0), row(1)], types: { 'a.csv': TYPES }, provider, k: 3, maxTokens: 900, concurrency: 2 });

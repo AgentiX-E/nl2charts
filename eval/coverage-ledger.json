@@ -622,6 +622,12 @@
       "functions": 100,
       "branches": 97.67
     },
+    "eval/nvbench2/diagnose.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
     "eval/nvbench2/facts.ts": {
       "lines": 100,
       "statements": 100,
@@ -632,7 +638,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 97.72
+      "branches": 98.35
     },
     "eval/preflight.ts": {
       "lines": 98.69,

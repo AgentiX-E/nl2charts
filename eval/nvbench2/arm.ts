@@ -48,6 +48,7 @@ import { billOf, formatYuan, type TokenCounts } from '../price.js';
 import { cacheKey, openStore, type CacheIdentity, type ContentStore } from '../text2vis/content-store.js';
 import { runIfEntry } from '../entry.js';
 import { parseSplit, resolveTypes, type SplitRow } from './check.js';
+import { diagnose, type Diagnostic } from './diagnose.js';
 import { factsOf, type GoldFacts } from './facts.js';
 import { readingOf, type Case, type Chart, type FieldTypes, type Reading } from './judge.js';
 
@@ -275,6 +276,15 @@ export interface ArmReport {
   readonly unparsed: number;
   readonly truncated: number;
   readonly reading: Reading;
+  /**
+   * Where the misses stop agreeing with their nearest gold.
+   *
+   * Travels with the reading because the reading alone cannot be acted on: "5% right" is compatible
+   * with a wrong column, a wrong mark, and a reply that carries a channel `type` the corpus never
+   * writes, and the three call for different fixes. Costs nothing — it is a comparison of charts the
+   * run already has, not another call.
+   */
+  readonly diagnostic: Diagnostic;
   readonly facts: GoldFacts;
   readonly cost: {
     readonly calls: number;
@@ -426,6 +436,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     unparsed: answers.filter((answer) => answer.unparsed).length,
     truncated: answers.filter((answer) => answer.truncated).length,
     reading,
+    diagnostic: diagnose(cases, options.k),
     facts: factsOf(asked),
     ...(options.samples === undefined
       ? {}
