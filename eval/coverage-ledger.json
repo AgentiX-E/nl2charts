@@ -2,7 +2,7 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-23",
+  "measuredAt": "2026-11-24",
   "totals": {
     "lines": 99.63,
     "statements": 99.63,
@@ -609,6 +609,18 @@
       "statements": 99.4,
       "functions": 100,
       "branches": 99.07
+    },
+    "eval/nvbench2/check.ts": {
+      "lines": 99.14,
+      "statements": 99.14,
+      "functions": 100,
+      "branches": 97.67
+    },
+    "eval/nvbench2/judge.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 97.67
     },
     "eval/preflight.ts": {
       "lines": 98.69,

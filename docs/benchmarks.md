@@ -18030,16 +18030,17 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | BIRD dev | the same questions | R-VES | **partial** | 56.63 over 600 of 1,532 questions, floor 57.96 |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
-| nvBench 2.0 | 7,878 queries / 24,076 visualizations | F1@3, F1@5 | **absent** | — |
+| nvBench 2.0 | 7,878 queries / 24,076 visualizations | F1@3, F1@5 | **instrumented** | — |
 | VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
 
 Four of nine carry a number over the denominator their leaderboard reports, and two of those four are
 counts rather than accuracies. A fifth — R-VES — carries a number over 600 of its leaderboard's 1,532
 questions, which is a real reading and not that row, so the table states the denominator rather than
-letting the reader assume one. A sixth — WikiSQL — has a corpus, a judge and a split that executes
-clean, and no dispatch over it, which is a different absence from a corpus nobody can fetch: the first
-needs a run, the second needs a fetcher. The remaining three are not a scandal; they are a to-do list
-with prices, which is the only kind of to-do list this document has ever been able to act on.
+letting the reader assume one. Two more — WikiSQL and nvBench 2.0 — have a corpus, a judge and a split
+that reads clean, and no dispatch over them, which is a different absence from a corpus nobody can
+fetch: the first needs a run, the second needs a fetcher. The remaining two are not a scandal; they
+are a to-do list with prices, which is the only kind of to-do list this document has ever been able
+to act on.
 
 Two things about the `number` column, both learned by watching it be misquoted. A printed line now
 carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 56.63 (600 of 1532)` —
@@ -18549,11 +18550,13 @@ four routes to it were tried and none delivered.
 gold reading exact match against itself. It is tested against a stub, so the day the corpus lands the
 reading is one command rather than a port.
 
-**nvBench 2.0** is the only absent row that is a *method* gap rather than a corpus gap. One query maps
-to a set of valid visualizations, so the reading is F1 over that set; the mark vocabulary is Vega-Lite
-specifications rather than this repository's eleven-mark contract. Step-NL2VIS (trained on the
-benchmark) reads 81.50 F1@3 against GPT-4o prompting 22.54pp lower; a system that answers one chart
-per question — which is what this product does — cannot be scored on a metric that asks for a set.
+**nvBench 2.0** was the only row whose gap was a *method* rather than a corpus, and the method is now
+in place: one query maps to a set of valid visualizations, so the reading is F1 over that set, and the
+mark vocabulary is Vega-Lite specifications rather than this repository's eleven-mark contract.
+Step-NL2VIS (trained on the benchmark) reads 81.50 F1@3 against GPT-4o prompting 22.54pp lower; a
+system that answers one chart per question — which is what this product does — cannot be scored on a
+metric that asks for a set, which is why the port returns a set and scores it. What is missing is a
+predictions file, and the row says `instrumented` for it.
 
 **VisCodeBench** ships through a leaderboard precisely so the corpus stays out of training data, so it
 cannot be vendored the way BIRD and Text2Vis are. Its contract is also different: the system writes
@@ -20637,3 +20640,82 @@ absent, and prints the reason rather than passing quietly.
 four routes could not reach, not a judge nobody wrote. That moves it out of the plan's "¥0, 3–4 h"
 column — where it has sat for two rounds — and into "blocked on a download somebody has to perform
 outside this sandbox".
+
+## A metadata file nobody ships, and the rule the corpus demonstrates instead
+
+nvBench 2.0's judge reads `raw_data/nvbench_metadata.json` at import time and the public checkout
+does not carry that file — there is no `raw_data/` directory in the tree — so the official script
+cannot start from a checkout. The checkout does carry `code/data_synthesis_pipeline/part1_metadata/`,
+whose second and third stages produce the file, and the obvious reading is "run them". That reading
+is wrong, and the corpus is what says so.
+
+**The filter stage cannot have produced the corpus it ships with.** `2.table_filter.py` drops a column
+that is more than 80% empty, a column whose values look like hex, a column holding characters above
+0x7F, and a column whose date-like name does not parse as `%Y-%m-%d`. Run it on the published tables
+and 42 fields disappear that the shipped `table_schema` still lists:
+
+| table | field | which rule removes it | what the corpus still says |
+| --- | --- | --- | --- |
+| `formula_1@drivers.csv` | `number` | 804 of 842 rows empty, past the 80% cut | in `table_columns`, with `[0, 44, 108]` as examples |
+| `cre_Doc_Template_Mgt@Documents.csv` | `document_id` | ids `16514113` and `385906526` are eight hex digits | in `table_columns`, 15 unique values |
+| `college_2@student.csv` | `name` | `Álvarez` is a byte above 0x7F | in `table_columns` |
+| `cre_Theme_park@Visits.csv` | `visit_date` | `5/1/2010` is not `%Y-%m-%d`, so the column becomes all-NaT | in `table_columns` |
+
+Each `table_schema` also carries `column_examples`, and those examples were written by the generator
+that wrote the metadata: min/median/max for a quantitative column, three sampled values otherwise. So
+the corpus states the type of every field a question touches, and a rebuild can be checked rather than
+believed.
+
+**The rule that reproduces it** is the third stage's, applied to every column of the published CSV
+with nothing dropped: a datetime dtype is temporal, a name that is `id` or ends in `_id` is a
+category, a numeric dtype is quantitative, everything else is a category. Against `column_examples`:
+
+| quantity | dev | test |
+| --- | ---: | ---: |
+| table columns in `table_schema` | 4,158 | 4,794 |
+| columns the rebuild cannot type | 0 | 0 |
+| type decisions that disagree with `column_examples` | 0 | 0 |
+
+8,952 of 8,952. The filtered rebuild managed 7,856 of the same decisions and left 243 of 9,076 gold
+field references untyped — and since the judge reads a missing type as *not quantitative*, those
+silences are not neutral: they switch the axis rules off for a field and change the score.
+
+**The judge is a port, and the reference is executed to prove it.** `eval/nvbench2/diff.py` imports
+`reference/evaluation.py` and `reference/utils.py` unmodified — it builds the `raw_data/` directory
+they expect and changes into it, rather than editing them — and prints one JSON object per split.
+`eval/nvbench2/judge.ts` computes the same three things, and they agree:
+
+| reading | dev | test |
+| --- | ---: | ---: |
+| questions | 750 | 751 |
+| gold charts | 2,321 | 2,260 |
+| digest over preprocessed golds | `cbebd751…` | `313724c4…` |
+| golds whose transpose the judge calls equal | **381** | **437** |
+| F1@1 / F1@3 / F1@5 on the probe predictions | 0.5232 / 0.3389 / 0.3389 | 0.5350 / 0.3443 / 0.3443 |
+
+The probe is three predictions per question: the gold, the gold transposed, and the gold with its mark
+changed. That is why F1@1 is not 1.0 — a gold is a *set*, and F1 divides by its size — and why the
+transposed count is the interesting one: **818 of 1,501 golds survive a transposition**, and whether a
+transposed *prediction* is credited is decided entirely by the type map. The map is what makes the
+judge generous, so the map is what has to be right.
+
+**Two things in the reference are reproduced rather than fixed**, because a judgment that differs from
+the leaderboard's is not a better judgment:
+
+- `deep_compare_charts` compares lists **without consuming** a match — equal length, then every
+  element of the first has *some* partner in the second — so `[1, 1]` and `[1, 2]` are the same chart.
+  `compareExactly` runs the consuming comparison beside it, and the gap is reported rather than folded
+  in.
+- `normalize_chart_order` drops a `transform` that is not a filter and leaves an empty `{}` behind for
+  an encoding channel whose value is not an object. Both are visible in a comparison, so both are in
+  the port.
+
+Two things are deliberately different. The reference **mutates** the chart it is handed, so a caller
+that preprocesses the same list twice is trusting an idempotence nobody checked; the port copies. And
+the reference raises `TypeError` when `encoding` is a string that happens to contain a channel name
+(`'x' in 'xy'`), which would abort a 750-question run over one malformed prediction; the port
+normalises it to an empty encoding, which scores zero.
+
+**Cost of this reading: ¥0.** It downloads a public archive and compares two implementations over
+1,501 questions; no model was called. The row is `instrumented` and the remaining step is a
+predictions file.

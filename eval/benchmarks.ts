@@ -241,20 +241,27 @@ export const BENCHMARKS: readonly Benchmark[] = [
     source: 'https://nvbench2.github.io/ (arXiv:2503.12880)',
     corpus: '7,878 queries and 24,076 visualizations over 780 tables in 153 domains',
     metrics: ['F1@3', 'F1@5'],
-    status: 'absent',
+    status: 'instrumented',
     gap:
-      'The corpus is in `HKUSTDial/nvBench-2.0`, not on Hugging Face, and it does download: '
-      + '`data/nvbench2.0/dev.json` is 750 queries in 3.3 MB, small enough to survive the egress proxy '
-      + 'that truncates larger blobs. What does not arrive is the judge. `code/evaluation/evaluation.py` '
-      + 'loads `raw_data/nvbench_metadata.json` at import time and the repository does not carry that '
-      + 'file — no `raw_data/` directory exists in the tree — so the official script cannot start from a '
-      + 'public checkout, and the metadata has to be rebuilt by `code/data_synthesis_pipeline/'
-      + 'part1_metadata/*.py` against the databases first. Two things also differ from Text2Vis: one '
-      + 'query has a *set* of valid visualizations, so the reading is precision and recall over that set '
-      + 'rather than top-1, and the mark vocabulary is Vega-Lite specifications rather than this '
-      + 'repository\'s eleven-mark contract. Building it means rebuilding the metadata, an adapter from '
-      + 'Vega-Lite to the mark contract, and a set-valued scorer; the leaderboard is trained-model '
-      + 'territory (Step-NL2VIS 81.50 F1@3), which is the same wall as BIRD\'s.',
+      'Instrumented, not measured: the corpus, the judge and the type map are in place and are the '
+      + 'same objects the leaderboard used, and what is missing is a predictions file. `eval/nvbench2/'
+      + 'fetch.mjs` pulls the two splits and the 803-table archive from jsDelivr (22 MB, pinned by '
+      + 'digest; the 27.5 MB train split answers 403 there and is not needed). `eval/nvbench2/'
+      + 'metadata.py` rebuilds the `raw_data/nvbench_metadata.json` the reference imports at module '
+      + 'scope, which the checkout does not ship — and it rebuilds it from a rule the corpus itself '
+      + 'demonstrates: read every column and type it by name and dtype, dropping nothing. The '
+      + 'checkout\'s own filter stage cannot be what produced the checkout\'s data, because it would '
+      + 'remove 42 fields that the shipped `table_schema` still lists (`formula_1`.number is 804 of 842 '
+      + 'rows empty, `cre_Doc_Template_Mgt`.document_id holds ids like `16514113`, `college_2`.name '
+      + 'holds `Álvarez`). Measured against `column_examples` — min/median/max for a quantitative column '
+      + '— the map agrees on **8,952 of 8,952** field decisions, with 0 of 10,830 gold field references '
+      + 'left untyped (the filtered rebuild left 243). `eval/nvbench2/judge.ts` is the port and '
+      + '`eval/nvbench2/diff.py` is the evidence: the vendored reference and the port produce the same '
+      + 'digest over all 1,501 preprocessed gold charts and the same F1@1/3/5 on both splits. The one '
+      + 'number worth quoting before any model runs is **818 of 1,501 golds are transpose-equivalent** '
+      + '(381 dev, 437 test) — that is how much of the reading the type map decides. Dispatch is the '
+      + 'remaining step, and the leaderboard is trained-model territory (Step-NL2VIS 81.50 F1@3) against '
+      + 'a zero-shot ceiling of 58.96 (GPT-4o prompting), which is the tier to enter at.',
   },
   {
     id: 'viscodebench',

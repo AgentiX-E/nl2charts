@@ -1,0 +1,81 @@
+{
+ "source": "HKUSTDial/nvBench-2.0 @ main: data/nvbench2.0/{dev,test}.json and data/database/database_csv.zip",
+ "judge": "reference/{evaluation,utils}.py, imported unmodified by diff.py",
+ "tables": 803,
+ "metadataDigest": "0ca640e8f89a8f406a36153ab8748b31b21f34194ac0150fe7d0e1eca4356eb5",
+ "fields": {
+  "category": 2940,
+  "quantitative": 1147,
+  "temporal": 0
+ },
+ "splits": {
+  "dev": {
+   "split": "dev",
+   "questions": 750,
+   "tables": 92,
+   "golds": 2321,
+   "emptyGold": 0,
+   "fieldRefs": 5490,
+   "unresolved": 0,
+   "schemaFields": 4158,
+   "missingSchema": 0,
+   "typeDisagreements": 0,
+   "transposed": 381,
+   "digest": "cbebd751a598f0c94684582e672a36d7152059198a7acfe28ad145da0a728f51",
+   "f1": {
+    "1": 0.5231555555555548,
+    "3": 0.33888253968254123,
+    "5": 0.33888253968254123
+   },
+   "hit": {
+    "1": 1,
+    "3": 1,
+    "5": 1
+   },
+   "precision": {
+    "1": 1,
+    "3": 0.3337777777777814,
+    "5": 0.3337777777777814
+   },
+   "recall": {
+    "1": 0.3649777777777775,
+    "3": 0.3653111111111108,
+    "5": 0.3653111111111108
+   }
+  },
+  "test": {
+   "split": "test",
+   "questions": 751,
+   "tables": 87,
+   "golds": 2260,
+   "emptyGold": 0,
+   "fieldRefs": 5340,
+   "unresolved": 0,
+   "schemaFields": 4794,
+   "missingSchema": 0,
+   "typeDisagreements": 0,
+   "transposed": 437,
+   "digest": "313724c47dff673b0996e2e778dc3a75d9829c735c1fabda9f01de3b15ee1599",
+   "f1": {
+    "1": 0.5350199733688429,
+    "3": 0.3442647898040729,
+    "5": 0.3442647898040729
+   },
+   "hit": {
+    "1": 1,
+    "3": 1,
+    "5": 1
+   },
+   "precision": {
+    "1": 1,
+    "3": 0.3342210386151834,
+    "5": 0.3342210386151834
+   },
+   "recall": {
+    "1": 0.3762982689746998,
+    "3": 0.3769640479360846,
+    "5": 0.3769640479360846
+   }
+  }
+ }
+}

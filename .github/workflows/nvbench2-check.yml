@@ -1,0 +1,69 @@
+name: nvbench2-check
+
+# nvBench 2.0's judge, rebuilt and then checked against the reference that produced the leaderboard.
+#
+# The public checkout does not carry `raw_data/nvbench_metadata.json`, which the reference imports at
+# module scope, so the judge cannot start from a clone. It carries the 803 CSV tables and the three
+# question files, and it carries, per sample, a `table_schema` whose `column_examples` were written by
+# the same generator — which is what makes a rebuild checkable rather than merely plausible.
+#
+# This workflow does four things in order, and each one is a precondition of the next:
+#
+#   1. fetch the two splits and the table archive, pinned by byte count and sha256;
+#   2. rebuild the type map and compare it with `column_examples` (8,952 field decisions);
+#   3. gate the corpus: every gold parses, every field a gold names has a type, counts match;
+#   4. run the port against the vendored reference over both splits and compare digest and F1@k.
+#
+# Dispatch-only and not on push: it downloads 22 MB and runs two language runtimes. What runs on every
+# commit is the port's unit suite, with the differential test skipping on a cold cache and saying so.
+
+on:
+  workflow_dispatch:
+    inputs:
+      split:
+        description: Split to validate
+        required: false
+        default: dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nvbench2-check
+  cancel-in-progress: true
+
+jobs:
+  judge:
+    name: judge
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NVBENCH2_CACHE: eval/.cache/nvbench2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # `metadata.py` is Python because the reference's type rule is pandas' dtype inference.
+      - name: Install the reference's dependency
+        run: python3 -m pip install --quiet pandas
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch the corpus
+        run: node eval/nvbench2/fetch.mjs
+      # The map, rebuilt from the published tables, with the rule the corpus demonstrates.
+      - name: Rebuild the type map
+        run: pnpm bench:nvbench2:metadata
+      # Every gold parses, every field a gold names is typed, the counts are the corpus's, and the map
+      # agrees with `column_examples` on all 8,952 field decisions.
+      - name: Check the corpus
+        run: pnpm bench:nvbench2:check
+      # The port against the reference: same digest over 1,501 preprocessed golds, same F1@1/3/5.
+      - name: Compare the port with the reference judge
+        run: pnpm exec vitest run test/nvbench2-reference.test.ts --reporter=dot
