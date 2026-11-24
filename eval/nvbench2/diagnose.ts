@@ -81,6 +81,20 @@ export interface Diagnostic {
    * may do is say what the next prompt should stop writing.
    */
   readonly countFieldless: number;
+  /**
+   * The per-channel keys that a miss carries and its nearest gold does not, counted by name.
+   *
+   * `first.properties` says *that* the two charts differ on a key the reference reads as a property;
+   * it does not say which key, and "which key" is the whole of the next action. The first arm that
+   * sent the corpus's own short prompt read 3.27 F1@3 with 25% of its misses parting on `properties`,
+   * and finding out that the key was `type` — a field Vega-Lite infers from the column and the gold
+   * never writes — took a dispatched sample of twenty replies. This counter is what makes that a
+   * field in the artifact instead of an investigation.
+   *
+   * Counted per miss rather than per slot: a chart that writes `type` on three channels is one miss
+   * with one cause.
+   */
+  readonly extraKeys: Readonly<Record<string, number>>;
 }
 
 /**
@@ -150,6 +164,21 @@ export function withoutCountFields(chart: Chart): Chart {
   return { ...chart, encoding: stripped };
 }
 
+/**
+ * The per-channel keys a prediction carries and a gold does not.
+ *
+ * A key the *gold* has and the prediction does not is not reported: it is an omission, and the
+ * counter exists to name what a prompt told the model to write rather than what it forgot.
+ */
+function extraKeysOf(prediction: Chart, gold: Chart): readonly string[] {
+  const goldKeys = new Set(slotsOf(gold).flatMap(([, slot]) => Object.keys(slot)));
+  const out = new Set<string>();
+  for (const [, slot] of slotsOf(prediction)) {
+    for (const key of Object.keys(slot)) if (!goldKeys.has(key)) out.add(key);
+  }
+  return [...out].sort();
+}
+
 /** Top-level keys other than the three the reference reads first. */
 function restOf(chart: Chart): string {
   return Object.keys(chart)
@@ -206,6 +235,7 @@ export function nearest(prediction: Chart, golds: readonly Chart[]): Chart {
 export function diagnose(cases: readonly Case[], k: number): Diagnostic {
   const agree = emptyCounts();
   const first = emptyCounts();
+  const extraKeys: Record<string, number> = {};
   let predictions = 0;
   let matched = 0;
   let countFieldless = 0;
@@ -216,18 +246,22 @@ export function diagnose(cases: readonly Case[], k: number): Diagnostic {
     for (const candidate of preprocess(item.predictions, item.types).slice(0, k)) {
       if (candidate === null) continue;
       predictions += 1;
-      const comparison = compareAspects(candidate, nearest(candidate, golds));
+      const closest = nearest(candidate, golds);
+      const comparison = compareAspects(candidate, closest);
       if (comparison.equal) {
         matched += 1;
         continue;
       }
       for (const aspect of ASPECTS) if (comparison.aspects[aspect]) agree[aspect] += 1;
       first[comparison.first] += 1;
+      if (comparison.first === 'properties') {
+        for (const key of extraKeysOf(candidate, closest)) extraKeys[key] = (extraKeys[key] ?? 0) + 1;
+      }
       const stripped = canonical(withoutCountFields(candidate));
       if (golds.some((gold) => canonical(withoutCountFields(gold)) === stripped)) countFieldless += 1;
     }
   }
-  return { predictions, matched, agree, first, countFieldless };
+  return { predictions, matched, agree, first, countFieldless, extraKeys };
 }
 
 function emptyCounts(): Record<Aspect, number> {

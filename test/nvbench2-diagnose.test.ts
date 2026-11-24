@@ -213,3 +213,43 @@ describe('diagnose', () => {
     expect(diagnostic.agree.mark).toBe(2);
   });
 });
+
+describe('the key a miss carries and the gold does not', () => {
+  const TYPED: Chart = {
+    mark: 'line',
+    encoding: { y: { field: 'authorder', aggregate: 'mean', type: 'quantitative' }, x: { field: 'paperid', type: 'ordinal' } },
+  };
+
+  it('names it, once per miss rather than once per channel', () => {
+    // The arm that sent the corpus's short prompt wrote `type` on every channel; its misses parted on
+    // `properties` and the artifact could not say which key. The key is the next action, so it is
+    // counted by name — and a chart that writes it twice is one miss with one cause.
+    const diagnostic = diagnose([{ predictions: [TYPED], golds: [GOLD], types: TYPES }], 1);
+    expect(diagnostic.first.properties).toBe(1);
+    expect(diagnostic.extraKeys).toEqual({ type: 1 });
+  });
+
+  it('counts two keys separately, and sums them over misses', () => {
+    const both: Chart = {
+      mark: 'line',
+      encoding: { y: { field: 'authorder', aggregate: 'mean', type: 'quantitative', bin: true }, x: { field: 'paperid' } },
+    };
+    const diagnostic = diagnose([{ predictions: [both, TYPED], golds: [GOLD], types: TYPES }], 2);
+    expect(diagnostic.extraKeys).toEqual({ bin: 1, type: 2 });
+  });
+
+  it('reports nothing for a miss that parts on a group other than the properties', () => {
+    const wrongField: Chart = { mark: 'line', encoding: { y: { field: 'name', aggregate: 'mean' }, x: { field: 'paperid' } } };
+    const diagnostic = diagnose([{ predictions: [wrongField], golds: [GOLD], types: TYPES }], 1);
+    expect(diagnostic.first.field).toBe(1);
+    expect(diagnostic.extraKeys).toEqual({});
+  });
+
+  it('does not report a key the gold has and the prediction omits', () => {
+    const sparse: Chart = { mark: 'line', encoding: { y: { field: 'authorder' }, x: { field: 'paperid' } } };
+    const diagnostic = diagnose([{ predictions: [sparse], golds: [GOLD], types: TYPES }], 1);
+    // The omission parts on `aggregate`, which is its own group and its own counter.
+    expect(diagnostic.first.aggregate).toBe(1);
+    expect(diagnostic.extraKeys).toEqual({});
+  });
+});
