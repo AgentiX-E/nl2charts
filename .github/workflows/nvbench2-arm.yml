@@ -86,9 +86,9 @@ on:
         default: '3'
         type: string
       concurrency:
-        description: 'Calls in flight at once'
+        description: 'Calls in flight at once (a reasoning tier with a long prompt needs more than a chat tier)'
         required: true
-        default: '6'
+        default: '8'
         type: string
 
 permissions:
@@ -109,7 +109,13 @@ jobs:
   arm:
     name: what a model answers, judged by the ported judge
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Four hours, not one. The 60 was sized for a chat tier answering in two seconds a call; a
+    # reasoning tier writes 700 to 2,000 thinking tokens before its array, and one long prompt at
+    # concurrency 4 needs more than an hour for 750 questions. Two full-split arms were killed at
+    # exactly 60 minutes with no artifact and no cache save — the runner gives a timed-out job no
+    # chance to run its `if: always()` steps, so the answers were paid for and discarded. The number
+    # has to be a property of the slowest instrument, not of the one it was first measured with.
+    timeout-minutes: 240
     env:
       LLM_API_KEY: ${{ inputs.provider == 'deepseek' && secrets.DEEPSEEK_API_KEY || secrets.ZHIPU_API_KEY }}
       LLM_BASE_URL: ${{ inputs.provider == 'deepseek' && 'https://api.deepseek.com/v1' || 'https://open.bigmodel.cn/api/paas/v4' }}
