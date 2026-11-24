@@ -18302,8 +18302,9 @@ F1@3: 27.46% → 28.89% (+1.44%, 95% [-0.55%, 3.30%], inside the noise) over 250
 | ask 5 → 8 (250 questions) | +0.06 | [−1.75, +1.98] | inside the noise |
 | `steps`, reasoning tier, 250 questions | +0.70 | [−1.49, +2.92] | inside the noise |
 | **`steps`, chat tier, 750 questions** | **+3.90** | **[+1.99, +5.80]** | **separated from zero** |
+| **`ranks`, chat tier, 750 questions** | **+1.95** | **[+0.46, +3.38]** | **separated from zero** |
 
-Three conclusions, none of which the means alone could produce:
+Four conclusions, none of which the means alone could produce:
 
 1. **The ask sweep is noise.** Five settings between 3 and 8 charts span 1.4 points, and no interval
    clears zero. The arm is not being helped by being asked for more; it is being asked for roughly the
@@ -18321,6 +18322,17 @@ Three conclusions, none of which the means alone could produce:
    already doing the decomposition, in its own words, before it wrote the array. That is the first
    interaction this file has measured rather than assumed: the prompt and the tier are *not* fully
    additive, they overlap where they both resolve the ambiguity.
+
+4. **A count moves a different thing than `steps` does.** `ranks` writes how many distinct values each
+   column holds onto the schema line — the signal the corpus's own schema publishes and this arm was
+   not sending — and it reads **28.16** against 26.21 on the same 750 questions, **+1.95**
+   [+0.46, +3.38]. The gain is not where the rule was aimed: `field` first-partings stay at 800, while
+   channel-set disagreements fall 466 → 414 and matches rise 564 → 602. What the count buys is not a
+   better guess at which column a question means, but the confidence not to drop one — matches up,
+   predictions down from 2,098 to 2,083. The 60-question pilot of the same rule read +7.07
+   [0.74, 14.38], which is the clearest illustration in this file of what a pilot is for: it decides
+   whether to run the full split, not what the full split will say, because one dispatch of 60
+   questions resolves to about ±7 points.
 
 The product path follows the measurement and not symmetry: `DEFAULT_RULES` is
 `count,corpus,corpus2,steps` because that is the highest full-split arm, and a caller paying for a

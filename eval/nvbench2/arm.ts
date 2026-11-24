@@ -1057,7 +1057,9 @@ export async function main(
       model: meter.provider.model,
       questions: pending.questions,
       paid: pending.paid,
-      unit: unitPriceOf(metrics, meter.provider.model),
+      // The quote follows the arm whose instruction is closest to this one: a replica sends the
+      // corpus's prompt and has no rule set, so it keeps the dearest price on the model.
+      unit: unitPriceOf(metrics, meter.provider.model, args.replica === undefined ? args.rules : undefined),
     });
   })();
   process.stderr.write(`${quoteLine(quote)}\n`);

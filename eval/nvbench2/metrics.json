@@ -402,7 +402,8 @@
     "f1@1": 24.44,
     "reasonerWithoutSteps": 31.07,
     "corpusPromptF1@3": 29.49,
-    "corpusPromptGap": "+2.74 [0.46, 4.91]"
+    "corpusPromptGap": "+2.74 [0.46, 4.91]",
+    "yuan": 19.72
    },
    "because": "the shipped rules are the highest full-split arm in `readings` and the published figure is those rules on the reasoning tier over dev 750. `steps` is worth +3.90 [+1.99, +5.80] on the chat tier, where it is the difference between 22.39 and 26.28, and +1.11 at the reasoning tier, which is not separated at 750 rows because the tier already resolves the ambiguity in its own words; `published.reasonerWithoutSteps` is the same rules with `steps` dropped, and `published.chatF1@3` is the chat tier. Percent, the unit eval/benchmarks.ts resolves; every arm's raw fraction stays in `readings`. The default is also the answer to the obvious objection — that our number is a prompt artefact — because the corpus's own published prompts were sent as they were published: the full basic prompt reads 29.49 and the six-step one 25.63, against 32.23 for the shipped rules, and both gaps are separated from zero (`replicas`). No replica beat the shipped arm, so `DEFAULT_REPLICA` stays unset."
   },

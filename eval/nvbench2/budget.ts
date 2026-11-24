@@ -40,12 +40,19 @@ export const DEFAULT_BUDGET_CNY = 12;
  */
 export type Budget = number | 'none';
 
-/** One measured price: yuan per question, and where the number came from. */
+/**
+ * One measured price: yuan per question, and where the number came from.
+ *
+ * `rules` is the instruction that was measured, and it is what makes the price comparable: a 4.9 KB
+ * prompt and a 13.8 KB prompt on the same model differ by 2.5 times, so a price without its rule set
+ * is a price for some other dispatch.
+ */
 export interface UnitPrice {
   readonly model: string;
   readonly cnyPerQuestion: number;
   /** The part of `metrics.json` the row was read from, so a surprising quote can be traced. */
   readonly source: string;
+  readonly rules?: readonly string[];
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -55,50 +62,134 @@ const numberAt = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 
 /**
- * Every measured yuan-per-question row, keyed by model, keeping the dearest.
+ * Every measured yuan-per-question row, one per arm, with the instruction that was measured.
  *
  * `yuan` in an artifact is the whole split's bill and `asked` its denominator, so the ratio is a
  * question's price including the answers that were replayed from cache — which is the right unit for
  * a quote: a replay is what a re-dispatch of an unchanged arm will do.
+ *
+ * Kept per arm rather than per model because a model is not a price. `deepseek-reasoner` reading the
+ * shipped rules costs ¥0.0263 a question and reading the corpus's 13.8 KB six-step prompt costs
+ * ¥0.0671; collapsing those to the maximum is what turned a ¥19.70 dispatch into a quote of ¥50.29
+ * and a refusal that named the wrong instrument.
  */
-export function unitPricesOf(metrics: unknown): ReadonlyMap<string, UnitPrice> {
-  const found = new Map<string, UnitPrice>();
-  const offer = (model: unknown, yuan: unknown, asked: unknown, source: string): void => {
+export function armPricesOf(metrics: unknown): readonly UnitPrice[] {
+  const out: UnitPrice[] = [];
+  const offer = (
+    model: unknown,
+    yuan: unknown,
+    asked: unknown,
+    rules: readonly string[],
+    source: string,
+  ): void => {
     const bill = numberAt(yuan);
     const questions = numberAt(asked);
     if (typeof model !== 'string' || bill === undefined || questions === undefined) return;
-    const price = bill / questions;
-    const prior = found.get(model);
-    if (prior !== undefined && prior.cnyPerQuestion >= price) return;
-    found.set(model, { model, cnyPerQuestion: price, source });
+    out.push({ model, cnyPerQuestion: bill / questions, source, rules });
   };
-  if (!isRecord(metrics)) return found;
+  if (!isRecord(metrics)) return out;
+
+  const rulesAt = (value: unknown): readonly string[] =>
+    Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 
   const arms = isRecord(metrics['arms']) ? metrics['arms'] : {};
   const asked = arms['asked'];
   const readings = isRecord(arms['readings']) ? arms['readings'] : {};
   for (const [name, reading] of Object.entries(readings)) {
-    if (isRecord(reading)) offer(arms['model'], reading['yuan'], asked, `arms.readings.${name}`);
+    if (!isRecord(reading)) continue;
+    offer(arms['model'], reading['yuan'], asked, rulesAt(reading['rules']), `arms.readings.${name}`);
   }
+
+  // The published reading is the arm the product ships, and it is the one a dispatch of the shipped
+  // rules should be priced at — it is a full split on the reasoning tier, which no cell below is.
+  const selected = isRecord(arms['selected']) ? arms['selected'] : {};
+  const published = isRecord(selected['published']) ? selected['published'] : {};
+  offer(
+    selected['model'],
+    published['yuan'],
+    published['questions'],
+    rulesAt(selected['rules']),
+    'arms.selected.published',
+  );
+
   const tiers = isRecord(arms['tiers']) ? arms['tiers'] : {};
   const cells = isRecord(tiers['cells']) ? tiers['cells'] : {};
   for (const [name, cell] of Object.entries(cells)) {
     if (!isRecord(cell)) continue;
-    // `chat|count,corpus` — the tier is the model family, and the cell's own `run` names the dispatch.
-    const model = name.split('|')[0];
-    offer(model, cell['yuan'], tiers['rows'], `arms.tiers.cells.${name}`);
+    // `chat|count,corpus` — the tier is the model family, the rest is the instruction.
+    const [model, list] = name.split('|');
+    offer(model, cell['yuan'], tiers['rows'], (list ?? '').split(',').filter((rule) => rule !== ''), `arms.tiers.cells.${name}`);
   }
 
   const replicas = isRecord(metrics['replicas']) ? metrics['replicas'] : {};
   const replicaReadings = isRecord(replicas['readings']) ? replicas['readings'] : {};
   for (const [name, reading] of Object.entries(replicaReadings)) {
-    if (isRecord(reading)) offer(replicas['model'], reading['yuan'], replicas['asked'], `replicas.readings.${name}`);
+    if (!isRecord(reading)) continue;
+    // A replica arm sends the corpus's prompt, so it has no rules of its own.
+    offer(replicas['model'], reading['yuan'], replicas['asked'], [], `replicas.readings.${name}`);
+  }
+  return out;
+}
+
+/** Every measured yuan-per-question row, keyed by model, keeping the dearest. */
+export function unitPricesOf(metrics: unknown): ReadonlyMap<string, UnitPrice> {
+  const found = new Map<string, UnitPrice>();
+  for (const arm of armPricesOf(metrics)) {
+    const prior = found.get(arm.model);
+    if (prior !== undefined && prior.cnyPerQuestion >= arm.cnyPerQuestion) continue;
+    found.set(arm.model, arm);
   }
   return found;
 }
 
-/** The dearest measured question on this model, or nothing if the model has never been measured. */
-export function unitPriceOf(metrics: unknown, model: string): UnitPrice | undefined {
+/** How much two rule sets have in common, as a share of everything either of them names. */
+function overlap(left: readonly string[], right: readonly string[]): number {
+  const all = new Set([...left, ...right]);
+  if (all.size === 0) return 1;
+  let shared = 0;
+  for (const rule of new Set(left)) if (right.includes(rule)) shared += 1;
+  return shared / all.size;
+}
+
+/**
+ * The measured arm whose instruction is closest to this dispatch's.
+ *
+ * Closeness rather than the maximum, with the maximum kept as the tie-break: the quote has to be an
+ * upper bound on *this* prompt, and the dearest arm on the model is usually a different prompt. A
+ * dispatch naming no rules at all has no instruction to be close to, so it gets the dearest.
+ */
+export function closestPriceOf(
+  metrics: unknown,
+  model: string,
+  rules: readonly string[],
+): UnitPrice | undefined {
+  const candidates = armPricesOf(metrics).filter((arm) => arm.model === model);
+  if (candidates.length === 0) return undefined;
+  let best = candidates[0] as UnitPrice;
+  for (const arm of candidates) {
+    const mine = overlap(arm.rules ?? [], rules);
+    const theirs = overlap(best.rules ?? [], rules);
+    if (mine > theirs || (mine === theirs && arm.cnyPerQuestion > best.cnyPerQuestion)) best = arm;
+  }
+  return best;
+}
+
+/**
+ * What a question costs on this model under this instruction, or nothing if it was never measured.
+ *
+ * With `rules` the quote follows the closest measured arm, because an instruction is most of a bill;
+ * without them it falls back to the dearest, which is the conservative read a caller gets when it
+ * sends a replica (whose prompt has no rule set to be close to).
+ */
+export function unitPriceOf(
+  metrics: unknown,
+  model: string,
+  rules?: readonly string[],
+): UnitPrice | undefined {
+  if (rules !== undefined && rules.length > 0) {
+    const close = closestPriceOf(metrics, model, rules);
+    if (close !== undefined) return close;
+  }
   return unitPricesOf(metrics).get(model);
 }
 

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_BUDGET_CNY, quoteLine, quoteOf, refusalOf, unitPriceOf, unitPricesOf,
+  DEFAULT_BUDGET_CNY, armPricesOf, closestPriceOf, quoteLine, quoteOf, refusalOf, unitPriceOf, unitPricesOf,
 } from '../eval/nvbench2/budget.js';
 
 /** The published readings, so a test of the price table is a test of the file the product reads. */
@@ -48,6 +48,68 @@ describe('the price of a question', () => {
     // The cells are 250-row runs; dividing by the split's 750 would report a third of the real price.
     expect(prices.get(first[0].split('|')[0] as string)?.cnyPerQuestion)
       .toBeGreaterThanOrEqual(first[1].yuan / cell.rows);
+  });
+});
+
+describe('the price of an instruction, not of a model', () => {
+  const SHIPPED = ['count', 'corpus', 'corpus2', 'steps'] as const;
+
+  it('lists one price per measured arm, each with the instruction that was measured', () => {
+    const prices = armPricesOf(METRICS);
+    // More arms than models: the reasoner alone is on file under the shipped rules, two tier cells
+    // and four replicas, and they are five different prices.
+    const reasoner = prices.filter((price) => price.model === 'deepseek-reasoner');
+    expect(reasoner.length).toBeGreaterThan(4);
+    expect(reasoner.some((price) => (price.rules ?? []).join(',') === SHIPPED.join(','))).toBe(true);
+    // A replica has no rule set of its own, which is why a replica dispatch gets the dearest price.
+    expect(reasoner.some((price) => (price.rules ?? []).length === 0)).toBe(true);
+    // Tiers name their instruction in the key, because the cell is a different instrument otherwise.
+    expect(prices.some((price) => price.source.startsWith('arms.tiers.cells.reasoner|count,corpus,'))).toBe(true);
+    expect(armPricesOf(null)).toEqual([]);
+  });
+
+  it('quotes the arm whose instruction is closest, not the dearest one on the model', () => {
+    // The dispatch that was refused: the shipped rules plus one, on the reasoning tier. The closest
+    // measured arm is the published shipped arm at ¥0.02629 a question, not the 13.8 KB six-step
+    // replica at ¥0.06705 — pricing the light prompt at the heavy prompt's rate made a ¥19.72 run
+    // look like a ¥50.29 one and stopped it at a ¥25 ceiling.
+    const close = closestPriceOf(METRICS, 'deepseek-reasoner', [...SHIPPED, 'ranks']);
+    expect(close?.source).toBe('arms.selected.published');
+    expect(close?.cnyPerQuestion).toBeCloseTo(0.02629, 5);
+    expect((close?.cnyPerQuestion ?? 1) * 750).toBeLessThan(25);
+    // The same model, the same question, priced with no rules at all: the dearest, deliberately.
+    expect(unitPriceOf(METRICS, 'deepseek-reasoner')?.cnyPerQuestion).toBeCloseTo(0.06705, 4);
+  });
+
+  it('breaks a tie in closeness towards the dearer arm, because the quote is an upper bound', () => {
+    const metrics = {
+      arms: {
+        model: 'm',
+        asked: 10,
+        readings: {
+          a: { rules: ['x'], yuan: 10 },
+          b: { rules: ['y'], yuan: 30 },
+        },
+      },
+    };
+    // Both arms are equally close to `['x','y']` (one of two rules each): the dearer one wins.
+    expect(closestPriceOf(metrics, 'm', ['x', 'y'])?.source).toBe('arms.readings.b');
+    // Closer beats dearer: `['x']` is a perfect match and is chosen over the dearer `['y']`.
+    expect(closestPriceOf(metrics, 'm', ['x'])?.source).toBe('arms.readings.a');
+    // A dispatch with no rules is every arm at once, and the conservative read is the dearest.
+    expect(closestPriceOf(metrics, 'm', [])?.source).toBe('arms.readings.b');
+    // A model with no arm at all has no closest arm either.
+    expect(closestPriceOf(metrics, 'other', ['x'])).toBeUndefined();
+  });
+
+  it('reads the same price from the arm list as from the per-model maximum', () => {
+    // `unitPricesOf` is the conservative summary and stays one; the two views may not disagree about
+    // which model is which, or a quote and a refusal could cite different tables.
+    for (const [model, price] of unitPricesOf(METRICS)) {
+      const arms = armPricesOf(METRICS).filter((arm) => arm.model === model);
+      const dearest = arms.reduce((left, right) => (right.cnyPerQuestion > left.cnyPerQuestion ? right : left));
+      expect(price.cnyPerQuestion).toBeCloseTo(dearest.cnyPerQuestion, 10);
+    }
   });
 });
 
