@@ -58,7 +58,7 @@ on:
       rules:
         description: 'Comma-separated prompt rules: count, variants, values — or `none`, the first arm'
         required: false
-        default: 'count,variants'
+        default: 'count,corpus'
         type: string
       concurrency:
         description: 'Calls in flight at once'

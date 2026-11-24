@@ -78,46 +78,197 @@
    }
   }
  },
- "arm": {
+ "arms": {
   "model": "deepseek-chat",
   "split": "dev",
   "k": 3,
   "promptVersion": 1,
-  "run": 45317785657,
   "asked": 750,
-  "unparsed": 0,
-  "truncated": 0,
-  "replayed": 1,
-  "hit": {
-   "1": 0.09866666666666667,
-   "3": 0.09866666666666667,
-   "5": 0.09866666666666667
-  },
-  "recall": {
-   "1": 0.03484444444444443,
-   "3": 0.03484444444444443,
-   "5": 0.03484444444444443
-  },
-  "precision": {
-   "1": 0.09866666666666667,
-   "3": 0.0977777777777778,
-   "5": 0.0977777777777778
-  },
-  "f1": {
-   "1": 0.05044444444444444,
-   "3": 0.05022222222222221,
-   "5": 0.05022222222222221
-  },
-  "cost": {
-   "calls": 749,
-   "promptTokens": 201103,
-   "completionTokens": 36352,
-   "yuan": 0.693022
-  },
   "baseline": {
    "F1@3": 0.5896,
-   "source": "arXiv:2503.12880, prompting baseline; Step-NL2VIS 0.8150 is trained"
+   "source": "arXiv:2503.12880, prompting baseline; reproduced prompt in code/prompt_experiment/basic_prompt.py"
   },
-  "digest": "0e91d0c61d6d7391e0e7e5cd92fbcba76cda4f85345d1d185214df0a48ee8560"
+  "trained": {
+   "F1@3": 0.815,
+   "source": "Step-NL2VIS, fine-tuned; not a target for an arm that does not train"
+  },
+  "ceiling": {
+   "1": 0.5231555555555548,
+   "3": 0.8496380952380927,
+   "5": 0.7425449735449745
+  },
+  "readings": {
+   "none": {
+    "run": 45317785657,
+    "rules": [],
+    "f1": {
+     "1": 0.05044444444444444,
+     "3": 0.05022222222222221,
+     "5": 0.05022222222222221
+    },
+    "hit": {
+     "1": 0.09866666666666667,
+     "3": 0.09866666666666667,
+     "5": 0.09866666666666667
+    },
+    "predictions": 783,
+    "matched": 72,
+    "promptTokens": 201103,
+    "yuan": 0.693022
+   },
+   "count": {
+    "run": 45332576788,
+    "rules": [
+     "count"
+    ],
+    "f1": {
+     "1": 0.1157,
+     "3": 0.1168,
+     "5": 0.1168
+    },
+    "hit": {
+     "1": 0.228,
+     "3": 0.228,
+     "5": 0.228
+    },
+    "predictions": 769,
+    "matched": 171,
+    "yuan": 0.7568
+   },
+   "variants": {
+    "run": 45332580873,
+    "rules": [
+     "variants"
+    ],
+    "f1": {
+     "1": 0.0566,
+     "3": 0.0667,
+     "5": 0.0667
+    },
+    "hit": {
+     "1": 0.109,
+     "3": 0.109,
+     "5": 0.109
+    },
+    "predictions": 1313,
+    "matched": 125,
+    "yuan": 1.0409
+   },
+   "count+variants": {
+    "run": 45331796164,
+    "rules": [
+     "count",
+     "variants"
+    ],
+    "f1": {
+     "1": 0.129,
+     "3": 0.1464,
+     "5": 0.1464
+    },
+    "hit": {
+     "1": 0.2587,
+     "3": 0.2733,
+     "5": 0.2733
+    },
+    "predictions": 1121,
+    "matched": 246,
+    "promptTokens": 278353,
+    "yuan": 0.999842
+   },
+   "values": {
+    "run": 45334331206,
+    "rules": [
+     "values"
+    ],
+    "f1": {
+     "1": 0.0482,
+     "3": 0.0482,
+     "5": 0.0482
+    },
+    "hit": {
+     "1": 0.096,
+     "3": 0.096,
+     "5": 0.096
+    },
+    "predictions": 786,
+    "matched": 70,
+    "promptTokens": 280505,
+    "yuan": 0.8577
+   },
+   "count+values": {
+    "run": 45334337191,
+    "rules": [
+     "count",
+     "values"
+    ],
+    "f1": {
+     "1": 0.1103,
+     "3": 0.1103,
+     "5": 0.1103
+    },
+    "hit": {
+     "1": 0.224,
+     "3": 0.224,
+     "5": 0.224
+    },
+    "predictions": 769,
+    "matched": 164,
+    "promptTokens": 314255,
+    "yuan": 0.9264
+   },
+   "count+corpus": {
+    "run": 45335953364,
+    "rules": [
+     "count",
+     "corpus"
+    ],
+    "f1": {
+     "1": 0.1522,
+     "3": 0.1588,
+     "5": 0.1588
+    },
+    "hit": {
+     "1": 0.3013,
+     "3": 0.304,
+     "5": 0.304
+    },
+    "predictions": 827,
+    "matched": 237,
+    "countFieldless": 38,
+    "yuan": 1.0003
+   },
+   "count+variants+corpus": {
+    "run": 45335957932,
+    "rules": [
+     "count",
+     "variants",
+     "corpus"
+    ],
+    "f1": {
+     "1": 0.1303,
+     "3": 0.1444,
+     "5": 0.1444
+    },
+    "hit": {
+     "1": 0.2573,
+     "3": 0.2707,
+     "5": 0.2707
+    },
+    "predictions": 980,
+    "matched": 231,
+    "countFieldless": 96,
+    "promptTokens": 393103,
+    "yuan": 1.1417
+   }
+  },
+  "selected": {
+   "rules": [
+    "count",
+    "corpus"
+   ],
+   "f1@3": 0.1588,
+   "run": 45335953364,
+   "because": "highest F1@3 of the eight arms; the default in eval/nvbench2/arm.ts is this list"
+  }
  }
 }

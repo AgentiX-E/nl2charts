@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
-  answerOf, buildSpecPrompt, chartOf, main, mapLimit, parseArgs, parseSpecs, providerFromEnv, runArm,
-  rulesOf, splitDigest, summaryLine, PROMPT_VERSION, SPEC_MARKS,
+  answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs,
+  providerFromEnv, runArm, rulesOf, splitDigest, summaryLine, PROMPT_VERSION, SPEC_MARKS,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey } from '../eval/text2vis/content-store.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
@@ -410,8 +410,21 @@ describe('the arm', () => {
     expect(buildSpecPrompt({ question: 'q' }, types, 3, ['values'])[1]).toContain('amount (quantitative)');
   });
 
+  it('ships the rules the ablation measured best, so the product path cannot drift from the experiment', () => {
+    // The one link between an arm and the product that a test can hold: whatever `metrics.json` says
+    // reads highest IS what a caller who names no rules gets. A better arm with no default change
+    // fails here, and a default change with no arm behind it fails too.
+    const fixture = JSON.parse(readFileSync('eval/nvbench2/metrics.json', 'utf8')) as {
+      arms: { readings: Record<string, { rules: string[]; f1: Record<string, number> }> };
+    };
+    const readings = Object.entries(fixture.arms.readings);
+    const best = readings.reduce((left, right) => (right[1].f1['3']! > left[1].f1['3']! ? right : left));
+    expect([...best[1].rules].sort()).toEqual([...DEFAULT_RULES].sort());
+    expect(DEFAULT_RULES).toContain('count');
+  });
+
   it('reads a rule list, refuses a rule it does not have, and treats the empty string as none', () => {
-    expect(rulesOf(undefined)).toEqual(['count', 'variants', 'values', 'corpus']);
+    expect(rulesOf(undefined)).toEqual(['count', 'corpus']);
     expect(rulesOf('')).toEqual([]);
     expect(rulesOf('variants')).toEqual(['variants']);
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
@@ -437,10 +450,10 @@ describe('the command line', () => {
   it('reads the flags it documents and defaults the rest', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', artifact: undefined, limit: undefined, k: 3, concurrency: 6, maxTokens: 900, samples: undefined,
-      rules: ['count', 'variants', 'values', 'corpus'],
+      rules: ['count', 'corpus'],
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'variants', 'values', 'corpus'] });
+      .toEqual({ split: 'test', cache: 'c', artifact: 'out.json', limit: 5, k: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'corpus'] });
   });
 
   it('carries the sample count through the command line, and through the run it starts', () => {

@@ -18030,40 +18030,72 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | BIRD dev | the same questions | R-VES | **partial** | 56.63 over 600 of 1,532 questions, floor 57.96 |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
-| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **5.02** F1@3 (ceiling 84.96, baseline 58.96) |
+| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **15.88** F1@3 (ceiling 84.96, baseline 58.96, 8 arms) |
 | VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
 
-### nvBench 2.0: the first arm, and why 5.02 is a claim about the prompt rather than about the model
+### nvBench 2.0: eight arms, one prompt question, and where the 43 points still are
 
-`nvbench2-arm` (`eval/nvbench2/arm.ts`, run `45317785657`) asked one model, once per question, for
-three Vega-Lite fragments and judged the reply with the ported reference:
+`nvbench2-arm` (`eval/nvbench2/arm.ts`) asks one model, once per question, for `k` Vega-Lite
+fragments and judges the reply with the ported reference. The prompt is a bundle of rules, each
+switchable, so a reading can say which one moved it rather than whether "the new prompt" helped:
 
-| reading | value | what it is read against |
-| --- | --- | --- |
-| F1@1 | 5.04 | ceiling@1 **52.32** — the same number the corpus reads against itself |
-| F1@3 | **5.02** | ceiling@3 **84.96**, prompting baseline **58.96**, trained Step-NL2VIS 81.50 |
-| hit@1 | 9.87 | 74 of 750 questions had a correct chart somewhere in the reply |
-| unparsed / truncated | 0 / 0 | the reply format is not what failed |
-| cost | ¥0.693 | 749 calls, 201,103 prompt / 36,352 completion tokens |
+| arm | rules | F1@1 | F1@3 | hit@1 | charts | matched | cost |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A0 | — | 5.04 | 5.02 | 9.87 | 783 | 72 | ¥0.69 |
+| A1 | `count` | 11.57 | 11.68 | 22.80 | 769 | 171 | ¥0.76 |
+| A2 | `variants` | 5.66 | 6.67 | 10.90 | 1,313 | 125 | ¥1.04 |
+| A3 | `values` | 4.82 | 4.82 | 9.60 | 786 | 70 | ¥0.86 |
+| A4 | `count,values` | 11.03 | 11.03 | 22.40 | 769 | 164 | ¥0.93 |
+| A5 | `count,variants` | 12.90 | 14.64 | 25.87 | 1,121 | 246 | ¥1.00 |
+| **A6** | **`count,corpus`** | **15.22** | **15.88** | **30.13** | 827 | 237 | ¥1.00 |
+| A7 | `count,variants,corpus` | 13.03 | 14.44 | 25.73 | 980 | 231 | ¥1.14 |
 
-The ceiling column is not decoration. `facts.ceiling` is `E[2·min(k,|G|)/(k+|G|)]` over the split's
-own gold-set sizes — 311 questions with two golds, 169 with three, 158 with four, 112 with five — and
-at k=1 it reproduces the reference's gold-against-gold reading to five decimals (0.523156). A perfect
-top-1 answer scores 52.32 on this metric, not 100, and any reading quoted without that number would
-be read as an accuracy.
+The comparable references, and they do not move: ceiling@3 **84.96** (the gold sets are 2–5 charts
+each, so this metric caps recall at `k/|G|`), the corpus's own prompting baseline **58.96**, and the
+fine-tuned Step-NL2VIS **81.50** which this repository is not going to chase by training. `count` is
+worth +6.66, the corpus's own channel constraints +10.86 over no rules at all, and the whole table
+costs about ¥7 to produce.
 
-The eight-row sample the artifact keeps verbatim says what the loss is. Structure is not the problem:
-marks, aggregates and the row-restricting `transform` all came back as asked, and three of the eight
-matched a gold exactly. The miss is **which column is the axis**. On
-"The average author ID is calculated based on each paper ID" the reply is byte-identical to the first
-gold; on "The average author order … for authors with an order of 2 or higher" it is identical to the
-golds except that it charts the average by `authid` where the corpus accepts `paperid` or `instid`.
+Three of these arms exist because the alternatives were plausible:
 
-That is the corpus's own shape showing through: its golds for one question vary the axis column and
-agree on everything else. A prompt that asks for three *different* charts of one question therefore
-spends its candidates on three marks where it could spend them on three axes. Prompt v2 does the
-latter, and the number to beat is 58.96 — with the same ¥0.7 a dispatch costs, so a plateau here is a
-prompt question and not a budget one.
+- **`values` was rejected.** Listing three sample values per column — the corpus's own
+  `table_schema.column_examples`, part of the schema rather than of the gold — reads 4.82 alone and
+  11.03 on top of `count`, against 11.68 for `count`. Column *choice* is the dominant failure and
+  sample values do not fix it: the columns a question could mean (`authid`, `authorder`,
+  `authposition`) hold values of the same shape.
+- **`variants` is real but weaker than the corpus's own rule.** Asking for `k` charts that differ only
+  in the unnamed axis lifts F1@3 from 5.02 to 6.67 alone and to 14.64 with `count`. The corpus states
+  the same idea better in `code/prompt_experiment/basic_prompt.py`: *a phrase that could name more than
+  one column makes each candidate a chart of its own*. That is `corpus`, and it is worth another 1.2
+  points on top of `count` — while `variants` on top of `corpus` **subtracts** 1.4 (A7), because two
+  enumerations of the same freedom compete for the same three slots.
+- **`count` is not our discovery.** The corpus's own prompt says a count must not name a field. We
+  arrived at it from 157 misses that were one convention from a hit, and then found it stated in the
+  benchmark's baseline. The number it is worth (+6.66) is the size of a prompt detail that a reader of
+  the leaderboard would never see.
+
+What the misses are made of is now measured rather than inferred. `eval/nvbench2/diagnose.ts`
+decomposes every scored prediction against its nearest gold in the seven groups of keys the reference
+compares — `mark`, `channels`, `field`, `aggregate`, `properties`, `transform`, `rest` — and reports
+both which groups agreed and which parted first. For A0 that is `field` 416, `channels` 171, `mark` 82,
+`aggregate` 21, `properties` 12, `transform` 9; for A6 it is `field` 258, `channels` 174, `mark` 76,
+`transform` 55. Structure is not the wall for a model that has been told the constraint table; the
+wall is still which column a sentence means.
+
+Two facts about the corpus that a reader of the leaderboard should have, both computed here:
+
+- **k=5 is worse than k=3 on this corpus.** `facts.ceiling` is 52.32 / 84.96 / 74.25 at k = 1 / 3 / 5,
+  because precision's denominator is `k` while the gold sets are 2–5 charts. Asking for five costs ten
+  points before a model says anything.
+- **Half of dev's golds are transpose-equivalent under the corpus's own type map** (381 of 750), so
+  the type map `metadata.py` rebuilds is load-bearing rather than decorative; the port that reverses
+  axes without it would score a chart its author got right as wrong.
+
+The 43 points between A6 and the prompting baseline are a prompt-and-model question, not a budget one:
+one dispatch of the whole dev split is ¥1.00, so a prompt hypothesis can be tested for less than a
+coffee. The next hypothesis is written down and priced: the corpus's baseline prompt asks for **1 to 5**
+charts and its own examples are single-chart completions, while A6 asks for at most three — a k and a
+wording question that A2 and A7 both say matters.
 
 Four of nine carry a number over the denominator their leaderboard reports, and two of those four are
 counts rather than accuracies. A fifth — R-VES — carries a number over 600 of its leaderboard's 1,532

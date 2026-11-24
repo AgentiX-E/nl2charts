@@ -154,6 +154,24 @@ histogram, the expressible share of the gold vocabulary, and the row-restricting
 gold set uses (`bar`, `arc`, `rect`, `line`, `boxplot`, `point`) all map onto the eleven this
 repository draws; and 778 of 2,321 golds carry a `transform`.
 
+## Ablation note (2026-11-24)
+
+The prompt this ADR left open is now eight measured arms, in `eval/nvbench2/metrics.json` and tabulated
+in `docs/benchmarks.md`. Two of them changed the answer to a question this ADR asked:
+
+**What the `k` candidates are for.** This ADR proposed spending them on charts that differ in the
+unnamed axis; the corpus's own `code/prompt_experiment/basic_prompt.py` states it better — *a phrase
+that could name more than one column makes each candidate a chart of its own* — and that rule (`corpus`)
+is worth 15.88 F1@3 with `count`, against 14.64 for our paraphrase and 14.44 for both together. Two
+enumerations of one freedom compete for the same slots, so the paraphrase was removed from the default
+rather than kept "because it helped once".
+
+**What the comparison tolerates.** `compareAspects` in `eval/nvbench2/diagnose.ts` names the seven
+groups of keys the reference compares, and the one that surprised us is `properties`: dev's 6,044
+channel slots carry no `type`, so a reply written from the Vega-Lite documentation is unequal to a gold
+it agrees with. That is the reference's tolerance, reported and not adjusted — but it is why `count`, a
+convention about naming a column on a count, is worth +6.66 points and why the diagnostic exists.
+
 ## What this does not decide
 
 - Whether the product ever returns more than one chart to a user.

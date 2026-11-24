@@ -93,6 +93,16 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
 export const RULES = ['count', 'variants', 'values', 'corpus'] as const;
 export type Rule = (typeof RULES)[number];
 
+/**
+ * The rules the product path sends, which is the arm the ablation measured best.
+ *
+ * `count` and `corpus` read 15.88 F1@3 on dev against 5.02 for no rules at all; `variants` (14.64 with
+ * `count`), `values` (4.82 alone) and `count,variants,corpus` (14.44) were each measured and not
+ * selected. `test/nvbench2-arm.test.ts` re-derives this from `metrics.json`, so an arm that beats this
+ * one without the default following it fails CI rather than drifting quietly.
+ */
+export const DEFAULT_RULES: readonly Rule[] = ['count', 'corpus'];
+
 /** What each rule adds to the instruction. Wrapped to keep the system message readable in a log. */
 const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
   count: [
@@ -547,7 +557,7 @@ export function providerFromEnv(env: Readonly<Record<string, string | undefined>
  * because a typo that silently turned a rule off would be reported as "the rule did not help".
  */
 export function rulesOf(raw: string | undefined): readonly Rule[] {
-  if (raw === undefined) return RULES;
+  if (raw === undefined) return DEFAULT_RULES;
   if (raw === '') return [];
   const named = raw.split(',').map((entry) => entry.trim());
   const unknown = named.filter((entry) => !(RULES as readonly string[]).includes(entry));
