@@ -18030,7 +18030,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | BIRD dev | the same questions | R-VES | **partial** | 56.63 over 600 of 1,532 questions, floor 57.96 |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
-| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **26.28** F1@3 (chat, shipped rules), 31.12 on the reasoning tier; ceiling 84.96, baseline 58.96, 10 arms |
+| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **32.23** F1@3 (reasoning tier), 26.28 on chat; ceiling 84.96, baseline 58.96, 10 arms |
 | VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
 
 ### nvBench 2.0: nine arms, one prompt question, and where the 36 points still are
@@ -18169,12 +18169,17 @@ already paid for (`calls: 0`), so the only difference within a column is the mod
 | --- | ---: | ---: | ---: |
 | `count,corpus` | 15.31 (275 charts, 78 gold) | 24.56 (315, 127) | **+9.25** |
 | `count,corpus,corpus2` | 23.53 (550, 151) | **32.63** (548, 207) | **+9.10** |
-| **what the rule is worth** | **+8.22** | **+8.07** | |
+| **what `corpus2` is worth** | **+8.22** | **+8.07** | |
+| `count,corpus,corpus2,steps` | 27.46 (699, 196) | 33.32 (521, 209) | +5.86 |
+| **what `steps` is worth** | **+3.93** | **+0.69** | |
 
-The two effects are additive and independent: the prompt is worth about +8 points at either tier and
-the tier about +9 at either prompt. That is the strongest form this repository can report the
-requirement in — a strong model that is better on *both* prompts, rather than a strong model that
-happens to be better on the one it was tuned against.
+`corpus2` is additive with the tier — worth about +8 at either tier, while the tier is worth about +9
+at either prompt — and that is the strongest form this repository can report the requirement in: a
+strong model that is better on *both* prompts, rather than a strong model that happens to be better on
+the one it was tuned against. `steps` is the exception that makes the table worth keeping: worth +3.93
+on the chat tier and +0.69 on the reasoning one, because a reasoning tier already does in its own words
+what the preamble asks it to write down. Two prompts, two tiers, and one of the four cells is a
+substitution rather than a sum.
 
 It also says the prompt work is not a consolation prize for a cheap model. `corpus2` lifts the
 reasoning tier by the same 8 points it lifts the chat tier, and the reasoning tier's gains are not
@@ -18188,7 +18193,7 @@ reasoning tier costs ¥4.58 for those 250 questions against ¥0.57 for the chat 
 rows, 8× the bill for 9 points; over the full split it is ¥13.80 against ¥1.70. That is the trade the
 product makes per call, and the reason the tier is a parameter rather than a default.
 
-### Where 26.28 sits, and what the 31 points are made of
+### Where 32.23 sits, and what the 29 points are made of
 
 The corpus publishes the systems it compares, and until this round this file quoted two of them. The
 fuller table (arXiv:2503.12880v2, Table 3 and §4.2) changes what the next arm should be:
@@ -18201,8 +18206,8 @@ fuller table (arXiv:2503.12880v2, Table 3 and §4.2) changes what the next arm s
 | GPT-4o-Step *(prompted)* | **no** | **60.78** | 60.66 | the same prompt with step-wise reasoning |
 | GPT-4o *(prompted)* | no | 58.96 | 59.03 | the zero-shot baseline this file quotes |
 | Qwen2.5-7B-Step *(prompted)* | no | — | 64.08 | |
-| **this repository** | **no** | **26.28** | 26.28 | chat tier, 750 questions, ¥2.59 — `count,corpus,corpus2,steps` |
-| **this repository** | **no** | **31.12** | 31.12 | reasoning tier, 750 questions, ¥13.80 — without `steps`, which buys nothing there |
+| **this repository** | **no** | **32.23** | 32.23 | reasoning tier, 750 questions, shipped rules |
+| **this repository** | **no** | **26.28** | 26.28 | chat tier, 750 questions, ¥2.59 — the same rules |
 
 Two things to read off it. First, the gap is not explained by training: a **prompted** Qwen3-235B with
 step-wise reasoning reads 77.78 F1@5, 18.8 points above the GPT-4o prompting baseline and 45 above our
@@ -18214,9 +18219,11 @@ the step decomposition is the lever rather than the model.
 
 That was the next arm (`steps`), and it is a prompt change rather than a fine-tune, which is the only
 kind of change a repository that does not train can make. It is measured now and it is worth +3.90
-(separated), so 26.28 is a floor rather than a claim: the corpus's construction plus its step
-decomposition, with a chat tier and no training, against 60.78 for GPT-4o-Step and 81.50 for the
-trained system — the remaining 34 points are what a stronger model and a step-*trained* decoder buy.
+(separated on the cheap tier), so 32.23 is a floor rather than a claim: the corpus's construction plus
+its step decomposition, on a reasoning tier, with no training — against 60.78 for GPT-4o-Step on the
+same kind of prompt and 81.50 for the trained system. The remaining 29 points are what a stronger model
+and a step-*trained* decoder buy, and the 18.8 points between GPT-4o and a prompted Qwen3-235B say the
+model is the larger half of it.
 
 ### What a difference has to survive
 
@@ -18254,7 +18261,9 @@ Three conclusions, none of which the means alone could produce:
    96 → 198 per question, ¥1.70 → ¥2.59 for the split — because the preamble is ~60 tokens and the arm
    now answers 2.80 charts per question instead of 2.19.
 3. **`steps` is a substitute for reasoning, not a complement.** On the reasoning tier the same rule is
-   worth +0.70 over 250 questions, inside the noise, for 1.47× the bill (¥4.58 → ¥6.73). The tier was
+   worth +0.70 over 250 questions, inside the noise, for 1.47× the bill (¥4.58 → ¥6.73); over the full
+   split it reads 32.23 against 31.07 — +1.16, 95% [−0.52, +2.79], the same size and the same verdict.
+   The tier was
    already doing the decomposition, in its own words, before it wrote the array. That is the first
    interaction this file has measured rather than assumed: the prompt and the tier are *not* fully
    additive, they overlap where they both resolve the ambiguity.

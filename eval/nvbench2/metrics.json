@@ -388,19 +388,21 @@
     "corpus2",
     "steps"
    ],
-   "model": "deepseek-chat",
+   "model": "deepseek-reasoner",
    "split": "dev",
-   "run": 45363830228,
+   "run": 45369172462,
    "published": {
-    "f1@3": 26.28,
-    "hit@3": 49.2,
+    "f1@3": 32.23,
+    "hit@3": 53.6,
     "questions": 750,
     "ceiling": 84.96,
     "baseline": 58.96,
     "chatF1@3": 26.28,
-    "model": "deepseek-chat (26.28); the reasoning tier without steps reads 31.12"
+    "model": "deepseek-reasoner with the shipped rules (32.23) and deepseek-chat with the same rules (26.28)",
+    "f1@1": 24.44,
+    "reasonerWithoutSteps": 31.07
    },
-   "because": "the shipped rules are the highest full-split arm in `readings`, which the drift test re-derives on every run; the published figure is that arm on the chat tier over dev 750, and `steps` clears zero against the previous default (+3.90, 95% [1.99, 5.80], see `arms.prefix.intervals`). The reasoning tier reads 31.12 without `steps` because the decomposition it adds is inside the noise there (+0.70, 95% [-1.49, 2.92]) for 1.47x the bill. `published` is percent, which is the unit eval/benchmarks.ts resolves; every arm's raw fraction stays in `readings`."
+   "because": "the shipped rules are the highest full-split arm in `readings` and the published figure is those rules on the reasoning tier over dev 750. `steps` is worth +3.90 [+1.99, +5.80] on the chat tier, where it is the difference between 22.39 and 26.28, and +1.11 at the reasoning tier, which is not separated at 750 rows because the tier already resolves the ambiguity in its own words; `published.reasonerWithoutSteps` is the same rules with `steps` dropped, and `published.chatF1@3` is the chat tier. Percent, the unit eval/benchmarks.ts resolves; every arm's raw fraction stays in `readings`."
   },
   "tiers": {
    "rows": 250,
@@ -444,14 +446,15 @@
    "fullDev": {
     "reasoner|count,corpus,corpus2": {
      "questions": 750,
-     "f1@3": 31.12,
-     "f1@1": 23.65,
-     "hit@3": 52.53,
+     "f1@3": 31.07,
+     "f1@1": 23.6,
+     "hit@3": 52.4,
      "charts": 1646,
      "matched": 602,
-     "run": 45348663991,
+     "run": 45372144584,
      "yuan": 13.8,
-     "truncated": 5
+     "truncated": 5,
+     "note": "replayed from the run that published 31.12; the byte-identical replay under the ANSWER: parser reads 31.07, which is one question — a parser change can move a replayed reading, and that is why a replay is a regression test rather than a formality"
     },
     "chat|count,corpus,corpus2": {
      "questions": 750,
@@ -463,6 +466,20 @@
      "run": 45344467436,
      "yuan": 1.7,
      "truncated": 0
+    },
+    "reasoner|count,corpus,corpus2,steps": {
+     "questions": 750,
+     "scored": 750,
+     "f1@3": 32.23,
+     "f1@1": 24.44,
+     "hit@3": 53.6,
+     "charts": 1518,
+     "matched": 607,
+     "run": 45369172462,
+     "yuan": 19.72,
+     "truncated": 12,
+     "failed": 0,
+     "note": "252 of 750 answers were replayed from the 250-row run, so the bill covers the other 498"
     }
    }
   },
@@ -599,6 +616,16 @@
      "low": 1.86,
      "high": 4.82,
      "separated": true,
+     "rows": 750
+    },
+    {
+     "base": "reasoner|count,corpus,corpus2",
+     "arm": "reasoner|count,corpus,corpus2,steps",
+     "k": 3,
+     "delta": 1.16,
+     "low": -0.52,
+     "high": 2.79,
+     "separated": false,
      "rows": 750
     }
    ],
