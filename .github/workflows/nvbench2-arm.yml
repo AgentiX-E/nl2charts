@@ -70,6 +70,15 @@ on:
         required: false
         default: 'count,corpus,corpus2'
         type: string
+      mirrors:
+        description: 'Offer the transposed reading of a rect or point chart: none, interleave (behind its chart) or append'
+        required: false
+        default: 'none'
+        type: choice
+        options:
+          - 'none'
+          - 'interleave'
+          - 'append'
       replay:
         description: 'Replay only: refuse to call the endpoint if any of these questions is missing from the answer store'
         required: false
@@ -229,6 +238,7 @@ jobs:
           if [ "${{ inputs.samples }}" != "0" ]; then EXTRA="$EXTRA --samples ${{ inputs.samples }}"; fi
           if [ "${{ inputs.replica }}" != "none" ]; then EXTRA="$EXTRA --replica ${{ inputs.replica }}"; fi
           if [ "${{ inputs.replay }}" = "true" ]; then EXTRA="$EXTRA --replay"; fi
+          if [ "${{ inputs.mirrors }}" != "none" ]; then EXTRA="$EXTRA --mirrors ${{ inputs.mirrors }}"; fi
           pnpm bench:nvbench2:arm --split "$SPLIT" --k "$K" --concurrency "$CONCURRENCY" $EXTRA \
             --max-tokens "$MAX_TOKENS" --budget "${{ inputs.budget }}" \
             --rules "${{ steps.instrument.outputs.list }}" --artifact eval/out/nvbench2-arm.json

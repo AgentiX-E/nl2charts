@@ -372,6 +372,56 @@ export function productPrompt(
   return buildSpecPrompt(row, types, k, tier === 'reasoning' ? REASONING_RULES : DEFAULT_RULES, DEFAULT_REPLICA);
 }
 
+/** How a reply's interchangeable axes are offered, if at all. */
+export type Mirrors = 'none' | 'interleave' | 'append';
+
+/**
+ * The marks whose two position channels are interchangeable to the reference.
+ *
+ * `preprocess` normalises the other cases itself: two quantitative axes are swapped when their names
+ * sort the other way, and a bar, line or boxplot with a quantitative x and a non-quantitative y is
+ * turned. A `rect` heat map and a `point` scatter are left as written, so the corpus enumerates both
+ * orientations in the gold set — 109 of the shipped reasoning arm's 465 column-first misses are one
+ * swap away from a gold they did not otherwise touch. Offering the mirror is therefore answering the
+ * question the way the corpus answers it, not a tolerance added to the judge.
+ */
+const MIRROR_MARKS: readonly string[] = ['rect', 'point'];
+
+/** The same chart with its two position channels exchanged, when the mark makes that meaningful. */
+export function mirrorsOf(chart: Chart): Chart | undefined {
+  if (!MIRROR_MARKS.includes(chart['mark'] as string)) return undefined;
+  const encoding = chart['encoding'];
+  if (!isRecordLike(encoding)) return undefined;
+  const x = encoding['x'];
+  const y = encoding['y'];
+  if (!isRecordLike(x) || !isRecordLike(y)) return undefined;
+  return { ...chart, encoding: { ...encoding, x: y, y: x } };
+}
+
+/**
+ * A reply, with the orientations the mark leaves open.
+ *
+ * `interleave` puts each mirror directly after the chart it mirrors, so a width of three becomes the
+ * first column and both of its readings; `append` keeps the model's own order and puts every mirror
+ * after it, which at `k`=3 means they are not scored and the flag is a no-op. Both exist because the
+ * choice is a trade — a slot spent on an orientation is a slot not spent on another column — and the
+ * cached answers can price that trade without buying anything.
+ */
+export function withMirrors(charts: readonly Chart[], mode: Mirrors): Chart[] {
+  if (mode === 'none') return [...charts];
+  if (mode === 'append') {
+    const mirrors = charts.map(mirrorsOf).filter((chart): chart is Chart => chart !== undefined);
+    return [...charts, ...mirrors];
+  }
+  const out: Chart[] = [];
+  for (const chart of charts) {
+    out.push(chart);
+    const mirror = mirrorsOf(chart);
+    if (mirror !== undefined) out.push(mirror);
+  }
+  return out;
+}
+
 /** The same array without its repeats, in the order the model wrote them. */
 function dedupe(charts: readonly Chart[]): Chart[] {
   const seen = new Set<string>();
@@ -604,6 +654,8 @@ export interface ArmReport {
    */
   readonly diagnostic: Diagnostic;
   readonly facts: GoldFacts;
+  /** Present only when the reply's orientations were mirrored, and which way. */
+  readonly mirrors?: Mirrors;
   readonly cost: {
     readonly calls: number;
     readonly promptTokens: number;
@@ -622,6 +674,7 @@ async function answerOne(
     readonly maxTokens: number;
     readonly rules: readonly Rule[];
     readonly replica?: Replica;
+    readonly mirrors: Mirrors;
     readonly cache?: ContentStore<StoredAnswer>;
   },
 ): Promise<AnsweredRow> {
@@ -630,7 +683,7 @@ async function answerOne(
   const key = cacheKey(identityOf(system, user, provider.model, options.maxTokens), PROMPT_VERSION);
   const cached = options.cache?.get(key, { model: provider.model });
   if (cached !== undefined) {
-    const replayed = cached.truncated ? [] : parseSpecs(cached.reply, options.ask, mode);
+    const replayed = cached.truncated ? [] : withMirrors(parseSpecs(cached.reply, options.ask, mode), options.mirrors);
     return {
       index: row.index,
       charts: replayed,
@@ -671,7 +724,7 @@ async function answerOne(
   }
   const reply = response.text;
   const truncated = response.finishReason === 'length';
-  const charts = truncated ? [] : parseSpecs(reply, options.ask, mode);
+  const charts = truncated ? [] : withMirrors(parseSpecs(reply, options.ask, mode), options.mirrors);
   const usage: TokenCounts = {
     promptTokens: response.usage?.promptTokens ?? 0,
     completionTokens: response.usage?.completionTokens ?? 0,
@@ -744,6 +797,8 @@ export interface ArmOptions {
    */
   readonly replica?: Replica;
   readonly cache?: ContentStore<StoredAnswer>;
+  /** How the reply's interchangeable axes are offered; absent means as written. */
+  readonly mirrors?: Mirrors;
   readonly limit?: number;
   /** How many answered rows to keep verbatim, so a reading that surprises can be looked at. */
   readonly samples?: number;
@@ -781,6 +836,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
           ask,
           maxTokens: options.maxTokens,
           rules,
+          mirrors: options.mirrors ?? 'none',
           ...(options.replica === undefined ? {} : { replica: options.replica }),
           ...(options.cache === undefined ? {} : { cache: options.cache }),
         });
@@ -814,6 +870,7 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     reading,
     perQuestion: perQuestionOf(cases, SCORED_KS),
     rules,
+    ...(options.mirrors === undefined || options.mirrors === 'none' ? {} : { mirrors: options.mirrors }),
     ...(options.replica === undefined ? {} : { replica: options.replica }),
     diagnostic: diagnose(cases, options.k),
     facts: factsOf(asked),
@@ -934,6 +991,13 @@ export function replicaOf(raw: string | undefined): Replica | undefined {
   return raw as Replica;
 }
 
+/** The `--mirrors` value, refused rather than defaulted when it is not one this file knows. */
+export function mirrorsOfFlag(raw: string | undefined): Mirrors {
+  if (raw === undefined || raw === '' || raw === 'none') return 'none';
+  if (raw !== 'interleave' && raw !== 'append') throw new Error(`--mirrors ${raw} is not none, interleave or append`);
+  return raw;
+}
+
 export function parseArgs(argv: readonly string[]): {
   split: string;
   cache: string;
@@ -949,6 +1013,7 @@ export function parseArgs(argv: readonly string[]): {
   replica: Replica | undefined;
   budget: Budget;
   replay: boolean;
+  mirrors: Mirrors;
 } {
   const value = (flag: string): string | undefined => {
     const at = argv.indexOf(flag);
@@ -993,6 +1058,7 @@ export function parseArgs(argv: readonly string[]): {
     // endpoint at all. A hint would let a changed prompt, model or token budget quietly re-buy 750
     // answers under the word "replay", which is exactly what happened once.
     replay: argv.includes('--replay'),
+    mirrors: mirrorsOfFlag(value('--mirrors')),
   };
 }
 
@@ -1127,6 +1193,7 @@ export async function main(
     concurrency: args.concurrency,
     rules: args.rules,
     ...(args.replica === undefined ? {} : { replica: args.replica }),
+    ...(args.mirrors === 'none' ? {} : { mirrors: args.mirrors }),
     cache: store,
     ...(args.limit === undefined ? {} : { limit: args.limit }),
     ...(args.samples === undefined ? {} : { samples: args.samples }),

@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs, pendingOf,
-  DEFAULT_REPLICA, productPrompt, providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest,
+  DEFAULT_REPLICA, mirrorsOf, mirrorsOfFlag, productPrompt, providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest, withMirrors,
   summaryLine, timeoutMsOf, PROMPT_VERSION, REASONING_RULES, RULES, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
@@ -84,6 +84,44 @@ describe('the prompt', () => {
   it('names the budget it was given, so two k values are two prompts', () => {
     const [five] = buildSpecPrompt({ question: 'q' }, TYPES, 5);
     expect(five).toContain('at most 5 charts');
+  });
+});
+
+describe('the orientations a mark leaves open', () => {
+  // 109 of the shipped reasoning arm's 465 column-first misses are one x/y swap away from a gold, and
+  // every one of them is a `rect` or a `point`: the reference normalises the other marks itself, so
+  // only these two are left as written and only these two are worth mirroring.
+  const heat = { mark: 'rect', encoding: { x: { field: 'name' }, y: { field: 'amount' }, color: { aggregate: 'count' } } };
+
+  it('swaps the two position channels for the marks the reference does not normalise', () => {
+    expect(mirrorsOf(heat)).toEqual({ mark: 'rect', encoding: { x: { field: 'amount' }, y: { field: 'name' }, color: { aggregate: 'count' } } });
+    expect(mirrorsOf({ mark: 'point', encoding: { x: { field: 'name' }, y: { field: 'amount' } } })).not.toBeUndefined();
+  });
+
+  it('refuses a mark it normalises, a chart missing an axis, and a shape it cannot read', () => {
+    // Bar, line and boxplot are turned by `reverseAxes` when their x is quantitative, so a mirror of
+    // one would be a second chart the judge calls equal — a wasted slot rather than a new reading.
+    expect(mirrorsOf(GOLD)).toBeUndefined();
+    expect(mirrorsOf({ mark: 'rect', encoding: { x: { field: 'name' } } })).toBeUndefined();
+    expect(mirrorsOf({ mark: 'rect', encoding: 'x' })).toBeUndefined();
+    expect(mirrorsOf({ mark: 'rect', encoding: { x: 'name', y: { field: 'amount' } } })).toBeUndefined();
+  });
+
+  it('interleaves a mirror behind its chart, and appends every mirror after the model’s own order', () => {
+    const plain = { mark: 'bar', encoding: { x: { field: 'name' }, y: { field: 'amount' } } };
+    const mirror = mirrorsOf(heat);
+    expect(withMirrors([heat, plain], 'none')).toEqual([heat, plain]);
+    expect(withMirrors([heat, plain], 'interleave')).toEqual([heat, mirror, plain]);
+    expect(withMirrors([heat, plain], 'append')).toEqual([heat, plain, mirror]);
+  });
+
+  it('reads the flag, and refuses a value that is not one of the three', () => {
+    expect(mirrorsOfFlag(undefined)).toBe('none');
+    expect(mirrorsOfFlag('')).toBe('none');
+    expect(mirrorsOfFlag('none')).toBe('none');
+    expect(mirrorsOfFlag('interleave')).toBe('interleave');
+    expect(mirrorsOfFlag('append')).toBe('append');
+    expect(() => mirrorsOfFlag('both')).toThrow(/--mirrors both is not none, interleave or append/);
   });
 });
 
@@ -753,10 +791,10 @@ describe('the command line', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', metrics: 'eval/nvbench2/metrics.json', artifact: undefined, limit: undefined, k: 3, ask: 3,
       concurrency: 6, maxTokens: 900, samples: undefined, rules: ['count', 'ranks', 'corpus', 'corpus2', 'steps'], replica: undefined,
-      budget: 12, replay: false,
+      budget: 12, replay: false, mirrors: 'none',
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', metrics: 'eval/nvbench2/metrics.json', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'ranks', 'corpus', 'corpus2', 'steps'], replica: undefined, budget: 12, replay: false });
+      .toEqual({ split: 'test', cache: 'c', metrics: 'eval/nvbench2/metrics.json', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'ranks', 'corpus', 'corpus2', 'steps'], replica: undefined, budget: 12, replay: false, mirrors: 'none' });
   });
 
   it('reads a ceiling in yuan, and refuses an amount that is not money', () => {
@@ -852,6 +890,36 @@ describe('the command', () => {
     const second = fake(JSON.stringify([GOLD]));
     await main(['--cache', dir, '--budget', 'none', '--replay'], {}, { provider: second });
     expect(second.seen).toHaveLength(0);
+  });
+
+  it('turns a transposed heat map into a hit, because the corpus enumerates both orientations', async () => {
+    // The reading this protects: 109 of the shipped arm's 465 column-first misses are exactly this —
+    // the right two columns on each other's axes, for a mark the reference never normalises. Offering
+    // the mirror answers the question the way the gold set answers it; nothing about the judge moves.
+    const dir = scratch();
+    const gold = { mark: 'rect', encoding: { x: { field: 'name' }, y: { field: 'amount' }, color: { aggregate: 'count' } } };
+    const transposed = { mark: 'rect', encoding: { x: { field: 'amount' }, y: { field: 'name' }, color: { aggregate: 'count' } } };
+    const entry = {
+      csv_file: 'a.csv',
+      nl_query: 'how many per name and amount',
+      gold_answer: JSON.stringify([gold]),
+      table_schema: JSON.stringify({ table_columns: ['name', 'amount'], column_examples: { name: ['a'], amount: [1] } }),
+      steps: [],
+    };
+    writeFileSync(join(dir, 'dev.json'), JSON.stringify([entry]));
+    writeFileSync(join(dir, 'metadata.json'), JSON.stringify({ types: { 'a.csv': TYPES } }));
+
+    const plain = join(dir, 'plain.json');
+    await main(['--cache', dir, '--budget', 'none', '--artifact', plain], {}, { provider: fake(JSON.stringify([transposed])) });
+    expect((JSON.parse(readFileSync(plain, 'utf8')) as { reading: { f1: Record<string, number> } }).reading.f1['3']).toBe(0);
+
+    const mirrored = join(dir, 'mirrored.json');
+    await main(['--cache', dir, '--budget', 'none', '--artifact', mirrored, '--mirrors', 'interleave', '--replay'], {}, { provider: fake(JSON.stringify([transposed])) });
+    const payload = JSON.parse(readFileSync(mirrored, 'utf8')) as { reading: { f1: Record<string, number> }; mirrors?: string; produced: number };
+    // One gold, two offered charts: recall 1, precision 1/2.
+    expect(payload.reading.f1['3']).toBeCloseTo(2 / 3, 6);
+    expect(payload.mirrors).toBe('interleave');
+    expect(payload.produced).toBe(2);
   });
 
   it('writes the reading it took, with the corpus digest and the store’s own counters', async () => {
