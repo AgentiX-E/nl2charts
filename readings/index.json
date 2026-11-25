@@ -3,14 +3,14 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "656404a639b0527c1a262920d0492b79552c90d7",
+   "commit": "57e528cc20bd1e549f952b36e893a1def3754352",
    "workflow": "bird-dev",
-   "runId": "45663072306",
+   "runId": "45678159001",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": null,
-   "generatedAt": "2026-11-25T17:22:19.474Z",
+   "generatedAt": "2026-11-25T18:51:12.601Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
@@ -23,19 +23,19 @@
    "arms": [
     {
      "arm": "macsql-prompt",
-     "passed": 1008,
+     "passed": 1002,
      "total": 1532,
-     "accuracy": 0.6579634464751958,
+     "accuracy": 0.6540469973890339,
      "calls": 1,
      "promptTokens": 3694,
-     "completionTokens": 140,
-     "strictPassed": 915
+     "completionTokens": 136,
+     "strictPassed": 914
     }
    ],
    "rves": {
-    "rves": 0,
+    "rves": 0.5925261096605744,
     "repeats": 5,
-    "floor": 0
+    "floor": 0.6130874673629243
    }
   }
  }
