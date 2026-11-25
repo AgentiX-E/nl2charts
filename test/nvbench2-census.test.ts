@@ -56,14 +56,18 @@ describe('censusOf', () => {
     expect(census.width).toBeCloseTo(2100 / 736, 10);
   });
 
-  it('takes the failures out of the denominator instead of the numerator', () => {
-    // A call that produced no reply is not in the reading at all; counting it as a zero would let a
-    // network fault move a benchmark number.
+  it('counts a failed call as a zero inside the reading, not as a shorter denominator', () => {
+    // A call that produced no reply is a question that was asked and not answered. Dropping it made the
+    // denominator a function of the arm's own reliability — the arm that timed out more reported the
+    // higher mean — and left no pair for `compare.ts` to resample. It is now the third kind of zero,
+    // and the share of zeros is the most that answering them perfectly could be worth.
     const census = censusOf(report({ failed: 10 }));
     expect(census.absent).toBe(10);
-    expect(census.scored).toBe(740);
+    expect(census.scored).toBe(750);
     expect(census.dropouts).toBe(2);
-    expect(census.dropoutShare).toBeCloseTo(2 / 740, 10);
+    expect(census.zeros).toBe(12);
+    expect(census.dropoutShare).toBeCloseTo(12 / 750, 10);
+    // Charts per question is still over the questions that answered: a zero produced no chart.
     expect(census.width).toBeCloseTo(2100 / 738, 10);
   });
 
@@ -128,7 +132,7 @@ describe('censusLines', () => {
     expect(lines[0]).toBe('dev deepseek-chat rules=count,corpus k=3');
     expect(lines[1]).toContain('questions 750 · scored 750 · produced 2100');
     expect(lines[1]).toContain('width 2.85 · replayed 0');
-    expect(lines[2]).toContain('dropouts 14 (1.87% of the reading: 12 truncated, 2 unparsed) · absent 0');
+    expect(lines[2]).toContain('zeros 14 (1.87% of the reading: 12 truncated, 2 unparsed, 0 absent)');
   });
 
   it('says `none` for an arm that sent no rules', () => {

@@ -9,14 +9,17 @@
  * | --- | --- | --- |
  * | `truncated` | the endpoint said the reply hit its token budget | scores it as no chart |
  * | `unparsed` | a reply arrived and held nothing this repository can score | scores it as no chart |
- * | `failed` | no reply at all — a deadline or a transport fault that survived every attempt | **drops it** |
+ * | `failed` | no reply at all — a deadline or a transport fault that survived every attempt | scores it as no chart |
  *
- * The first two are in the denominator and contribute zero; the third is not. That asymmetry is the
- * reason this file exists: "12 truncated" on a 750-question arm is 1.6 points of F1 the reading cannot
- * see, and it reads exactly like 1.6 points of a prompt that does not work. The bound is computed
- * rather than argued — if every dropped row were answered perfectly the mean would rise by the share
- * of dropped rows, so that share *is* the most the rows can be worth — and the number that decides
- * whether to buy them is the bound against the price of a re-dispatch.
+ * All three are in the denominator and contribute zero, which is what an execution-accuracy table
+ * means by a question it counted. That was not always true of the third: `arm.ts` used to drop failed
+ * rows, so the denominator was a function of the arm's own reliability — the arm that timed out more
+ * reported the higher mean — and two arms over one split could not be paired at all. The asymmetry was
+ * the defect, and this file's counters are what made it visible.
+ *
+ * The bound is computed rather than argued — if every zero row were answered perfectly the mean would
+ * rise by the share of zero rows, so that share *is* the most the rows can be worth — and the number
+ * that decides whether to buy them is the bound against the price of a re-dispatch.
  *
  * The same pass decomposes the `misplaced` bucket by channel pair (`movesOf`), because a bucket that
  * is one pair and one exchange away is a prompt rule with a ceiling, and a bucket spread over six
@@ -41,9 +44,9 @@ export interface AnswerCensus {
   readonly rules: readonly string[];
   /** The width the reading was taken at, which is also the width the move table is counted at. */
   readonly k: number;
-  /** Questions the run was asked. */
+  /** Questions the run was asked. Every one of them is in the reading, so this is its denominator. */
   readonly questions: number;
-  /** Questions the reading is over: `questions` minus the calls that produced no reply. */
+  /** Questions the reading is over, which is every asked question. Kept as a field for old artifacts. */
   readonly scored: number;
   /** Charts the replies held in total, before scoring. */
   readonly produced: number;
@@ -51,11 +54,13 @@ export interface AnswerCensus {
   readonly replayed: number;
   readonly truncated: number;
   readonly unparsed: number;
-  /** Calls that produced no reply, and are therefore not in the reading at all. */
+  /** Calls that produced no reply. In the reading as a zero, and counted here so transport is visible. */
   readonly absent: number;
   /** Rows that are in the reading and contributed nothing: truncated plus unparsed. */
   readonly dropouts: number;
-  /** `dropouts / scored`, which is also the number of F1 points a perfect answer to them would add. */
+  /** Every row in the reading that scored zero: the dropouts plus the absent. */
+  readonly zeros: number;
+  /** `zeros / scored`, which is also the number of F1 points a perfect answer to them would add. */
   readonly dropoutShare: number;
   /** Charts per question, over the questions that produced any. */
   readonly width: number;
@@ -109,8 +114,11 @@ export function censusOf(report: unknown, name = 'the artifact'): AnswerCensus {
   if (dropouts + absent > questions) {
     throw new Error(`${name}: ${String(dropouts + absent)} dropouts and failures over ${String(questions)} questions`);
   }
-  const scored = questions - absent;
-  const answered = scored - dropouts;
+  // Every asked question is in the reading, so the denominator is the split: a failed call scores zero
+  // inside it rather than shrinking it.
+  const scored = questions;
+  const zeros = dropouts + absent;
+  const answered = questions - zeros;
   return {
     split,
     model,
@@ -124,18 +132,19 @@ export function censusOf(report: unknown, name = 'the artifact'): AnswerCensus {
     unparsed,
     absent,
     dropouts,
-    dropoutShare: scored === 0 ? 0 : dropouts / scored,
+    zeros,
+    dropoutShare: scored === 0 ? 0 : zeros / scored,
     width: answered === 0 ? 0 : produced / answered,
   };
 }
 
 /**
- * The most the drops could be worth, in the same units as the reading.
+ * The most the zeros could be worth, in the same units as the reading.
  *
  * Not an estimate and not a gain: an estimate needs a model of what the rows would have said, and the
  * only thing this repository knows about them is that they said nothing. What it can state is the
- * ceiling — a mean over `scored` questions where `dropouts` of them are 0 rises by at most
- * `dropouts / scored` when those rows are answered perfectly — and a ceiling below the cost of the
+ * ceiling — a mean over `scored` questions where `zeros` of them are 0 rises by at most
+ * `zeros / scored` when those rows are answered perfectly — and a ceiling below the cost of the
  * cheapest way to buy them is a decision, not an opinion.
  */
 export function ceilingOf(census: AnswerCensus, f1: number): number {
@@ -150,8 +159,9 @@ export function censusLines(census: AnswerCensus): string[] {
     `${census.split} ${census.model} rules=${rules} k=${String(census.k)}`,
     `  questions ${String(census.questions)} · scored ${String(census.scored)} · produced ${String(census.produced)}`
       + ` · width ${census.width.toFixed(2)} · replayed ${String(census.replayed)}`,
-    `  dropouts ${String(census.dropouts)} (${pct(census.dropoutShare)} of the reading:`
-      + ` ${String(census.truncated)} truncated, ${String(census.unparsed)} unparsed) · absent ${String(census.absent)}`,
+    `  zeros ${String(census.zeros)} (${pct(census.dropoutShare)} of the reading:`
+      + ` ${String(census.truncated)} truncated, ${String(census.unparsed)} unparsed,`
+      + ` ${String(census.absent)} absent)`,
   ];
 }
 

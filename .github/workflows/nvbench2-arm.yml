@@ -213,17 +213,28 @@ jobs:
           # default and an arm that says "no rules" must not quietly run with both of them.
           if [ "$RULES" = "none" ]; then echo "list=" >> "$GITHUB_OUTPUT"; else echo "list=$RULES" >> "$GITHUB_OUTPUT"; fi
 
-      # The answers, keyed by the request rather than by the calendar: model, split, k and the code
-      # that builds the prompt. A change to any of them is a new key and therefore a save; an
-      # unchanged request is an exact hit and needs no save.
+      # The answers, keyed by the request rather than by the calendar: model, split, k, the output cap
+      # and the code that builds the prompt.
+      #
+      # `max_tokens` is in this key and it was not before, and that omission cost a full reasoning arm.
+      # The answer store is keyed by the request, and the request contains the cap — so a dispatch at
+      # 2600 tokens and one at 900 hold *different* entries, while an archive keyed only by source
+      # files is one archive for both. Two dispatches therefore reserved one key, the second save was
+      # refused (`Unable to reserve cache … another job may be creating this cache`), and 750 paid
+      # answers were discarded. The next run quoted all 751 questions at ¥19.75 because the store it
+      # restored held entries for the other cap.
+      #
+      # The rule is the one the answer store already follows: an archive key must contain every input
+      # that changes an answer key. `--limit` does not, because a prefix of the split is a prefix of
+      # the same keys.
       - name: Keep the answers already paid for
         id: answers
         uses: actions/cache/restore@v4
         with:
           path: eval/.cache/nvbench2/answers
-          key: nvbench2-answers-${{ steps.instrument.outputs.slug }}-${{ hashFiles('eval/nvbench2/arm.ts', 'eval/nvbench2/facts.ts', 'eval/nvbench2/judge.ts', 'eval/nvbench2/corpus-text.ts', 'eval/nvbench2/corpus-prompt.ts') }}
+          key: nvbench2-answers-${{ steps.instrument.outputs.slug }}-mt${{ inputs.max_tokens }}-${{ hashFiles('eval/nvbench2/arm.ts', 'eval/nvbench2/facts.ts', 'eval/nvbench2/judge.ts', 'eval/nvbench2/corpus-text.ts', 'eval/nvbench2/corpus-prompt.ts') }}
           restore-keys: |
-            nvbench2-answers-${{ steps.instrument.outputs.slug }}-
+            nvbench2-answers-${{ steps.instrument.outputs.slug }}-mt${{ inputs.max_tokens }}-
 
       - name: Ask every question
         env:
