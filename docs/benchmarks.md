@@ -3596,6 +3596,10 @@ leaderboard's own two columns as of its 2026-10-29 snapshot, because a table who
 split and whose rows carry another is the coordinate error this section exists to refuse. Two
 consequences are worth stating: the gap to XiYan is **7.41pp** on dev (73.34), not 9.7pp to its test
 number; and MSL-SQL, previously read as the narrowest comparison below us, is **0.89pp above** us.
+Both gaps are against the **shipped** arm's 65.93% (`macsql-prompt`, 1,532 questions), not against the
+62.34 in the table above: that row is the best of the *selection* family, and the two families are
+different harnesses. A gap quoted without saying which arm it is against is the same defect as a
+split number under a `dev` heading.
 The best fully training-free systems on this snapshot are DecoSearch at 70.53 dev and OpenSearch-SQL
 at 69.3, i.e. 4.60pp and 3.37pp above this harness. Rows without a dev column (`—`) are systems whose dev score the
 snapshot does not carry; they are kept for their test number and are not compared to ours.
