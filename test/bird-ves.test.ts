@@ -139,6 +139,21 @@ describe('the reading', () => {
     expect(reading.rves).toBeCloseTo(1 / 2, 12);
   });
 
+  it('counts a correct case the artifact carries no statement for as absent, not as untimed', () => {
+    // The two are different facts about different components: `unmeasured` is the stopwatch failing
+    // on a statement that exists, `absent` is the artifact not saying what ran. Folding the second
+    // into the first — or, as this file did until now, into a wrong answer — is how a tool that
+    // cannot see a statement reports a system that gets nothing right.
+    const reading = rvesOf([
+      at(1),
+      { id: 'absent', correct: true, goldTime: Number.NaN, predictedTime: Number.NaN, absent: true },
+    ]);
+    expect(reading.correct).toBe(2);
+    expect(reading.valid).toBe(1);
+    expect(reading.absent).toBe(1);
+    expect(reading.unmeasured).toBe(0);
+  });
+
   it('is zero, not NaN, on an empty corpus', () => {
     expect(rvesOf([])).toMatchObject({ cases: 0, valid: 0, rves: 0, rvesOfValid: 0 });
   });
@@ -185,11 +200,17 @@ describe('measuring over a runner', () => {
     expect(reading.rves).toBe(0);
   });
 
-  it('treats a correct case with no predicted statement as wrong', async () => {
+  it('marks a correct case the tool cannot see as absent rather than as wrong', async () => {
+    // The case is correct — the judge compared two result sets and they matched — and the tool has
+    // no statement to time for it. Charging it as a wrong answer is a claim about the system made
+    // out of a gap in the artifact: on the 1,532-question dev artifact this put all 1,010 correct
+    // answers into the zero bucket, read R-VES 0.00%, and passed.
     const calls: string[] = [];
     const reading = await measureVes([{ id: '1', db: 'shop', gold: 'G', correct: true }],
       timerOf({ G: [1] }, calls), 2);
     expect(calls).toHaveLength(0);
+    expect(reading.correct).toBe(1);
+    expect(reading.absent).toBe(1);
     expect(reading.valid).toBe(0);
   });
 
@@ -245,7 +266,32 @@ describe('reading an artifact', () => {
     expect(candidates).toEqual([]);
   });
 
-  it('carries a correct case with no candidate as a wrong one', () => {
+  it('reads the statement the artifact records for the arm that returned one', () => {
+    // The shape every arm without a candidate list writes: `sql` is the statement the arm returned,
+    // put there by the runner itself, so it is the answer and not a candidate to choose between.
+    // `arm: 'macsql-prompt'` is the single-source arm the dev split publishes, which is exactly the
+    // artifact R-VES could not read: no `candidates`, so no statement, so 1,010 correct answers
+    // scored as wrong.
+    const candidates = vesCandidates([
+      { arm: 'macsql-prompt', id: 1, passed: true, sql: 'select 1' },
+      { arm: 'macsql-prompt', id: 2, passed: false, sql: 'select 3' },
+    ], questions, 'macsql-prompt');
+    expect(candidates.map((entry) => entry.predicted)).toEqual(['select 1', 'select 3']);
+    expect(candidates.map((entry) => entry.correct)).toEqual([true, false]);
+  });
+
+  it('prefers the returned statement over the first candidate when an artifact carries both', () => {
+    // An arm that drew several statements writes both `sql` (the one it returned) and `candidates`
+    // (the set it drew). The first candidate is the one a chooser may have rejected; `sql` is the
+    // answer. Reading the set before the answer is how a four-candidate arm's R-VES comes out as
+    // its first sample's.
+    const candidates = vesCandidates([
+      { arm: 'select-mixed', id: 1, passed: true, sql: 'returned', candidates: [{ source: 'a', sql: 'drawn' }] },
+    ], questions, 'select-mixed');
+    expect(candidates[0]?.predicted).toBe('returned');
+  });
+
+  it('carries a correct case with no statement at all, and says so rather than inventing one', () => {
     const candidates = vesCandidates([{ arm: 'select', id: 1, passed: true }], questions, 'select');
     expect(candidates[0]).toMatchObject({ correct: true });
     expect(candidates[0]?.predicted).toBeUndefined();
@@ -396,6 +442,70 @@ describe('the tool', () => {
     expect(missing[0]).toContain('no cases for arm nobody');
   });
 
+  it('scores an artifact that carries the returned statement and no candidate list', async () => {
+    // The shape the dev split's own artifact has, and the one the tool could not read: a reading of
+    // 0.00% over 1,532 questions with 1,010 of them correct was printed by the workflow, exited 0,
+    // and left the published row on a 600-question artifact from another arm.
+    const artifact = join(root, 'sql-only.json');
+    const dataset = join(root, 'sql-only-dataset.json');
+    const out = join(root, 'sql-only-out.json');
+    writeFileSync(artifact, JSON.stringify({
+      cases: [{ arm: 'macsql-prompt', id: 1, passed: true, sql: 'P', gold: 'G' }],
+    }));
+    writeFileSync(dataset, JSON.stringify([{ question_id: 1, db_id: 'shop', SQL: 'G' }]));
+    const printed: string[] = [];
+    const exit = await main(
+      ['--artifact', artifact, '--dataset', dataset, '--arm', 'macsql-prompt', '--repeats', '2', '--out', out],
+      (line) => printed.push(line),
+      async () => ({ timer: async () => ({ ok: true, us: 1000 }), close: async () => {} }),
+    );
+    expect(exit).toBe(0);
+    expect(printed[0]).toContain('R-VES 100.00% over 1 questions');
+    const written = JSON.parse(readFileSync(out, 'utf8')) as { valid: number; absent: number; correct: number };
+    expect(written.correct).toBe(1);
+    expect(written.valid).toBe(1);
+    expect(written.absent).toBe(0);
+  });
+
+  it('refuses a reading in which no correct answer could be seen, rather than printing a zero', async () => {
+    // Two causes, and the sentence names both: the artifact does not carry the statement, or the
+    // executor timed nothing. A printed zero is indistinguishable from a system that is wrong
+    // everywhere and quick about it, which is the reading the step published for a round.
+    const artifact = join(root, 'blind.json');
+    const dataset = join(root, 'blind-dataset.json');
+    writeFileSync(artifact, JSON.stringify({
+      cases: [{ arm: 'a', id: 1, passed: true }],
+    }));
+    writeFileSync(dataset, JSON.stringify([{ question_id: 1, db_id: 'shop', SQL: 'G' }]));
+    const printed: string[] = [];
+    const exit = await main(
+      ['--artifact', artifact, '--dataset', dataset, '--arm', 'a'],
+      (line) => printed.push(line),
+      async () => ({ timer: async () => ({ ok: true, us: 1000 }), close: async () => {} }),
+    );
+    expect(exit).toBe(2);
+    const text = printed.join('\n');
+    expect(text).toContain('1 correct answer');
+    expect(text).toContain('no statement');
+  });
+
+  it('refuses a reading in which every statement would not time, for the same reason', async () => {
+    const artifact = join(root, 'unrunnable.json');
+    const dataset = join(root, 'unrunnable-dataset.json');
+    writeFileSync(artifact, JSON.stringify({
+      cases: [{ arm: 'a', id: 1, passed: true, sql: 'P' }],
+    }));
+    writeFileSync(dataset, JSON.stringify([{ question_id: 1, db_id: 'shop', SQL: 'G' }]));
+    const printed: string[] = [];
+    const exit = await main(
+      ['--artifact', artifact, '--dataset', dataset, '--arm', 'a'],
+      (line) => printed.push(line),
+      async () => ({ timer: async () => ({ ok: false, us: 0 }), close: async () => {} }),
+    );
+    expect(exit).toBe(2);
+    expect(printed.join('\n')).toContain('did not time');
+  });
+
   it('closes the runner even when the measurement throws', async () => {
     const artifact = join(root, 'artifact2.json');
     const dataset = join(root, 'dataset2.json');
@@ -541,11 +651,15 @@ describe('the reading this repository publishes', () => {
     expect(Math.abs(derived - baseline.rves)).toBeLessThan(0.1);
   });
 
-  it('is a subset of the split, not the split', () => {
-    // The row is `partial` for exactly this reason: 600 of 1,532 is not the leaderboard's denominator.
-    expect(baseline.scored).toBeGreaterThan(0);
-    expect(baseline.scored).toBeLessThan(baseline.of);
-    expect(baseline.runs.length).toBeGreaterThan(1);
+  it('covers the split the leaderboard reports, not a subset of it', () => {
+    // This row was `partial` for two rounds: the only artifact carrying a statement per question
+    // covered 600 of the 1,532 questions, and the reading said so. The full-split measurement now
+    // exists — it was bought by fixing the instrument, not by buying more calls — so the assertion
+    // flips to the one `measured` means: the denominator is the leaderboard's own. The three runs
+    // are kept because a single run of a five-timing measurement is one draw, not a reading.
+    expect(baseline.scored).toBe(baseline.of);
+    expect(baseline.scored).toBe(1532);
+    expect(baseline.runs.length).toBe(3);
     expect(Math.max(...baseline.runs) - Math.min(...baseline.runs)).toBeLessThan(0.5);
     expect(baseline.repeats).toBeGreaterThanOrEqual(3);
   });

@@ -123,6 +123,15 @@ export interface VesCase {
   readonly correct: boolean;
   readonly goldTime: number;
   readonly predictedTime: number;
+  /**
+   * A correct answer the artifact carries no statement for.
+   *
+   * Not a wrong answer: the judge compared two result sets and they matched, and the gap is in
+   * what the tool was handed rather than in what the system did. Not `unmeasured` either — that
+   * one is a stopwatch failing on a statement that exists, which is a fact about the executor.
+   * The two are counted apart because they have two different repairs.
+   */
+  readonly absent?: true;
 }
 
 export interface VesBand {
@@ -133,10 +142,14 @@ export interface VesBand {
 export interface VesReading {
   /** Questions scored, which is the denominator of `rves`. */
   readonly cases: number;
+  /** Answers the judge marked correct, which is the population this metric can pay at all. */
+  readonly correct: number;
   /** Correct statements that were also timed. */
   readonly valid: number;
   /** Correct but unmeasurable: the statement would not time on one side or the other. */
   readonly unmeasured: number;
+  /** Correct answers the artifact carries no statement for, so the tool cannot see what ran. */
+  readonly absent: number;
   /** Mean reward over all questions, the normalisation the leaderboard's numbers imply. */
   readonly rves: number;
   /** Mean reward over the correct statements only, printed so the choice is visible. */
@@ -151,10 +164,17 @@ const LABEL_OF_REWARD = new Map<number, string>(RVES_BANDS.map((band) => [band.r
 export function rvesOf(cases: readonly VesCase[]): VesReading {
   const total = cases.length;
   const counts = new Map<string, number>(RVES_BANDS.map((band) => [band.label, 0]));
+  let correct = 0;
   let valid = 0;
+  let absent = 0;
   let reward = 0;
   for (const entry of cases) {
     if (!entry.correct) continue;
+    correct += 1;
+    if (entry.absent === true) {
+      absent += 1;
+      continue;
+    }
     const tau = timeRatio(entry.goldTime, entry.predictedTime);
     if (Number.isNaN(tau)) continue;
     valid += 1;
@@ -168,8 +188,12 @@ export function rvesOf(cases: readonly VesCase[]): VesReading {
   }
   return {
     cases: total,
+    correct,
     valid,
-    unmeasured: cases.filter((entry) => entry.correct).length - valid,
+    // `correct - valid - absent`: a correct case is timed, untimeable, or invisible, and the three
+    // have to add up to the population or one of them is double-counted.
+    unmeasured: correct - valid - absent,
+    absent,
     rves: total === 0 ? 0 : reward / total,
     rvesOfValid: valid === 0 ? 0 : reward / valid,
     bands: RVES_BANDS.map((band) => ({ label: band.label, cases: counts.get(band.label) as number })),
@@ -214,8 +238,16 @@ export async function measureVes(
   const runs = Math.max(1, Math.floor(repeats));
   const cases: VesCase[] = [];
   for (const candidate of candidates) {
-    if (!candidate.correct || candidate.predicted === undefined) {
+    if (!candidate.correct) {
       cases.push({ id: candidate.id, correct: false, goldTime: 0, predictedTime: 0 });
+      continue;
+    }
+    // Correct and invisible: the artifact says the answer matched and does not say what it ran.
+    // Marking this wrong — which is what this branch did until a 1,532-question artifact read
+    // 0.00% while its own arm comparison read 65.93% — puts a gap in the tool's input into the
+    // system's score, and a score built that way cannot be distinguished from a bad system.
+    if (candidate.predicted === undefined) {
+      cases.push({ id: candidate.id, correct: true, goldTime: Number.NaN, predictedTime: Number.NaN, absent: true });
       continue;
     }
     const gold = await meanTime(timer, candidate.db, candidate.gold, runs);
@@ -299,6 +331,10 @@ export function describeVes(reading: VesReading, repeats: number): string[] {
     `R-VES ${(reading.rves * 100).toFixed(2)}% over ${reading.cases} questions`
       + ` (mean over the valid ones: ${(reading.rvesOfValid * 100).toFixed(2)}%)`,
     `R-VES timed every statement ${repeats}x and trimmed by median absolute deviation`,
+    // The composition, always: a rate over 1,532 questions that was paid by 1,010 of them is a rate
+    // about a set, and a reader who cannot see the set cannot tell it from a rate about the split.
+    `R-VES ${reading.correct} correct: ${reading.valid} timed,`
+      + ` ${reading.unmeasured} untimeable, ${reading.absent} with no statement`,
   ];
   for (const band of reading.bands) {
     if (band.cases === 0) continue;
@@ -307,6 +343,10 @@ export function describeVes(reading: VesReading, repeats: number): string[] {
   if (reading.unmeasured > 0) {
     lines.push(`R-VES ${reading.unmeasured} correct statements could not be timed on one side`);
   }
+  if (reading.absent > 0) {
+    lines.push(`R-VES ${reading.absent} correct answers carry no statement in the artifact,`
+      + ' so this reading covers the ones that do and not the split');
+  }
   return lines;
 }
 
@@ -314,6 +354,15 @@ interface VesArtifactCase {
   readonly arm?: string;
   readonly id?: string | number;
   readonly passed?: boolean;
+  /**
+   * The statement the arm returned, written by the runner for every case that produced one.
+   *
+   * This is the field `caseRows` calls `sql`, and it is the answer rather than a candidate: an arm
+   * that drew three statements and chose the second still writes the second here. It was missing
+   * from this interface, so `vesCandidates` could only read artefacts that carried a candidate
+   * list — which is a property of the arms it was first run on, not of the corpus.
+   */
+  readonly sql?: string;
   readonly winnerSource?: string;
   readonly candidates?: readonly { readonly source?: string; readonly sql?: string }[];
 }
@@ -345,11 +394,15 @@ export function vesCandidates(
     const chosen = row.winnerSource === undefined
       ? row.candidates?.[0]
       : row.candidates?.find((candidate) => candidate.source === row.winnerSource) ?? row.candidates?.[0];
+    // The returned statement first: `sql` is what the caller received, while the candidate list is
+    // what the arm drew and a chooser may have rejected the first of. The list is the fallback for
+    // artefacts written before the statement was recorded per case.
+    const returned = typeof row.sql === 'string' && row.sql.trim() !== '' ? row.sql : chosen?.sql;
     out.push({
       id: String(row.id),
       db: question.db_id,
       gold: question.SQL,
-      ...(typeof chosen?.sql === 'string' ? { predicted: chosen.sql } : {}),
+      ...(typeof returned === 'string' ? { predicted: returned } : {}),
       correct: row.passed === true,
     });
   }
@@ -428,6 +481,25 @@ export async function openTimer(oracleScript: string, databaseRoot: string): Pro
   };
 }
 
+/**
+ * The artifact a reading leaves behind.
+ *
+ * Written by the refusal path too: a run that could not see its statements is the run whose file a
+ * reader will open, and a missing file would have to be explained by a log line nobody keeps.
+ */
+function writeArtifact(options: VesOptions, reading: VesReading, floor: VesReading | undefined): void {
+  if (options.out === undefined) return;
+  writeFileSync(options.out, `${JSON.stringify({
+    instrument: 'eval/bird/ves.ts',
+    arm: options.arm,
+    artifact: options.artifact,
+    repeats: options.repeats,
+    normalization: 'mean over all scored questions; the valid-only mean is reported beside it',
+    ...reading,
+    ...(floor === undefined ? {} : { floor }),
+  }, null, 1)}\n`);
+}
+
 /** Run the tool. Returns the process exit code; throws only on a malformed invite. */
 export async function main(
   argv: readonly string[],
@@ -450,19 +522,29 @@ export async function main(
     const floor = options.selfCheck
       ? await measureVes(selfPaired(candidates), timer, options.repeats)
       : undefined;
+    // A reading in which nothing could be paid is not a reading: the tool and the artifact (or the
+    // executor) disagree about what was run, and the number that comes out — 0.00% — is the same
+    // number a system that is wrong everywhere and quick about it would produce. Printed and
+    // exited 0, that is how the dev split's R-VES fell back to a 600-question artifact from another
+    // arm for a round. Refused instead, with the cause named.
+    if (reading.correct > 0 && reading.valid === 0) {
+      const answers = `${String(reading.correct)} correct answer${reading.correct === 1 ? '' : 's'}`;
+      if (reading.absent === reading.correct) {
+        log(`R-VES read ${answers} and timed none of them: every one of them carries no statement`
+          + ` in ${options.artifact}`);
+        log('R-VES the field this tool reads is `sql`, which the runner writes per case; an artifact'
+          + ' without it was written by a harness that recorded only the candidate list');
+      } else {
+        log(`R-VES read ${answers} and timed none of them: ${String(reading.unmeasured)} statement`
+          + `${reading.unmeasured === 1 ? '' : 's'} did not time, which is the executor's failure`
+          + ' rather than the system\'s');
+      }
+      if (options.out !== undefined) writeArtifact(options, reading, floor);
+      return 2;
+    }
     for (const line of describeVes(reading, options.repeats)) log(line);
     for (const line of floor === undefined ? [] : describeFloor(reading, floor)) log(line);
-    if (options.out !== undefined) {
-      writeFileSync(options.out, `${JSON.stringify({
-        instrument: 'eval/bird/ves.ts',
-        arm: options.arm,
-        artifact: options.artifact,
-        repeats: options.repeats,
-        normalization: 'mean over all scored questions; the valid-only mean is reported beside it',
-        ...reading,
-        ...(floor === undefined ? {} : { floor }),
-      }, null, 1)}\n`);
-    }
+    if (options.out !== undefined) writeArtifact(options, reading, floor);
     return 0;
   } finally {
     await close();

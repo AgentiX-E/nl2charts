@@ -183,13 +183,25 @@ describe('a reading over a narrower denominator', () => {
   });
 
   it('keeps the shipped manifest honest about its own denominator', () => {
-    const narrow = BENCHMARKS.filter((benchmark) => benchmark.status === 'partial');
-    expect(narrow.length).toBeGreaterThan(0);
-    for (const benchmark of narrow) {
-      expect(benchmark.narrowed, `${benchmark.id} is partial without a denominator`).toBeDefined();
+    // This used to assert that at least one row was `partial`, because the R-VES row was — a
+    // 600-question reading published beside a 1,532-question leaderboard. That reading was re-run
+    // over the whole split, so the count is now zero and an assertion on the count would have had
+    // to be deleted rather than strengthened. The invariant that survives the row is the pairing
+    // between the status and the denominator, so it is asserted in both directions: a row that
+    // carries a denominator is a subset row, and a subset row carries one.
+    for (const benchmark of BENCHMARKS.filter((row) => row.narrowed !== undefined)) {
+      expect(benchmark.status, `${benchmark.id} carries a denominator but is not partial`).toBe('partial');
       expect(benchmark.narrowed?.scored).toBeLessThan(benchmark.narrowed?.of ?? 0);
       expect(benchmark.narrowed?.scored).toBeGreaterThan(0);
     }
+    for (const benchmark of BENCHMARKS.filter((row) => row.status === 'partial')) {
+      expect(benchmark.narrowed, `${benchmark.id} is partial without a denominator`).toBeDefined();
+    }
+    // And the row whose denominator moved is pinned, because "no partial rows" is also what a
+    // manifest looks like when somebody deletes a reading instead of widening it.
+    const rves = BENCHMARKS.find((row) => row.id === 'bird-dev-rves');
+    expect(rves?.status).toBe('measured');
+    expect(rves?.narrowed).toBeUndefined();
   });
 });
 
@@ -200,7 +212,7 @@ describe('the gate', () => {
     expect(exit).toBe(0);
     expect(lines.some((line) => line.includes('text2sql bird-dev: measured, EX = 62.5'))).toBe(true);
     expect(lines.some((line) => line.includes('text2viz text2vis: measured, top-1 = 664'))).toBe(true);
-    expect(lines.at(-1)).toContain('5 of 9 leaderboards carry a number');
+    expect(lines.at(-1)).toContain('6 of 9 leaderboards carry a number');
   });
 
   it('names the failing row and exits non-zero', async () => {
@@ -294,6 +306,6 @@ describe('the defaults the workflow relies on', () => {
     expect(lines).toEqual([]);
     const code = await entryCoverage(fileURLToPath(moduleUrl), moduleUrl, (line) => lines.push(line), []);
     expect(code).toBe(0);
-    expect(lines.at(-1)).toContain('5 of 9 leaderboards carry a number');
+    expect(lines.at(-1)).toContain('6 of 9 leaderboards carry a number');
   });
 });

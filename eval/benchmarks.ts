@@ -182,21 +182,25 @@ export const BENCHMARKS: readonly Benchmark[] = [
     source: 'https://bird-bench.github.io/',
     corpus: 'the same 1,532 questions, ranked by the reward-weighted efficiency score',
     metrics: ['R-VES'],
-    status: 'partial',
+    status: 'measured',
     reading: {
       file: 'eval/baseline/bird-ves.json',
       path: ['rves'],
       kind: 'run',
       unit: 'percent',
-      note: '600-question subset of dev, arm `select-cross`, five timings per statement trimmed by '
-        + 'median absolute deviation; the two runs behind it landed 0.04pp apart',
-    },
-    narrowed: {
-      scored: 600,
-      of: 1532,
-      why: 'the only artifact in this repository that holds a statement per question for a dev split '
-        + 'covers 600 of the 1,532 questions, and the leaderboard files OpenSearch-SQL at 69.36 over '
-        + 'all 1,532 — so this reading is a first coordinate on that metric, not that row',
+      note: 'the arm that ships, over the denominator the leaderboard reports: 59.81% over 1,532 '
+        + 'questions, 1,010 of them answered correctly, three full runs landing 59.81 / 59.56 / '
+        + '59.87, five timings a statement trimmed by median absolute deviation. It replaces a '
+        + '600-question reading of `select-cross` (56.63) that this row carried as `partial` for two '
+        + 'rounds, because the full-split version of the same measurement read 0.00% and exited 0: '
+        + '`eval/bird/ves.ts` resolved the predicted statement from a `candidates` list that only a '
+        + 'multi-candidate arm writes, never from the `sql` every artifact writes per case, so 1,010 '
+        + 'correct answers arrived statement-less and were scored wrong. The floor on this corpus is '
+        + '62.21 (every prediction replaced by its own gold): 3.72pp of the 6.12pp between EX 65.93 '
+        + 'and this reading is the reward table\'s step at tau = 1, and 2.40pp is the shipped '
+        + 'statements running slower than the gold they are equal to. That floor applies to every '
+        + 'row on the leaderboard too, which is why the gap there is 2.92pp and here 6.12pp — a '
+        + 'statement-speed difference, not a scoring one. §R-VES in docs/benchmarks.md.',
     },
     gap: '',
   },
