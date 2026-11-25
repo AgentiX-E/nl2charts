@@ -300,6 +300,29 @@ describe('why a field parted, as a repair path', () => {
     expect(diagnostic.fieldRepair.absent).toBe(1);
   });
 
+  it('does not turn a column choice into a placement error when only one side is axis-normalised', () => {
+    // `reverseAxes` is the reference's, and it has two rules: swap when both axes are quantitative
+    // and the x field sorts after the y field, and swap a bar/line/boxplot whose x is quantitative
+    // and whose y is not. A reply with a different column can therefore be normalised by a
+    // different rule than the gold it is compared with, and the counter must not read that
+    // asymmetry as "the column was right and the channel was wrong".
+    const gold: Chart = { mark: 'line', encoding: { x: { field: 'paperid' }, y: { field: 'authorder', aggregate: 'mean' } } };
+    const reply: Chart = { mark: 'line', encoding: { x: { field: 'paperid' }, y: { field: 'name' } } };
+    const diagnostic = diagnose([{ predictions: [reply], golds: [gold], types: TYPES }], 1);
+    expect(diagnostic.first.field).toBe(1);
+    expect(diagnostic.fieldRepair.unused).toBe(1);
+    expect(diagnostic.fieldRepair.misplaced).toBe(0);
+  });
+
+  it('keeps the columns equal when both sides take the same swap rule', () => {
+    const gold: Chart = { mark: 'line', encoding: { x: { field: 'paperid' }, y: { field: 'authorder', aggregate: 'mean' } } };
+    const reply: Chart = { mark: 'line', encoding: { x: { field: 'paperid' }, y: { field: 'authorder' } } };
+    const diagnostic = diagnose([{ predictions: [reply], golds: [gold], types: TYPES }], 1);
+    // Both are swapped by the both-quantitative rule, so the only group that parts is `aggregate`.
+    expect(diagnostic.first.aggregate).toBe(1);
+    expect(Object.values(diagnostic.fieldRepair).reduce((sum, n) => sum + n, 0)).toBe(0);
+  });
+
   it('reports nothing on a miss that parts before the field', () => {
     const wrongMark: Chart = { ...GOLD, mark: 'bar' };
     const diagnostic = diagnose([{ predictions: [wrongMark], golds: [GOLD], types: TYPES }], 1);

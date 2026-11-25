@@ -9297,9 +9297,19 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
    * their case, and every case behind them is skipped rather than thrown from a worker. The
    * difference is what a stop means — a breaker stop says the endpoint refused a tenth of the calls,
    * and a budget stop says nothing failed and the run simply outgrew its clock.
+   *
+   * **One case is always allowed to start.** A budget that is smaller than the time it takes to
+   * reach the first worker used to stop the run at zero cases, and the message that is the whole
+   * deliverable of a budget stop then had no per-case rate to extrapolate from — it had to tell the
+   * reader that the clock ran out before anything happened. That is not a speed, it is a race with
+   * the scheduler: a 1 ms budget finished one case on a fast machine and none on a slow one, and the
+   * test that pinned the message failed for a reason that had nothing to do with the code under it.
+   * Exempting the first case makes the reading deterministic and keeps the message's promise: the
+   * clock stops the run *after* it has bought something to report.
    */
   const budgetMs = settings.budgetMs;
-  const expired = (): boolean => budgetMs !== undefined && Date.now() - startedAt > budgetMs;
+  const expired = (): boolean =>
+    budgetMs !== undefined && finished > 0 && Date.now() - startedAt > budgetMs;
   await pool(cases, settings.concurrency, async (question, index) => {
     // A case the previous dispatch already paid for is not re-asked. It is not skipped either: it
     // is counted, because the table this run publishes has to cover the same population the whole

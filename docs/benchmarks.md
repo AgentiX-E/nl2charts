@@ -18345,6 +18345,73 @@ lists under `arms.layers`, with each dropped rule and its interval, and a test r
 from that node: a rule that starts separating on a tier has to be added, and a dropped rule that
 separates has to be sent — otherwise CI fails rather than the document ageing.
 
+### What the 465 field-first misses are made of, counted by repair rather than by face
+
+`first.field` has been this file's largest number for two rounds and has never been a plan. It says
+where agreement stops; it does not say what would start it again. So every miss that parts on the
+column is now classified by the cheapest thing that would repair it, in the artifact rather than in
+a sample of twenty replies:
+
+| cause | what it means | count | share of 465 |
+| --- | --- | ---: | ---: |
+| `elsewhere` | the reply's column is on the same channel in **another gold of the same question** — the corpus's multi-answer structure, not a wrong reading | 167 | 35.9% |
+| `misplaced` | the reply's column appears in a gold, on a **different channel** — an assignment error, not a choice error | 151 | 32.5% |
+| `absent` | the reply leaves the channel blank while the gold names a column | 9 | 1.9% |
+| `unused` | the table has the column and **no gold of the question uses it** — the semantic gap | 138 | 29.7% |
+| `offSchema` | the column is not in the table at all — a hallucination rather than a choice | **0** | 0% |
+
+**The three repairable causes are 70.3% of the face**, and that reverses the prior the previous
+round's plan was written on. Three prompt changes had left `first.field` at 794 → 800 on the chat
+tier while `channels` fell 482 → 414, and the honest reading at the time was "a prompt cannot move
+this". The decomposition says why: those changes taught column *choice* — a count of distinct
+values, a decomposition of the ambiguous axis, the corpus's own construction — and column choice is
+only the `unused` third. Two thirds of the face is column *placement* (the right column on the
+wrong channel) and *coverage* (the right column, in a chart that lost the comparison to another
+gold). A fourth instruction was therefore the wrong instrument, and it was priced at ¥40.
+
+**No hallucinated column at all.** `offSchema` is zero on 1,518 predictions, so the schema linker is
+not the lever here and a fix aimed at it would have been aimed at nothing. That is worth stating
+because "the model named a column the table does not have" is the first hypothesis a reader has, and
+it is the one this run refutes.
+
+**Cost of this reading: ¥0.** The dispatch (`45509465255`) answered nothing: all 750 rows replayed
+from the answer store, so `calls` is 0 and the bill is the ¥19.72 already paid for the arm. The
+counter runs inside `diagnose`, on the same normalised charts the judge scored, so it cannot
+disagree with the reading beside it: the five buckets sum to the 465 the `first` row reports, and a
+test re-derives that sum from `metrics.json` on every push.
+
+**What it changes.** The next arm is not a fourth prompt rule and not a ¥40 pair on the reasoning
+tier. It is a change to how the three answers are spread over the free columns — the thing that
+`elsewhere` and `misplaced` say is missing — measured on the chat tier first at ¥2.8, and only
+carried to the reasoning tier if the chat reading separates from zero. The instrument that decides
+that is the same one this section used: five buckets that have to sum to the face, not a mean that
+can improve for the wrong reason.
+
+**The coverage gap, counted on the same 750 answers.** For each question, the three replies were
+read as a set of columns rather than as three charts:
+
+| quantity | reading |
+| --- | ---: |
+| distinct columns the golds use, per question | 3.15 |
+| distinct columns the three replies use, per question | **2.56** |
+| of those, columns a gold also uses | 2.24 |
+| gold columns reached by the three replies | **74.0%** |
+| questions whose replies name only columns the golds use | 578 / 738 |
+| questions whose replies reach every gold column | 346 / 738 (46.9%) |
+
+Three answers spend 2.56 distinct columns, not 3: **14.7% of the ask is spent on a column another
+reply already named.** That is the `elsewhere` and `misplaced` buckets in one number, and it is the
+cheapest lever in this file — no model change, no new instruction about *which* column a sentence
+means, only a constraint that the three candidates be three columns. The ceiling on it is the gold
+sets' own 3.15 columns and the 74.0% already reached, which is why the arm is a chat-tier experiment
+at ¥2.8 rather than a reasoning-tier campaign.
+
+**Two independent counts of the same thing.** The classifier runs in TypeScript on the charts the
+judge normalised. A separate Python pass over the 750 stored replies, which re-implements nothing
+but set intersection, finds that **577 of 817** predictions whose column signature is not a gold's
+have *every* column inside the question's gold columns — **70.6%**, against the classifier's 70.3%.
+The two implementations share no code, and they agree on the size of the repairable face.
+
 ### What the gold sets are built from, counted rather than assumed
 
 The dev split's 750 questions carry 2,321 gold charts between them, a median of 3 per question. The

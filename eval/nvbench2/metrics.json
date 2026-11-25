@@ -669,6 +669,25 @@
    ],
    "because2": "the intervals are paired percentile bootstraps over questions, 2,000 resamples, seed 20261124, from `pnpm bench:nvbench2:compare`. A 250-row comparison resolves about ±2 points of F1@3, which is why the whole ask sweep is inside the noise and why the steps arm had to be re-measured on 750 rows before it was believed."
   },
+  "repairs": {
+   "because": "`first.field` counts the face, not the job. On the shipped reasoning arm 465 of 1,518 scored predictions stop agreeing with their nearest gold at the column; classified by the closest repair, 167 chose a column another gold of the same question puts on the same channel (`elsewhere`), 151 a column a gold uses on another channel (`misplaced`), 9 left a channel blank that the gold names (`absent`), and 138 a column the table has and no gold uses (`unused`). None named a column the table does not have, so there is no hallucination for a schema linker to fix. The three repairable causes are 70.3% of the face, and that reverses the prior this queue was written on: three prompt changes failing to move `first.field` did not mean the face was unrepairable, it meant they were teaching column *choice* while most of the face is column *placement* and *coverage*. A prompt rule is therefore the wrong instrument for two thirds of it, and the cheap test is a change to how the three answers are spread over the free columns, measured on the chat tier first.",
+   "arm": "count+corpus+corpus2+steps",
+   "model": "deepseek-reasoner",
+   "split": "dev",
+   "questions": 750,
+   "predictions": 1518,
+   "fieldFirst": 465,
+   "fieldRepair": {
+    "elsewhere": 167,
+    "misplaced": 151,
+    "unused": 138,
+    "offSchema": 0,
+    "absent": 9
+   },
+   "repairable": 327,
+   "repairableShare": 0.7032,
+   "run": 45509465255
+  },
   "layers": {
    "because": "one prompt change measured on both tiers over the same 750 dev questions. `readings` is the chat tier and `published` is the reasoning tier. A rule earns a place in a tier's list where it separates from zero there, so the two lists are allowed to differ; this node is what the tests read to check that neither list drifts from the measurement.",
    "chat": {
