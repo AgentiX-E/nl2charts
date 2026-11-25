@@ -360,6 +360,44 @@ export function fieldRepairOf(
   return 'unused';
 }
 
+/** One prediction's verdict, as the counter sees it and as a reader needs to see it. */
+export interface Label {
+  /** Equal to some gold. */
+  readonly equal: boolean;
+  /** The group it parted on first, or `null` when it parted nowhere. */
+  readonly first: Aspect | null;
+  /** Why a `field`-first miss happened, when it was one. */
+  readonly repair?: FieldRepair;
+}
+
+/**
+ * The same verdicts `diagnose` counts, but one per prediction and in order.
+ *
+ * `diagnose` answers "how many", and a plan needs "which ones": reading twenty charts chosen by hand
+ * from a bucket is how an arm gets designed against a case that is not in it. The labels are produced
+ * from the same four calls `diagnose` makes, and a test asserts the two agree group by group, so the
+ * sample cannot describe a different judgement than the summary beside it.
+ *
+ * A question with no usable gold has no verdict to give: nothing was scored, so nothing is labelled.
+ */
+export function labelsOf(item: Case, k: number): Label[] {
+  const golds = preprocess(item.golds, item.types).filter((gold): gold is Chart => gold !== null);
+  if (golds.length === 0) return [];
+  const labels: Label[] = [];
+  for (const candidate of preprocess(item.predictions, item.types).slice(0, k)) {
+    if (candidate === null) continue;
+    const closest = nearest(candidate, golds);
+    const comparison = compareAspects(candidate, closest);
+    if (comparison.equal) {
+      labels.push({ equal: true, first: null });
+      continue;
+    }
+    const repair = comparison.first === 'field' ? fieldRepairOf(candidate, closest, golds, item.types) : undefined;
+    labels.push(repair === undefined ? { equal: false, first: comparison.first } : { equal: false, first: comparison.first, repair });
+  }
+  return labels;
+}
+
 /**
  * Decompose a split's misses.
  *

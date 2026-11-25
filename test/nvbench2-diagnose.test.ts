@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ASPECTS, FIELD_REPAIRS, compareAspects, diagnose, fieldRepairOf, nearest, spreadOf, withoutCountFields, type Aspect,
+  ASPECTS, FIELD_REPAIRS, compareAspects, diagnose, fieldRepairOf, labelsOf, nearest, spreadOf, withoutCountFields, type Aspect,
 } from '../eval/nvbench2/diagnose.js';
 import { canonical, normalizeOrder, type Case, type Chart, type FieldTypes } from '../eval/nvbench2/judge.js';
 
@@ -446,5 +446,49 @@ describe('spread: how much of the reply width the model actually spends on diffe
     expect(empty.spread).toEqual({
       questions: 0, entries: 0, goldColumns: 0, predictedColumns: 0, coveredColumns: 0, repeatedEntries: 0,
     });
+  });
+});
+
+describe('labelsOf: the same verdicts as `diagnose`, one per prediction', () => {
+  // The aggregate is what a plan is written *from* and the labels are what a plan is written
+  // *against*. If the two disagree, an arm gets designed at a case that the counter never counted.
+  const at = (x: string, extra: Record<string, unknown> = {}): Chart =>
+    normal({ mark: 'line', encoding: { x: { field: x }, y: { field: 'authorder', aggregate: 'mean' }, ...extra } });
+
+  it('agrees with the counter group by group and bucket by bucket', () => {
+    const cases: Case[] = [
+      { predictions: [at('paperid'), at('name')], golds: [GOLD], types: TYPES },
+      { predictions: [at('ghost')], golds: [GOLD], types: TYPES },
+      { predictions: [{ ...GOLD, mark: 'bar' }], golds: [GOLD], types: TYPES },
+      { predictions: [GOLD], golds: [GOLD], types: TYPES },
+    ];
+    const diagnostic = diagnose(cases, 3);
+    const labels = cases.flatMap((item) => labelsOf(item, 3));
+    for (const aspect of ASPECTS) {
+      expect(labels.filter((label) => label.first === aspect)).toHaveLength(diagnostic.first[aspect]);
+    }
+    expect(labels.filter((label) => label.equal)).toHaveLength(diagnostic.matched);
+    for (const repair of FIELD_REPAIRS) {
+      expect(labels.filter((label) => label.repair === repair)).toHaveLength(diagnostic.fieldRepair[repair]);
+    }
+  });
+
+  it('labels a hit as equal with no group and no repair', () => {
+    expect(labelsOf({ predictions: [GOLD], golds: [GOLD], types: TYPES }, 3)).toEqual([{ equal: true, first: null }]);
+  });
+
+  it('has nothing to say about a question with no usable gold, or a prediction that is not a chart', () => {
+    expect(labelsOf({ predictions: [GOLD], golds: [], types: TYPES }, 3)).toEqual([]);
+    expect(labelsOf({ predictions: ['nope' as unknown as Chart, GOLD], golds: [GOLD], types: TYPES }, 3)).toEqual([
+      { equal: true, first: null },
+    ]);
+  });
+
+  it('keeps the order of the predictions and stops at k', () => {
+    const labels = labelsOf({ predictions: [at('name'), at('paperid'), at('ghost')], golds: [GOLD], types: TYPES }, 2);
+    expect(labels).toHaveLength(2);
+    // In the order the model wrote them: the column-first miss, then the chart that is the gold.
+    expect(labels[0]).toEqual({ equal: false, first: 'field', repair: 'unused' });
+    expect(labels[1]).toEqual({ equal: true, first: null });
   });
 });

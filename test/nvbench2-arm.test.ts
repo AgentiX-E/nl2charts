@@ -753,10 +753,10 @@ describe('the command line', () => {
     expect(parseArgs([])).toEqual({
       split: 'dev', cache: 'eval/.cache/nvbench2', metrics: 'eval/nvbench2/metrics.json', artifact: undefined, limit: undefined, k: 3, ask: 3,
       concurrency: 6, maxTokens: 900, samples: undefined, rules: ['count', 'ranks', 'corpus', 'corpus2', 'steps'], replica: undefined,
-      budget: 12,
+      budget: 12, replay: false,
     });
     expect(parseArgs(['--split', 'test', '--limit', '5', '--k', '5', '--artifact', 'out.json', '--concurrency', '2', '--max-tokens', '1200', '--cache', 'c']))
-      .toEqual({ split: 'test', cache: 'c', metrics: 'eval/nvbench2/metrics.json', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'ranks', 'corpus', 'corpus2', 'steps'], replica: undefined, budget: 12 });
+      .toEqual({ split: 'test', cache: 'c', metrics: 'eval/nvbench2/metrics.json', artifact: 'out.json', limit: 5, k: 5, ask: 5, concurrency: 2, maxTokens: 1200, samples: undefined, rules: ['count', 'ranks', 'corpus', 'corpus2', 'steps'], replica: undefined, budget: 12, replay: false });
   });
 
   it('reads a ceiling in yuan, and refuses an amount that is not money', () => {
@@ -799,6 +799,9 @@ describe('the command line', () => {
     expect(() => parseArgs(['--limit', '0'])).toThrow(/positive whole number/);
     expect(() => parseArgs(['--limit', 'half'])).toThrow(/positive whole number/);
     expect(() => parseArgs(['--k', 'two'])).toThrow(/positive whole number/);
+    // `--replay` is a flag, not a value: a dispatch that says it replays must not spend.
+    expect(parseArgs([]).replay).toBe(false);
+    expect(parseArgs(['--replay']).replay).toBe(true);
   });
 
   it('builds a provider only from a host and a key, and names the variable that is missing', () => {
@@ -827,6 +830,29 @@ describe('the command', () => {
     writeFileSync(join(dir, 'dev.json'), JSON.stringify([entry]));
     writeFileSync(join(dir, 'metadata.json'), JSON.stringify({ types: { 'a.csv': TYPES } }));
   }
+
+  it('refuses to replay a dispatch whose answers it does not have, and calls nothing', async () => {
+    // The failure this prevents is silent and expensive: a hand-typed `--max-tokens` that differs from
+    // the run that paid misses every key, the quote is recomputed from the published price, the ceiling
+    // allows it, and 750 answers are bought again under a command line that said "replay".
+    const dir = scratch();
+    corpus(dir);
+    const provider = fake(JSON.stringify([GOLD]));
+    await expect(main(['--cache', dir, '--budget', 'none', '--replay'], {}, { provider }))
+      .rejects.toThrow(/--replay was asked for, but 1 of 1 questions are not in the answer store/);
+    expect(provider.seen).toHaveLength(0);
+  });
+
+  it('replays for free once the answers exist, and still calls nothing', async () => {
+    const dir = scratch();
+    corpus(dir);
+    const first = fake(JSON.stringify([GOLD]));
+    await main(['--cache', dir, '--budget', 'none'], {}, { provider: first });
+    expect(first.seen).toHaveLength(1);
+    const second = fake(JSON.stringify([GOLD]));
+    await main(['--cache', dir, '--budget', 'none', '--replay'], {}, { provider: second });
+    expect(second.seen).toHaveLength(0);
+  });
 
   it('writes the reading it took, with the corpus digest and the store’s own counters', async () => {
     const dir = scratch();

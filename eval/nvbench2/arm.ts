@@ -50,7 +50,7 @@ import { runIfEntry } from '../entry.js';
 import { parseSplit, resolveTypes, type SplitRow } from './check.js';
 import { corpusPromptOf, finalOutputOf, parseModeOf, REPLICAS, type Replica } from './corpus-prompt.js';
 import { DEFAULT_BUDGET_CNY, quoteLine, quoteOf, refusalOf, unitPriceOf, type Budget, type Quote } from './budget.js';
-import { diagnose, type Diagnostic } from './diagnose.js';
+import { diagnose, labelsOf, type Diagnostic } from './diagnose.js';
 import { factsOf, type GoldFacts } from './facts.js';
 import { perQuestionOf, readingOf, type Case, type Chart, type FieldTypes, type Reading } from './judge.js';
 
@@ -827,6 +827,9 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
             question: row.question,
             predictions: scored.predictions,
             golds: scored.golds,
+            // One verdict per prediction, in the order they were written: a plan is written against
+            // cases, and a case has to be findable from the artifact rather than by re-deriving it.
+            labels: labelsOf(scored, options.k),
           })),
         }),
     cost: {
@@ -945,6 +948,7 @@ export function parseArgs(argv: readonly string[]): {
   rules: readonly Rule[];
   replica: Replica | undefined;
   budget: Budget;
+  replay: boolean;
 } {
   const value = (flag: string): string | undefined => {
     const at = argv.indexOf(flag);
@@ -985,6 +989,10 @@ export function parseArgs(argv: readonly string[]): {
     rules: rulesOf(value('--rules')),
     replica: replicaOf(value('--replica')),
     budget,
+    // `--replay` is a promise, not a hint: a dispatch that says it is replaying must not call the
+    // endpoint at all. A hint would let a changed prompt, model or token budget quietly re-buy 750
+    // answers under the word "replay", which is exactly what happened once.
+    replay: argv.includes('--replay'),
   };
 }
 
@@ -1044,6 +1052,25 @@ export function pendingOf(input: {
   return { questions: asked.length, paid };
 }
 
+/**
+ * The refusal for a dispatch that promised to replay.
+ *
+ * The answer store is keyed by the exact request, so a replay is free only if the request is
+ * unchanged. The failure mode is silent otherwise: a `--max-tokens` that differs from the run that
+ * paid (900 by default, 2048 in a hand-typed dispatch) misses every key, the quote is recomputed from
+ * the published unit price, the ceiling allows it, and 750 answers are bought a second time under a
+ * command line that said "replay". This function turns that into a refusal before the first call.
+ */
+export function replayRefusal(
+  replay: boolean,
+  pending: { readonly questions: number; readonly paid: number },
+): string | undefined {
+  if (!replay) return undefined;
+  const missing = pending.questions - pending.paid;
+  if (missing === 0) return undefined;
+  return `--replay was asked for, but ${String(missing)} of ${String(pending.questions)} questions are not in the answer store: this dispatch is not the request that paid for them (prompt text, model, or --max-tokens differ). Nothing was called. Fix the identity, or drop --replay to buy the missing answers.`;
+}
+
 /** Read the corpus and ask it. The thin half, kept separate so the thick half can be tested. */
 export async function main(
   argv: readonly string[],
@@ -1061,32 +1088,32 @@ export async function main(
   // The price of a question is read off the readings already published, not typed here: a table in a
   // plan said ≈¥3 an arm and the day's invoice was ¥100.01, because the arm was a reasoning tier
   // reading 13.8 KB and the table was priced at the chat tier's short prompt.
-  const quote = ((): Quote => {
-    const metrics = JSON.parse(readFileSync(args.metrics, 'utf8')) as unknown;
-    const peek = openStore<StoredAnswer>(`${cacheDir}/answers`, PROMPT_VERSION, (parsed, expect) =>
-      answerOf(parsed, expect?.model),
-    );
-    const pending = pendingOf({
-      rows,
-      types,
-      k: args.k,
-      rules: args.rules,
-      ...(args.replica === undefined ? {} : { replica: args.replica }),
-      model: meter.provider.model,
-      maxTokens: args.maxTokens,
-      store: peek,
-      ...(args.limit === undefined ? {} : { limit: args.limit }),
-    });
-    return quoteOf({
-      model: meter.provider.model,
-      questions: pending.questions,
-      paid: pending.paid,
-      // The quote follows the arm whose instruction is closest to this one: a replica sends the
-      // corpus's prompt and has no rule set, so it keeps the dearest price on the model.
-      unit: unitPriceOf(metrics, meter.provider.model, args.replica === undefined ? args.rules : undefined),
-    });
-  })();
+  const metrics = JSON.parse(readFileSync(args.metrics, 'utf8')) as unknown;
+  const peek = openStore<StoredAnswer>(`${cacheDir}/answers`, PROMPT_VERSION, (parsed, expect) =>
+    answerOf(parsed, expect?.model),
+  );
+  const pending = pendingOf({
+    rows,
+    types,
+    k: args.k,
+    rules: args.rules,
+    ...(args.replica === undefined ? {} : { replica: args.replica }),
+    model: meter.provider.model,
+    maxTokens: args.maxTokens,
+    store: peek,
+    ...(args.limit === undefined ? {} : { limit: args.limit }),
+  });
+  const quote: Quote = quoteOf({
+    model: meter.provider.model,
+    questions: pending.questions,
+    paid: pending.paid,
+    // The quote follows the arm whose instruction is closest to this one: a replica sends the
+    // corpus's prompt and has no rule set, so it keeps the dearest price on the model.
+    unit: unitPriceOf(metrics, meter.provider.model, args.replica === undefined ? args.rules : undefined),
+  });
   process.stderr.write(`${quoteLine(quote)}\n`);
+  const replayStop = replayRefusal(args.replay, pending);
+  if (replayStop !== undefined) throw new Error(replayStop);
   const refusal = refusalOf(quote, args.budget);
   if (refusal !== undefined) throw new Error(refusal);
   const report = await runArm({
