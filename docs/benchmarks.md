@@ -18399,18 +18399,84 @@ read as a set of columns rather than as three charts:
 | questions whose replies name only columns the golds use | 578 / 738 |
 | questions whose replies reach every gold column | 346 / 738 (46.9%) |
 
-Three answers spend 2.56 distinct columns, not 3: **14.7% of the ask is spent on a column another
-reply already named.** That is the `elsewhere` and `misplaced` buckets in one number, and it is the
-cheapest lever in this file — no model change, no new instruction about *which* column a sentence
-means, only a constraint that the three candidates be three columns. The ceiling on it is the gold
-sets' own 3.15 columns and the 74.0% already reached, which is why the arm is a chat-tier experiment
-at ¥2.8 rather than a reasoning-tier campaign.
+Three answers spend 2.56 distinct columns against the golds' 3.15. The first reading of that gap,
+written in this section a round ago, said 14.7% of the ask was spent repeating a column another
+reply had already named. **Counting entries instead of summing columns falsifies that**, and the
+correction is the next subsection: 48 of 1,518 entries name nothing an earlier entry did not. The
+gap is field density — 1.63 named fields per chart against the golds' 1.97 — not a budget spent
+twice, and a constraint on distinct columns has almost nothing to bind.
 
 **Two independent counts of the same thing.** The classifier runs in TypeScript on the charts the
 judge normalised. A separate Python pass over the 750 stored replies, which re-implements nothing
 but set intersection, finds that **577 of 817** predictions whose column signature is not a gold's
 have *every* column inside the question's gold columns — **70.6%**, against the classifier's 70.3%.
 The two implementations share no code, and they agree on the size of the repairable face.
+
+### The coverage hypothesis, tested and closed — and what the labels found instead
+
+The queue item this round inherited said the fix for `elsewhere` and `misplaced` was to make the
+three answers spend three different columns, priced at ¥2.8 on the chat tier. Two things were done
+before that money was committed, and one of them was done before the arm was designed.
+
+**The mechanism was counted first.** `diagnostic.spread` reads the same 1,518 predictions the judge
+scored and counts, per question, the distinct columns on both sides and how many entries name
+nothing an earlier entry did not:
+
+| quantity | shipped reasoning arm |
+| --- | ---: |
+| questions with a gold and a reply | 738 |
+| entries examined | 1,518 |
+| distinct gold columns, summed | 2,324 (3.15 per question) |
+| distinct reply columns, summed | 1,888 (2.56 per question) |
+| columns both sides name | 1,655 (71.2% of the golds') |
+| **entries that repeat an earlier entry's columns** | **48 (3.2%)** |
+
+An entry repeats only when *every* column it names has already been named; an entry that shares the
+measure's column but introduces a new one is a new guess. Under that definition **96.8% of entries
+introduce a column**, so a rule forbidding repeats can only bind on one entry in thirty. The gap
+between 3.15 and 2.56 is the number of fields a chart carries — 1.63 against 1.97 — which is a
+statement about what the reply chooses to plot, not about how it spends its width.
+
+**The arm was run anyway, because a mechanism that cannot bind is a prediction and not a reading.**
+`spread` is a sixth prompt rule phrased as a check on the array rather than as a description of the
+set. On the chat tier, 750 questions, ¥3.02:
+
+| arm | F1@3 | paired 95% | produced | cost |
+| --- | ---: | --- | ---: | ---: |
+| `count,ranks,corpus,corpus2,steps` | 28.12 | — | 2,098 | ¥2.83 |
+| **+ `spread`** | **27.25** | **−0.86 [−2.23, +0.54]** | 2,138 | ¥3.02 |
+
+Inside the noise and pointing down. The branch is closed: a rule that cannot bind does not help
+when it is followed, and this one did not separate even though the model produced 40 more charts.
+
+**Reading the 465 misses as cases, not as a number.** `labelsOf` writes one verdict per prediction
+into every kept sample — the group it parted on and, for a column-first miss, the repair bucket — so
+a case can be found from an artifact instead of re-derived from a mean. Reading them found the thing
+the aggregate had hidden:
+
+| what a column-first miss is | count | share of 465 |
+| --- | ---: | ---: |
+| **one x/y swap away from a gold it matches otherwise** | **109** | **23.4%** |
+| something else | 356 | 76.6% |
+
+All 109 are `rect` heat maps or `point` scatters — the two marks `preprocess` never normalises,
+because for bar, line and boxplot it turns the axes itself by type. The corpus answers such a
+question in **both orientations** (the golds of one question hold `(y=A, x=B)` and `(x=A, y=B)`), so a
+reply that offers one is scored wrong for a chart that agrees with the gold in substance.
+
+**The mirror, measured at ¥0.** The transform is applied to the parsed reply, so the answer cache is
+untouched and a replay re-scores 750 paid answers for nothing:
+
+| tier | shipped | + mirrors (interleaved) | paired 95% | charts |
+| --- | ---: | ---: | --- | ---: |
+| reasoning | 32.23 | 32.57 | +0.34 [−0.31, +0.99] | 1,518 → 1,612 |
+| chat | 28.12 | 28.20 | +0.08 [−0.54, +0.67] | 2,098 → 2,132 |
+
+Both intervals cross zero, so the flag is **not** in the product's prompt: a slot spent on an
+orientation is a slot not spent on another column, and at `k`=3 the exchange is a wash. What the
+round bought is the decomposition — 23.4% of the largest face is a convention about axis order that
+the reference does not share, and no amount of prompt engineering about *which* column is meant can
+address it.
 
 ### What the gold sets are built from, counted rather than assumed
 

@@ -99,3 +99,64 @@ describe('the repair decomposition of a field-first miss', () => {
     expect(REPAIRS.run).toBe(45509465255);
   });
 });
+
+describe('the spread and mirror readings, held to the sentences that quote them', () => {
+  // Both nodes exist because a plan was written on a number nobody had decomposed. The spread node is
+  // the falsifier: the queue item said one guess in seven was spent repeating a column, and 48 of
+  // 1,518 is 3.2%. The mirror node is the salvage: 109 of the same 465 misses are one axis swap away
+  // from a gold, and both intervals cross zero, so the flag stays out of the product's prompt.
+  const metrics = JSON.parse(
+    readFileSync(resolve(import.meta.dirname, '../eval/nvbench2/metrics.json'), 'utf8'),
+  ) as {
+    arms: {
+      spread: { entries: number; repeatedEntries: number; repeatedShare: number; questions: number; goldColumns: number; predictedColumns: number; coveredColumns: number };
+      mirrors: {
+        fieldFirst: number; transposed: number; transposedShare: number;
+        readings: { tier: string; base: number; arm: number; delta: number; low: number; high: number; separated: boolean; questions: number; yuan: number }[];
+      };
+      readings: Record<string, { f1: Record<string, number>; rules: readonly string[]; yuan: number }>;
+    };
+  };
+
+  it('keeps the repeat count small enough that the mechanism it was meant to test cannot bind', () => {
+    const { spread } = metrics.arms;
+    expect(spread.repeatedEntries).toBe(48);
+    expect(spread.entries).toBe(1518);
+    expect(spread.repeatedShare).toBeCloseTo(48 / 1518, 4);
+    // The claim in the document is "one entry in twenty", and it is the claim that closes the branch.
+    expect(spread.repeatedShare).toBeLessThan(0.05);
+    // Coverage is still worth reading: the reply touches 71% of the columns the golds use.
+    expect(spread.coveredColumns / spread.goldColumns).toBeCloseTo(0.712, 2);
+    expect(spread.predictedColumns / spread.questions).toBeLessThan(3);
+  });
+
+  it('keeps every mirror reading inside the noise, which is why the flag is not a default', () => {
+    const { mirrors } = metrics.arms;
+    expect(mirrors.transposed).toBe(109);
+    expect(mirrors.fieldFirst).toBe(465);
+    expect(mirrors.transposed).toBeLessThan(mirrors.fieldFirst);
+    expect(mirrors.readings).toHaveLength(2);
+    for (const reading of mirrors.readings) {
+      expect(reading.separated).toBe(false);
+      expect(reading.low).toBeLessThanOrEqual(0);
+      expect(reading.delta).toBeCloseTo(reading.arm - reading.base, 6);
+      expect(reading.questions).toBe(750);
+      // Free to read: a replay of answers already paid for.
+      expect(reading.yuan).toBe(0);
+    }
+  });
+
+  it('records the spread arm as a loss, so a later round cannot call it untried', () => {
+    const entry = metrics.arms.readings['count+ranks+corpus+corpus2+steps+spread'];
+    expect(entry).toBeDefined();
+    expect(entry!.rules).toContain('spread');
+    expect(entry!.f1['3']).toBeCloseTo(0.2725, 4);
+    const base = metrics.arms.readings['count+ranks+corpus+corpus2+steps'];
+    // Measured against the arm it was stacked on, and lower: −0.86 with an interval that reaches +0.54.
+    // That interval is paired against a re-read of the base, which came back 0.04 lower than the
+    // published 28.16 (two dispatches of one prompt are not bit-identical); the difference between
+    // the two published readings is 0.91, which is the number this pins.
+    expect(entry!.f1['3']).toBeLessThan(base!.f1['3']!);
+    expect(base!.f1['3']! - entry!.f1['3']!).toBeCloseTo(0.0091, 4);
+  });
+});

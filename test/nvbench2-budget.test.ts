@@ -28,8 +28,10 @@ describe('the price of a question', () => {
   it('prices the chat tier far below the reasoning one, which is the error that produced the invoice', () => {
     const chat = unitPriceOf(METRICS, 'deepseek-chat');
     const reasoner = unitPriceOf(METRICS, 'deepseek-reasoner');
-    // The dearest chat arm is the one that reads the count as well as the rules: ¥2.82 for the split.
-    expect(chat?.cnyPerQuestion).toBeCloseTo(2.82 / 750, 6);
+    // The dearest chat arm is now the one that also asks for the entries to spend different columns:
+    // ¥3.02 for the split, against ¥2.82 for the arm it was measured on top of. A price table that
+    // kept the older number would quote every later chat dispatch 7% short.
+    expect(chat?.cnyPerQuestion).toBeCloseTo(3.02 / 750, 6);
     expect((reasoner?.cnyPerQuestion ?? 0) / (chat?.cnyPerQuestion ?? 1)).toBeGreaterThan(15);
   });
 
