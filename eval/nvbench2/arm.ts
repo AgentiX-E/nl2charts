@@ -596,8 +596,14 @@ export interface AnsweredRow {
    * attempt, or a budget too small to answer inside.
    *
    * Distinct from `unparsed`, which is an answer this repository cannot read, and distinct from a wrong
-   * answer, which is one it can. A failed row is left out of the reading and counted, because scoring a
-   * timeout as zero charts would put a network into a benchmark number.
+   * answer, which is one it can. It scores zero and keeps its place: the question was asked and not
+   * answered, which is a miss on the split the reading is taken over. It is also counted, so a reader
+   * can see how much of a reading is transport rather than thinking.
+   *
+   * The previous behaviour — dropping the row — was a selection on the outcome. The questions it
+   * removed were exactly the ones this arm got stuck on, so the arm that failed *more* was the arm
+   * whose denominator shrank, and two arms over one split reported different denominators. That made
+   * every paired test refuse (`compare.ts`) and left the reading flattering the slower system.
    */
   readonly failed: boolean;
   readonly replayed: boolean;
@@ -632,7 +638,13 @@ export interface ArmReport {
   readonly replayed: number;
   readonly unparsed: number;
   readonly truncated: number;
-  /** Calls that produced no reply. Excluded from the reading and reported beside it. */
+  /**
+   * Calls that produced no reply. Scored zero and reported beside the reading.
+   *
+   * Invariant: `reading.questions === asked` for every arm, so two arms over one split are always the
+   * same length and `perQuestion` vectors pair by index. `failed ≤ asked` says how many of the zeros
+   * are transport.
+   */
   readonly failed: number;
   readonly reading: Reading;
   /**
@@ -641,7 +653,8 @@ export interface ArmReport {
    * Travels with the artifact because means cannot be compared without it: the standard error of a
    * difference between two arms is a function of how many questions they disagreed on, and
    * `eval/nvbench2/compare.ts` needs the paired vector to say whether a gap survives the noise.
-   * Aligned with the counted questions, so index `i` is the same question in two arms over one split.
+   * One entry per asked question, including the ones that never answered (they score zero), so index
+   * `i` is the same question in every arm over one split and two arms are always the same length.
    */
   readonly perQuestion: ReturnType<typeof perQuestionOf>;
   /**
@@ -843,13 +856,17 @@ export async function runArm(options: ArmOptions): Promise<ArmReport> {
     return {
       answer,
       row,
-      // A failed row scores nothing because it answered nothing: its case is dropped below rather than
-      // handed to the judge as an empty prediction.
+      // Every asked question keeps a case, including the ones that never answered: a question that was
+      // asked and not answered is a miss on this split, and dropping it would divide two arms by two
+      // denominators. A failed row carries no charts, which scores zero for the same reason an empty
+      // reply does — `failed` beside the reading says how many of those zeros were transport.
       scored: { predictions: answer.charts, golds: row.golds, types: types ?? {} } satisfies Case,
     };
   });
   const answers = answered.map((entry) => entry.answer);
-  const cases: Case[] = answered.filter((entry) => !entry.answer.failed).map((entry) => entry.scored);
+  // One case per asked question, in the order asked. This is the invariant `perQuestion` needs and
+  // `compare.ts` relies on: index `i` is the same question in every arm over this split.
+  const cases: Case[] = answered.map((entry) => entry.scored);
   const reading = readingOf(cases, SCORED_KS);
   const promptTokens = answers.reduce((sum, answer) => sum + answer.promptTokens, 0);
   const completionTokens = answers.reduce((sum, answer) => sum + answer.completionTokens, 0);
@@ -1074,6 +1091,11 @@ export function splitDigest(rows: readonly SplitRow[]): string {
  *
  * The price is `unpriced` rather than `¥0.00` when the model is not on `eval/price.ts`'s table, for
  * the reason `eval/bill.ts` gives: a zero would read as a free run and a missing row is a missing row.
+ *
+ * The denominator is printed as one number rather than `N of M scored`, because after the failed-row
+ * fix those two are the same number for every arm — and a ratio that is always 1 invites a reader to
+ * assume it can vary. What can vary, and is printed when it does, is how many of the questions the
+ * endpoint never answered.
  */
 export function summaryLine(report: ArmReport): string {
   const f1 = report.reading.f1[3];
@@ -1081,7 +1103,7 @@ export function summaryLine(report: ArmReport): string {
   const price = report.cost.yuan === undefined ? 'unpriced' : formatYuan(report.cost.yuan);
   const failed = report.failed === 0 ? '' : ` · ${String(report.failed)} failed`;
   const replica = report.replica === undefined ? '' : ` · replica ${report.replica}`;
-  return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.reading.questions)} of ${String(report.asked)} scored · ask ${String(report.ask)}${replica} · ${String(report.cost.calls)} calls${failed} · ${price}`;
+  return `nvbench2 arm: ${report.split} F1@3 ${reading} · ${String(report.reading.questions)} questions · ask ${String(report.ask)}${replica} · ${String(report.cost.calls)} calls${failed} · ${price}`;
 }
 
 /**
@@ -1209,6 +1231,14 @@ export async function main(
     mkdirSync(dirname(args.artifact), { recursive: true });
     writeFileSync(args.artifact, `${text}\n`);
     process.stdout.write(`${summaryLine(report)}\n`);
+  }
+  // A split where nothing answered reads 0.00, and 0.00 is exactly what a system that is wrong
+  // everywhere prints. The artifact is already written — a reader who opens the file this run cited
+  // has to find the run — but the exit code says the number is an average of misses, not a reading of
+  // the arm. Without this, an endpoint outage publishes a verdict on a model.
+  if (report.asked > 0 && report.failed === report.asked) {
+    process.stderr.write(`nvbench2 arm: all ${String(report.asked)} questions failed to answer — no call to ${report.model} returned a reply, so this reading is an average over unanswered questions rather than a measurement of the arm. The artifact was written so the failed dispatch can be inspected; re-dispatch when the endpoint answers, and the answers already bought replay from the store.\n`);
+    return 2;
   }
   return 0;
 }

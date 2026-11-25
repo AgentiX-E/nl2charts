@@ -10,6 +10,7 @@ import {
   summaryLine, timeoutMsOf, PROMPT_VERSION, REASONING_RULES, RULES, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
+import { compare } from '../eval/nvbench2/compare.js';
 import { REPLICAS } from '../eval/nvbench2/corpus-prompt.js';
 import { factsOf, ceilingOf, MARK_FROM_VEGA } from '../eval/nvbench2/facts.js';
 import { parseSplit, type SplitRow } from '../eval/nvbench2/check.js';
@@ -379,11 +380,17 @@ describe('the arm', () => {
     expect(provider.seen[0]).toContain('at most 3 charts');
   });
 
-  it('survives a call that never answers, and reports the row instead of the run', async () => {
+  it('survives a call that never answers, and keeps the row so the denominator is the split', async () => {
     // Three dispatches died this way before the arm did: a reasoning call past its deadline threw out of
     // `mapLimit`, the answers already bought stayed in the cache, and the run reported nothing — so the
-    // reading had to be bought again to exist. A row without a reply is a missing row, not a wrong one,
-    // and certainly not the end of the run.
+    // reading had to be bought again to exist. A row without a reply is a missing row, not the end of
+    // the run.
+    //
+    // It is also not a row to drop. Dropping it selected on the outcome: the questions removed were the
+    // ones this arm got stuck on, so the arm that failed more was the arm whose denominator shrank, and
+    // two arms over one split reported different denominators — which made every paired test refuse.
+    // The measurement that exposed it: a reasoning arm at 749 questions against a chat arm at 751 had a
+    // 6.64pp gap nobody could attach an interval to.
     const kinds: string[] = [];
     const provider: LlmProvider = {
       id: 'fake',
@@ -405,14 +412,51 @@ describe('the arm', () => {
     expect(kinds).toEqual(['answered', 'failed', 'answered']);
     expect(report.failed).toBe(1);
     expect(report.asked).toBe(3);
-    // The two that answered are the reading, and the failed row is not a zero in it.
-    expect(report.reading.questions).toBe(2);
-    expect(report.reading.f1[3]).toBeCloseTo(1, 6);
+    // The failed row is a zero in the reading, not an absence from it: the split has three questions.
+    expect(report.reading.questions).toBe(3);
+    expect(report.reading.f1[3]).toBeCloseTo(2 / 3, 6);
+    expect(report.perQuestion.f1['3']).toHaveLength(3);
     // It still counts as a call, because the endpoint was asked; it is not billed, because a reply that
     // never arrived reported no tokens.
     expect(report.cost.calls).toBe(3);
-    expect(summaryLine(report)).toContain('2 of 3 scored');
+    expect(summaryLine(report)).toContain('3 questions');
     expect(summaryLine(report)).toContain('1 failed');
+  });
+
+  it('pairs a failed arm with a clean one, because both vectors are the split', async () => {
+    // The point of the row above. Two arms, one split, one of them losing a call: before the fix these
+    // were 2- and 3-long vectors and `compare` refused them, which is a correct refusal of a wrong
+    // measurement. Now the vectors are the same length by construction, so the interval exists.
+    const flaky: LlmProvider = {
+      id: 'fake',
+      model: 'fake-model',
+      complete: async (request) => {
+        if ((request.messages[1]?.content ?? '').includes('(2)')) throw new Error('timeout');
+        return { text: JSON.stringify([GOLD]), model: 'fake-model', usage: { promptTokens: 10, completionTokens: 5 }, finishReason: 'stop' };
+      },
+    };
+    const rows = [row(0), row(1), row(2)];
+    const broken = await runArm({
+      split: 'dev', rows, types: { 'a.csv': TYPES }, provider: flaky,
+      k: 3, maxTokens: 900, concurrency: 1, rules: ['count'],
+    });
+    const clean = await runArm({
+      split: 'dev', rows, types: { 'a.csv': TYPES }, provider: fake(JSON.stringify([GOLD])),
+      k: 3, maxTokens: 900, concurrency: 1, rules: ['count'],
+    });
+    expect(broken.failed).toBe(1);
+    expect(clean.failed).toBe(0);
+    const comparison = compare(
+      broken.perQuestion.f1['3'] as number[],
+      clean.perQuestion.f1['3'] as number[],
+      { k: 3 },
+    );
+    expect(comparison.questions).toBe(3);
+    expect(comparison.delta).toBeCloseTo(1 / 3, 6);
+    // Three questions cannot separate a third of a point from zero, and the tool says so rather than
+    // reporting the point estimate as a finding. That refusal is the reason the pairing had to exist:
+    // the same call over 751 questions is what turns a gap into a claim.
+    expect(comparison.separated).toBe(false);
   });
 
   it('keeps the first N answers verbatim when it is asked to, so a surprising reading can be read', async () => {
@@ -488,7 +532,7 @@ describe('the arm', () => {
 
   it('prints a reading at the precision a bill is read at, and says `unpriced` when the model has no row', async () => {
     const base = await runArm({ split: 'dev', rows: [row(0)], types: { 'a.csv': TYPES }, provider: fake(JSON.stringify([GOLD])), k: 3, maxTokens: 900, concurrency: 1 });
-    expect(summaryLine(base)).toBe('nvbench2 arm: dev F1@3 1.0000 · 1 of 1 scored · ask 3 · 1 calls · unpriced');
+    expect(summaryLine(base)).toBe('nvbench2 arm: dev F1@3 1.0000 · 1 questions · ask 3 · 1 calls · unpriced');
     const priced = { ...base, model: 'deepseek-chat', cost: { ...base.cost, yuan: 0.00042 } };
     expect(summaryLine(priced)).toContain('deepseek-chat' === priced.model ? '' : '¥');
     expect(summaryLine({ ...priced, reading: { ...priced.reading, f1: { 1: 1 } } })).toContain('F1@3 —');
@@ -890,6 +934,28 @@ describe('the command', () => {
     const second = fake(JSON.stringify([GOLD]));
     await main(['--cache', dir, '--budget', 'none', '--replay'], {}, { provider: second });
     expect(second.seen).toHaveLength(0);
+  });
+
+  it('refuses to publish a reading when the endpoint answered nothing, and leaves the artifact behind', async () => {
+    // 0.00 over a split is what a system that is wrong everywhere prints, and an outage prints the same
+    // number. Without this, a dead endpoint publishes a verdict on a model and the job goes green — the
+    // exact shape of the R-VES defect, one directory over.
+    const dir = scratch();
+    corpus(dir);
+    const dead: LlmProvider = {
+      id: 'fake',
+      model: 'fake-model',
+      complete: async () => { throw new Error('502 from the endpoint'); },
+    };
+    const artifact = join(dir, 'dead.json');
+    const code = await main(['--cache', dir, '--budget', 'none', '--artifact', artifact], {}, { provider: dead });
+    expect(code).toBe(2);
+    const written = JSON.parse(readFileSync(artifact, 'utf8')) as { failed: number; asked: number; reading: { f1: Record<string, number> } };
+    // The artifact exists and says what happened, so a reader who opens the file the failed run cited
+    // finds the run rather than a missing file.
+    expect(written.failed).toBe(1);
+    expect(written.asked).toBe(1);
+    expect(written.reading.f1['3']).toBe(0);
   });
 
   it('turns a transposed heat map into a hit, because the corpus enumerates both orientations', async () => {

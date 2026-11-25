@@ -140,14 +140,18 @@ export function compare(base: readonly number[], arm: readonly number[], options
   readonly seed?: number;
 }): Comparison {
   if (base.length !== arm.length) {
-    // Almost always a failed row: an arm that lost calls to a deadline scores the questions it did
-    // answer and counts the rest, so its vector is shorter and a paired difference would divide the
-    // two arms by different denominators. The fix is not arithmetic, it is the re-dispatch — the
-    // answers already bought are replayed from the store, and only the failures are paid for again.
-    throw new Error(`the vectors are ${String(base.length)} and ${String(arm.length)} questions: an arm `
-      + 'that failed to answer some rows scores the rest and counts the failures, so the two arms are '
-      + 'divided by different denominators and no question is paired — re-dispatch the short arm, where '
-      + 'the answers already bought are replayed and only the failed rows are paid for');
+    // Two sources, and the message names both because the remedy differs. A vector that is short
+    // because the arm was asked fewer questions (`--limit`) is a different split, not a shorter one. A
+    // vector that is short because it was written before failed rows kept their place is an old
+    // artifact: that arm scored the questions it answered and dropped the rest, so its denominator is
+    // not the split's and its mean is not comparable to one that is. Either way the fix is arithmetic
+    // nothing — re-dispatch the arm, where the answers already bought replay from the store.
+    throw new Error(`the vectors are ${String(base.length)} and ${String(arm.length)} questions: two arms `
+      + 'over one split score one entry per asked question, so unequal lengths mean either a different '
+      + '`--limit` (a different split) or an artifact written before failed rows kept their place — that '
+      + 'one divided its mean by the questions it answered and dropped the rest. No question is paired; '
+      + 're-dispatch the short arm, where the answers already bought replay and only the failed rows are '
+      + 'paid for');
   }
   if (base.length === 0) throw new Error('the vectors are empty, so there is nothing to compare');
   const resamples = options.resamples ?? 2000;

@@ -106,9 +106,10 @@ describe('the interval', () => {
   });
 
   it('refuses a pairing it cannot make and a resample count it cannot honour', () => {
-    // The message has to name the cause and the fix: unequal lengths here are almost always a failed
-    // row, and the arithmetic cannot be repaired — the short arm has to be dispatched again.
-    expect(() => compare([1, 2], [1, 2, 3], { k: 3 })).toThrow(/failed to answer some rows/);
+    // The message has to name both causes and the fix: a different `--limit` is a different split, and
+    // a short vector from before failed rows kept their place divided its mean by the questions it
+    // answered. Neither is repairable by arithmetic — the short arm has to be dispatched again.
+    expect(() => compare([1, 2], [1, 2, 3], { k: 3 })).toThrow(/an artifact written before failed rows/);
     expect(() => compare([1, 2], [1, 2, 3], { k: 3 })).toThrow(/re-dispatch the short arm/);
     expect(() => compare([], [], { k: 3 })).toThrow(/nothing to compare/);
     expect(() => compare([1], [1], { k: 3, resamples: 50 })).toThrow(/at least 100/);
