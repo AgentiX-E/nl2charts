@@ -825,9 +825,10 @@
           "questions": 750,
           "produced": {
             "base": 1518,
-            "arm": 1612
+            "arm": 1961
           },
-          "yuan": 0
+          "yuan": 0,
+          "run": 45634989699
         },
         {
           "tier": "chat",
@@ -841,12 +842,72 @@
           "questions": 750,
           "produced": {
             "base": 2098,
-            "arm": 2132
+            "arm": 2613
           },
-          "yuan": 0
+          "yuan": 0,
+          "run": 45635014097
         }
       ],
-      "decision": "Not shipped: both intervals cross zero. The flag stays, because it is free to read and the two readings price the trade — a slot spent on an orientation is a slot not spent on another column, and at k=3 the exchange is a wash."
+      "decision": "Not shipped: both intervals cross zero. The flag stays, because it is free to read and the two readings price the trade — a slot spent on an orientation is a slot not spent on another column, and at k=3 the exchange is a wash.",
+      "provenance": "Each reading now carries the run its two numbers were read from: the `produced` counts recorded before this round came from a different dispatch than the `f1` beside them, which is the defect this round's census exists to make impossible to hide."
+    },
+    "width": {
+      "because": "The census found one structural gap no rule had addressed: the reasoning tier returns 2.06 charts per question against gold sets of 3.09 columns, and the corpus's own prompt asks for one to five. Asking for five is free to try — the workflow already has an `ask` — and the corpus scores F1, where an extra chart that matches nothing costs precision.",
+      "question": "If the arm is asked for five charts instead of three, does F1@5 rise enough to pay for the extra tokens?",
+      "readings": [
+        {
+          "tier": "chat",
+          "run": 45652683714,
+          "artifact": "deepseek-chat-dev-5-count_ranks_corpus_corpus2_steps",
+          "rules": "count+ranks+corpus+corpus2+steps",
+          "k": 5,
+          "ask": 5,
+          "questions": 750,
+          "f1": {
+            "1": 21.43,
+            "3": 27.8,
+            "5": 27.7
+          },
+          "hit": {
+            "1": 42.8,
+            "3": 49.33,
+            "5": 50.67
+          },
+          "produced": {
+            "base": 2098,
+            "arm": 2886
+          },
+          "width": {
+            "base": 2.8,
+            "arm": 3.85
+          },
+          "paired": [
+            {
+              "k": 3,
+              "base": 28.12,
+              "arm": 27.8,
+              "delta": -0.32,
+              "low": -1.47,
+              "high": 0.89,
+              "separated": false
+            },
+            {
+              "k": 5,
+              "base": 28.12,
+              "arm": 27.7,
+              "delta": -0.42,
+              "low": -1.69,
+              "high": 0.88,
+              "separated": false
+            }
+          ],
+          "yuan": {
+            "base": 2.82,
+            "arm": 3.12
+          }
+        }
+      ],
+      "decision": "Closed against the hypothesis. Asked for five, the chat tier returns 3.85 charts per question — 37% more completion tokens — and reads 27.80 at k=3 and 27.70 at k=5, both intervals crossing zero and both point estimates below the arm that was asked for three. Within one run F1@5 is lower than its own F1@3, which is the corpus's precision term doing exactly what it is for: a fourth chart that matches nothing is a cost. The reasoning tier's 2.06 is therefore not a defect to fix, and no dispatch is bought for it."
     }
   },
   "replicas": {
@@ -1155,14 +1216,38 @@
         "oneExchange": 60,
         "sameColumnTwice": 26,
         "pairs": {
-          "x→y": 146,
-          "color→theta": 21,
-          "x→color": 20,
-          "y→x": 19,
-          "color→y": 19,
-          "y→color": 7,
-          "color→x": 3,
-          "theta→color": 1
+          "x→y": {
+            "count": 146,
+            "swapped": 57
+          },
+          "color→theta": {
+            "count": 21,
+            "swapped": 0
+          },
+          "x→color": {
+            "count": 20,
+            "swapped": 0
+          },
+          "y→x": {
+            "count": 19,
+            "swapped": 3
+          },
+          "color→y": {
+            "count": 19,
+            "swapped": 0
+          },
+          "y→color": {
+            "count": 7,
+            "swapped": 0
+          },
+          "color→x": {
+            "count": 3,
+            "swapped": 0
+          },
+          "theta→color": {
+            "count": 1,
+            "swapped": 0
+          }
         }
       },
       "chat+mirrors": {
@@ -1193,14 +1278,38 @@
         "oneExchange": 81,
         "sameColumnTwice": 25,
         "pairs": {
-          "x→y": 165,
-          "color→y": 22,
-          "color→theta": 21,
-          "x→color": 20,
-          "y→x": 15,
-          "y→color": 6,
-          "color→x": 3,
-          "theta→color": 1
+          "x→y": {
+            "count": 165,
+            "swapped": 78
+          },
+          "color→y": {
+            "count": 22,
+            "swapped": 0
+          },
+          "color→theta": {
+            "count": 21,
+            "swapped": 0
+          },
+          "x→color": {
+            "count": 20,
+            "swapped": 0
+          },
+          "y→x": {
+            "count": 15,
+            "swapped": 3
+          },
+          "y→color": {
+            "count": 6,
+            "swapped": 0
+          },
+          "color→x": {
+            "count": 3,
+            "swapped": 0
+          },
+          "theta→color": {
+            "count": 1,
+            "swapped": 0
+          }
         }
       },
       "chat+spread": {
@@ -1231,14 +1340,38 @@
         "oneExchange": 58,
         "sameColumnTwice": 35,
         "pairs": {
-          "x→y": 147,
-          "color→theta": 24,
-          "y→x": 22,
-          "color→y": 19,
-          "x→color": 17,
-          "color→x": 12,
-          "theta→color": 8,
-          "y→color": 4
+          "x→y": {
+            "count": 147,
+            "swapped": 55
+          },
+          "color→theta": {
+            "count": 24,
+            "swapped": 0
+          },
+          "y→x": {
+            "count": 22,
+            "swapped": 3
+          },
+          "color→y": {
+            "count": 19,
+            "swapped": 0
+          },
+          "x→color": {
+            "count": 17,
+            "swapped": 0
+          },
+          "color→x": {
+            "count": 12,
+            "swapped": 0
+          },
+          "theta→color": {
+            "count": 8,
+            "swapped": 0
+          },
+          "y→color": {
+            "count": 4,
+            "swapped": 0
+          }
         }
       },
       "reasoning": {
@@ -1267,13 +1400,34 @@
         "oneExchange": 67,
         "sameColumnTwice": 0,
         "pairs": {
-          "x→y": 107,
-          "color→theta": 13,
-          "color→y": 13,
-          "y→x": 10,
-          "x→color": 5,
-          "y→color": 2,
-          "color→x": 1
+          "x→y": {
+            "count": 107,
+            "swapped": 65
+          },
+          "color→theta": {
+            "count": 13,
+            "swapped": 0
+          },
+          "color→y": {
+            "count": 13,
+            "swapped": 0
+          },
+          "y→x": {
+            "count": 10,
+            "swapped": 2
+          },
+          "x→color": {
+            "count": 5,
+            "swapped": 0
+          },
+          "y→color": {
+            "count": 2,
+            "swapped": 0
+          },
+          "color→x": {
+            "count": 1,
+            "swapped": 0
+          }
         }
       },
       "reasoning+mirrors": {
@@ -1303,13 +1457,34 @@
         "oneExchange": 88,
         "sameColumnTwice": 0,
         "pairs": {
-          "x→y": 134,
-          "color→y": 16,
-          "color→theta": 13,
-          "y→x": 11,
-          "x→color": 5,
-          "y→color": 1,
-          "color→x": 1
+          "x→y": {
+            "count": 134,
+            "swapped": 85
+          },
+          "color→y": {
+            "count": 16,
+            "swapped": 0
+          },
+          "color→theta": {
+            "count": 13,
+            "swapped": 0
+          },
+          "y→x": {
+            "count": 11,
+            "swapped": 3
+          },
+          "x→color": {
+            "count": 5,
+            "swapped": 0
+          },
+          "y→color": {
+            "count": 1,
+            "swapped": 0
+          },
+          "color→x": {
+            "count": 1,
+            "swapped": 0
+          }
         }
       }
     },

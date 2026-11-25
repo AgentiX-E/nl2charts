@@ -21269,10 +21269,38 @@ constraint" is withdrawn on this measurement rather than on the argument that pr
 prohibition in words ("no chart puts one column on two channels") and the reasoning tier never does
 it at all, so a second sentence would be a rule aimed at 1.2% of one tier.
 
-**Cost of this reading: ¥0.** It reads artifacts that were already paid for; no model was called. The
-instrument is `eval/nvbench2/census.ts`, which enters `eval/coverage-ledger.json` and is held by two
-test files: the census arithmetic and its refusals, and the move tally against the bucket `diagnose`
-counts on the same cases.
+### The width is a cost, not a lever
+
+The census found one structural gap that no rule had addressed: the reasoning tier returns 2.06 charts
+per question, the chat tier 2.80, and the gold sets hold 3.09 columns. If the arm were asked for five
+instead of three, would F1@5 rise enough to pay for the tokens? The workflow already takes an `ask`, so
+the question is one dispatch:
+
+| chat, dev | charts | charts/question | F1@1 | F1@3 | F1@5 | completion tokens | ¥ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ask 3, k 3 (run 45631097059) | 2,098 | 2.80 | 21.86 | **28.12** | 28.12 | 145,482 | 2.83 |
+| ask 5, k 5 (run 45652683714) | 2,886 | 3.85 | 21.43 | 27.80 | 27.70 | 181,896 | 3.12 |
+
+| paired, 750 questions | base | arm | delta | 95% |
+| --- | ---: | ---: | ---: | --- |
+| F1@3 | 28.12 | 27.80 | **−0.32** | [−1.47, +0.89] |
+| F1@5 | 28.12 | 27.70 | **−0.42** | [−1.69, +0.88] |
+
+Both intervals cross zero and both point estimates are negative, so the extra charts are a cost and not
+a lever. The stronger statement is inside the arm itself: its F1@5 (27.70) is *lower* than its own
+F1@3 (27.80), because the reading is F1 and F1 has a precision term — a fourth chart that matches
+nothing costs more than a fourth chance is worth. The corpus asking its own baseline for "1 to 5
+charts" is therefore not an invitation to ask for five.
+
+Both rows are one dispatch each, quoted whole: the census exists because a table can otherwise mix a
+`produced` from one run with an `f1` from another, and one row of `arms.mirrors` did exactly that
+before this round.
+
+**Cost of this reading: ¥3.12.** It also cost ¥0 to price the alternative: the two mirror arms and the
+five censuses are all replays of answers already in the store. The instrument is
+`eval/nvbench2/census.ts`, which enters `eval/coverage-ledger.json` and is held by two test files: the
+census arithmetic and its refusals, and the move tally against the bucket `diagnose` counts on the same
+cases.
 
 The split no arm has answered is scorable too, and that is a gate rather than a note: `check.ts` reads
 both splits on every run, and test reads 751 questions over 87 tables, 2,260 gold charts, 5,340 field
