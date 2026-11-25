@@ -18031,7 +18031,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | Spider 1.0 dev | 1,034 questions, 20 databases | EM, EX | **absent** | — |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | 62.5 (floor) |
-| BIRD dev | the same questions | R-VES | **partial** | 56.63 over 600 of 1,532 questions, floor 57.96 |
+| BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
 | nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **32.23** F1@3 (reasoning tier), 26.28 on chat; ceiling 84.96, baseline 58.96, 10 arms |
@@ -18513,12 +18513,11 @@ would have told the arm to drop exactly the columns its own golds put on the axi
 refuted it before a dispatch was paid for, and the refutation is now an assertion against the
 checked-in split rather than a paragraph in a design document.
 
-Five of nine carry a number over the denominator their leaderboard reports, and two of those five are
-counts rather than accuracies. A sixth — R-VES — carries a number over 600 of its leaderboard's 1,532
-questions, which is a real reading and not that row, so the table states the denominator rather than
-letting the reader assume one. A seventh — WikiSQL — has a corpus, a judge and a split that reads
-clean, and no dispatch over it, which is a different absence from a corpus nobody can fetch: the first
-needs a run, the second needs a fetcher. The remaining two are not a scandal; they are a to-do list
+Six of nine carry a number over the denominator their leaderboard reports, and two of those six are
+counts rather than accuracies. None of them is over a narrower denominator, which is new: R-VES spent
+two rounds at 600 of 1,532 questions, and the reason it did was not the corpus. A seventh — WikiSQL —
+has a corpus, a judge and a split that reads clean, and no dispatch over it, which is a different
+absence from a corpus nobody can fetch: the first needs a run, the second needs a fetcher. The remaining two are not a scandal; they are a to-do list
 with prices, which is the only kind of to-do list this document has ever been able to act on.
 
 That sentence used to be written with nvBench 2.0 in the "corpus but no dispatch" group, and it was
@@ -18529,9 +18528,10 @@ The row is `measured` now, cited at `arms.selected.published.f1@3`, and `pnpm be
 22.39 beside the other eight.
 
 Two things about the `number` column, both learned by watching it be misquoted. A printed line now
-carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 56.63 (600 of 1532)` —
-because a floor is the minimum a rerun may land on, a count is not a percentage, and a rate over a
-subset is not a rate over the split. And `BIRD dev` cites the floor (62.5), not the run: the
+carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 59.81` — because a
+floor is the minimum a rerun may land on and a count is not a percentage. A third form, `= 56.63
+(600 of 1532)`, is what a subset reading prints; the table has none this round, and the two rounds it
+printed are the subject of the next section. And `BIRD dev` cites the floor (62.5), not the run: the
 published reading on that split is **62.34%** in run `41296610389`, and the floor sits 0.16pp *above*
 it because the floor was set from an earlier 63.0% reading of the same arm. The gate compares a rerun
 against `floor − tolerance`, where the tolerance is no longer one constant: 4pp was measured at
@@ -18539,34 +18539,59 @@ n=239, and at 1,532 questions the same σ-multiple is **1.58pp**, so the 0.16pp 
 band and the number in this table is still the floor. What changed is that a dev run can no longer
 lose 3.9pp and pass.
 
-**Why `R-VES` is partial rather than absent or measured.** The metric is implemented and tested
+**Why `R-VES` is measured, and what fixing that took.** The metric is implemented and tested
 (`eval/bird/ves.ts`): the reward table, the `tau = time(gold) / time(predicted)` ratio, the
 median-absolute-deviation trim over repeated timings, and both normalisations the literature uses
-(averaged over all questions, and over the valid ones). The reading it now carries is
-**56.63%** — arm `select-cross`, the 600-question dev artifact at `eval/out/bird-eval-41453395203.json`
-(378 correct of 600, **63.0% EX**), five timings per statement, three full executions of the loop
-landing 0.07pp apart (56.58, 56.54 and 56.63). It is `partial` because the leaderboard files
-OpenSearch-SQL at 69.36 over all 1,532 questions and 600 of them is a different claim; a rate is
-about a set of questions, and this repository has already published one subset reading beside a
-full-split reading as if they were ordered. The first number on a metric is worth recording
-precisely because it is wrong to compare, and the row says so in the same breath.
+(averaged over all questions, and over the valid ones). The reading is **59.81%** — arm
+`macsql-prompt`, the artifact of a full dev dispatch (`44991167518`), **1,010 correct of 1,532**,
+five timings per statement, three full executions of the loop landing 59.81 / 59.56 / 59.87. The
+row is `measured` because the denominator is the leaderboard's own.
+
+Getting there took fixing a defect that had been invisible for two rounds, and the shape of the
+invisibility is worth more than the number. The full-split measurement read **0.00%** and the
+workflow step **exited 0**. The cause was one field: `vesCandidates` resolved each case's predicted
+statement from a `candidates` array, which only a multi-candidate arm writes, while every artifact
+writes the statement the arm returned in `sql`. The arm that ships draws one statement per question
+and therefore carries no candidate list, so all 1,532 cases arrived statement-less — and
+`measureVes`, which had two outcomes, right and wrong, scored each of them wrong. 1,010 correct
+answers were counted as mistakes. What came out was not a low score but the absence of one, and the
+two are not distinguishable in the printed line.
+
+Three changes, because any one of them alone would have hidden the other two again:
+
+> **Read `sql` first, then the candidate list.** The returned statement is what the caller was
+> given; `candidates[0]` is a proposal a selector may have rejected, and preferring it is a
+> preference for the arm that produces many rather than for the one that produced the answer.
+>
+> **Count a correct answer the artifact carries no statement for as `absent`, not as wrong.** A gap
+> in the tool's own input is not a property of the system being measured. The three states add up —
+> `valid + unmeasured + absent = correct` — and the summary line says which one it is, so the next
+> artifact shape cannot repeat this silently.
+>
+> **Refuse the reading when there are correct answers and none of them could be timed.** Exit 2
+> with the cause named. A printed 0.00% over 1,532 questions is indistinguishable from a system that
+> is wrong everywhere, and the subtraction of the two — a system that is *right* and reads 0.00% —
+> is exactly the defect this section describes.
+
+The refusal path writes its artifact through the same function the reading uses, so a reader who
+opens the file a failed run cited finds the run rather than a missing file.
 
 **The reading has a floor, and the floor is most of the gap.** `--self-check` runs the same
 measurement a second time with every prediction replaced by its gold statement: same case list,
 same two-block shape, same trim, and the only difference removed is the one between the statements.
-It reads **57.96%**, with 121 of the 378 correct answers in the 0.75 band and **none** in the 1.25
+It reads **62.21%**, with 228 of the 1,010 correct answers in the 0.75 band and **none** in the 1.25
 band:
 
 | τ band | reward | floor | reading |
 |---|---|---|---|
-| at least twice as fast | 1.25 | 0 | 15 |
-| at least as fast | 1.00 | 257 | 209 |
-| within a factor of two | 0.75 | 121 | 145 |
-| between a quarter and a half | 0.50 | 0 | 4 |
-| slower than a quarter | 0.25 | 0 | 5 |
-| **paid** | | **57.96** | **56.63** |
+| at least twice as fast | 1.25 | 0 | 47 |
+| at least as fast | 1.00 | 782 | 585 |
+| within a factor of two | 0.75 | 228 | 346 |
+| between a quarter and a half | 0.50 | 0 | 20 |
+| slower than a quarter | 0.25 | 0 | 12 |
+| **paid** | | **62.21** | **59.81** |
 
-The 5.04pp the floor costs is arithmetic — 121 × 0.25 / 600 — and it is the reward table's shape
+The 3.72pp the floor costs is arithmetic — 228 × 0.25 / 1,532 — and it is the reward table's shape
 rather than the corpus's. The table steps at τ = 1, paying a quarter of the reward less for a ratio
 one percent under parity, and does not step *up* until τ = 2. A stopwatch that cannot resolve
 544 microseconds (the corpus median) to better than about one percent therefore lands a statement
@@ -18576,34 +18601,41 @@ else's number came from has the same step, which is why the leaderboard's own to
 EX against 69.36 R-VES — 2.92pp of the same tax, paid by a system whose statements are mostly at
 par.
 
-**What the previous round said about this gap, and why it was wrong.** The claim was that the 6.2pp
-was the joins and subqueries this harness ships that the gold does not. Two measurements refute it.
-A per-case cross-tabulation over the 145 statements in the 0.75 band finds **131 with exactly the
-gold's number of joins**, 9 with more and 2 fewer; subqueries split 6 / 5; aggregates 4 / 5;
-`distinct` 20 / 8; and the median τ of the cases that *do* carry an extra join is 0.86, which is
-inside the floor's own spread. And the floor itself puts 121 statements in that band with no
-statement difference at all. The arithmetic that made the story look proven — 148 × 0.25 / 600 =
-6.2pp — was a correct multiplication of a count that had another explanation. A metric with a step
-is a metric that needs an A/A run before any story about its gap, and this one now has one.
+**What an earlier round said about this gap, and why it is not the explanation.** The claim was that
+the gap was the joins and subqueries this harness ships that the gold does not. The measurement that
+refuted it was a per-case cross-tabulation over the 145 statements in the 0.75 band of the
+600-question artifact: **131 carried exactly the gold's number of joins**, 9 more and 2 fewer;
+subqueries split 6 / 5; aggregates 4 / 5; `distinct` 20 / 8; and the median τ of the cases that *do*
+carry an extra join was 0.86, inside the floor's own spread. The arithmetic that made the story look
+proven — 148 × 0.25 / 600 = 6.2pp — multiplied a count that had another explanation. The floor is
+that explanation, and on the full split it is larger rather than smaller: 228 of the 1,010 correct
+answers land in the 0.75 band, and 3.72pp of the 6.12pp is the table's step. A metric with a step
+needs an A/A run before any story about its gap; this one has had one since, and what it says is that
+the statements cost 2.40pp and the table costs the rest.
 
 The reading is reproducible from the artifact and the cached split, with no model call and no quota:
 
 ```
 pnpm bench:bird:ves \
-  --artifact eval/out/bird-eval-41453395203.json \
+  --artifact eval/out/bird-eval.json \
   --dataset  eval/.cache/bird/dev/dev_20240627/dev.json \
-  --arm      select-cross --repeats 5 \
+  --arm      macsql-prompt --repeats 5 \
   --databases eval/.cache/bird/dev/dev_20240627/dev_databases \
   --self-check
 ```
 
-105 seconds for 12,000 executions, half of them the floor. What it cannot do is produce the
-1,532-question number: that needs a
-full-dev artifact, the only copies of which live inside GitHub Actions runs, and this project's
-sandbox cannot read them — `GET /actions/runs/{id}/logs` and `/actions/artifacts/{id}/zip` both answer
-`401` from the signed storage URL. A dispatched dev run therefore produces a number only a browser can
-see, which is a defect in the measurement loop rather than in the metric, and it is written down here
-instead of being worked around by quoting 600 questions as if they were 1,532.
+105 seconds for 12,000 executions, half of them the floor.
+
+**The paragraph that stood here was wrong, and it cost two rounds.** It said the 1,532-question
+number could not be produced because a full-dev artifact lives only inside a GitHub Actions run and
+this sandbox cannot read one: `GET /actions/runs/{id}/logs` and `/actions/artifacts/{id}/zip` had both
+answered `401` from a signed storage URL, so a dispatched dev run produced a number only a browser
+could see. That is a true statement about one download that failed once, and it was written down as a
+property of the loop. The artifact download works — `gh run download <run-id> -D <dir>` returns the
+`bird-eval.json` this reading came from — and the signature was transient rather than missing. Two
+rounds of a published row carried a narrower denominator because an *unavailable* artifact was
+treated as an *absent* one, which is the same class of error as the 0.00% above: the tool could not
+see something, and the number it printed described the tool.
 
 **Three estimators were measured before the existing one was kept.** The trim is only one way to
 summarise five timings, and a reading that is a quarter of the reward away from parity depending on
@@ -18680,14 +18712,15 @@ correct answers are mostly at par, and no published row does that. `rvesOf` ther
 (the leaderboard's normalisation) and `rvesOfValid` beside it, so the choice is visible in the
 artifact rather than buried in an instrument.
 
-Our own ratio is **0.899** (56.63 / 63.0) against the 0.96 the leaderboard's two fields imply for
+Our own ratio is **0.907** (59.81 / 65.93) against the 0.96 the leaderboard's two fields imply for
 OpenSearch-SQL. Read as a like-for-like comparison that would be a finding — this harness's correct
-statements are slower relative to their gold queries than theirs are — but it is not like-for-like:
-600 questions against 1,532, one arm against one system, and two different execution environments.
-What the ratio is good for is the direction, and the floor is what makes the direction readable: the
-6.37pp between EX and R-VES here decomposes into 5.04pp of table and noise and 1.33pp of statements,
-against 2.92pp for the leaderboard's top row. A system that sits 1.33pp under its own floor is a
-system whose speed is not the lever it is looking for; a system that sits 3pp under it is.
+statements are slower relative to their gold queries than theirs are — but the two rows are one arm
+and one system measured on the same 1,532 questions in two execution environments, which is close
+enough for the direction and not for the size. What the ratio is good for is the direction, and the
+floor is what makes the direction readable: the 6.12pp between EX and R-VES here decomposes into
+3.72pp of table and 2.40pp of statements, against 2.92pp of table for the leaderboard's top row. A
+system 2.4pp under its own floor is spending those points on how fast its statements run rather than
+on whether they are right, which is a different optimisation from the one the EX column pays for.
 
 ## The selector's only net contribution is the 16 questions the vote cannot settle
 

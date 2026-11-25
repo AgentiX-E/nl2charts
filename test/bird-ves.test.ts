@@ -343,6 +343,22 @@ describe('the tool', () => {
     expect(lines.join('\n')).toContain('at least twice as fast: 1');
     const unmeasured = describeVes({ ...rvesOf([]), unmeasured: 2 }, 1);
     expect(unmeasured.join('\n')).toContain('2 correct statements could not be timed');
+    // The third state has its own line, because the two have different repairs: an untimeable
+    // statement is the executor's problem and an absent one is the artifact's, and a reading that
+    // folded them together would send the next round looking in the wrong file.
+    const absent = describeVes({ ...rvesOf([]), correct: 2, absent: 2 }, 1);
+    expect(absent.join('\n')).toContain('2 correct answers carry no statement in the artifact');
+    expect(absent.join('\n')).toContain('R-VES 2 correct: 0 timed, 0 untimeable, 2 with no statement');
+  });
+
+  it('takes the middle of an even sample as the mean of the two members', () => {
+    // The first version read `sorted[floor(n / 2)]`, which on an even sample reports the upper of
+    // the two middle members — on `[100, 10000]` that is the outlier. Four samples is the only
+    // shape that puts both the median and the spread on an even count, so it is the shape that
+    // reaches the branch at all.
+    expect(cleanTimings([1000, 1000, 1200, 1200])).toBe(1100);
+    // And a sample with no spread is kept whole: a window of zero width would delete every member.
+    expect(cleanTimings([500, 500, 500, 500])).toBe(500);
   });
 
   it('mirrors the statements a floor is measured on, and only those', () => {
@@ -504,6 +520,61 @@ describe('the tool', () => {
     );
     expect(exit).toBe(2);
     expect(printed.join('\n')).toContain('did not time');
+  });
+
+  it('says how many answers it read, in the number the reading carries', async () => {
+    // The two refusals above are the singular shapes. A plural is the only form the dev split could
+    // ever have printed — 1,532 correct answers, none of them timed — and a plural that reads
+    // "2 correct answer" is a sentence nobody would have caught by rereading it. Both branches of
+    // both interpolations are pinned here for that reason.
+    const artifact = join(root, 'blind-two.json');
+    const dataset = join(root, 'blind-two-dataset.json');
+    const out = join(root, 'blind-two-out.json');
+    writeFileSync(artifact, JSON.stringify({
+      cases: [
+        { arm: 'a', id: 1, passed: true },
+        { arm: 'a', id: 2, passed: true },
+      ],
+    }));
+    writeFileSync(dataset, JSON.stringify([
+      { question_id: 1, db_id: 'shop', SQL: 'G1' },
+      { question_id: 2, db_id: 'shop', SQL: 'G2' },
+    ]));
+    const blind: string[] = [];
+    expect(await main(
+      ['--artifact', artifact, '--dataset', dataset, '--arm', 'a', '--out', out],
+      (line) => blind.push(line),
+      async () => ({ timer: async () => ({ ok: true, us: 1000 }), close: async () => {} }),
+    )).toBe(2);
+    expect(blind.join('\n')).toContain('2 correct answers');
+    // The refusal leaves its artifact behind: a reader who opens the file the log cited finds it.
+    const written = JSON.parse(readFileSync(out, 'utf8')) as { correct: number; absent: number };
+    expect(written.correct).toBe(2);
+    expect(written.absent).toBe(2);
+
+    const unrunnable = join(root, 'unrunnable-two.json');
+    writeFileSync(unrunnable, JSON.stringify({
+      cases: [
+        { arm: 'a', id: 1, passed: true, sql: 'P1' },
+        { arm: 'a', id: 2, passed: true, sql: 'P2' },
+      ],
+    }));
+    const timed: string[] = [];
+    expect(await main(
+      ['--artifact', unrunnable, '--dataset', dataset, '--arm', 'a'],
+      (line) => timed.push(line),
+      async () => ({ timer: async () => ({ ok: false, us: 0 }), close: async () => {} }),
+    )).toBe(2);
+    expect(timed.join('\n')).toContain('2 statements did not time');
+  });
+
+  it('ignores a positional argument instead of reading it as a flag', () => {
+    // Arguments arrive from a shell and from a workflow's `$EXTRA`, so a bare word is a shape the
+    // parser meets. Skipping it keeps the tool from reading `--out` out of a filename.
+    const options = parseVesArgs(['--artifact', 'a', '--dataset', 'b', '--arm', 'c', 'stray', '2']);
+    expect(options.artifact).toBe('a');
+    expect(options.arm).toBe('c');
+    expect(options.out).toBeUndefined();
   });
 
   it('closes the runner even when the measurement throws', async () => {
