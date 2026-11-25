@@ -114,6 +114,18 @@ export function censusOf(report: unknown, name = 'the artifact'): AnswerCensus {
   if (dropouts + absent > questions) {
     throw new Error(`${name}: ${String(dropouts + absent)} dropouts and failures over ${String(questions)} questions`);
   }
+  // The artifact states the denominator its own reading was taken over, and this file has to describe
+  // that reading rather than the one the current code would produce. An artifact whose reading covers
+  // fewer questions than it asked was written when failed rows were dropped: its mean is divided by a
+  // denominator this census no longer computes, so the share printed beside it would be a share of a
+  // different set. Refused, with the remedy — the answers are in the store, so re-dispatching it is
+  // free.
+  const stated = isRecord(report['reading']) ? report['reading']['questions'] : undefined;
+  if (stated !== undefined && stated !== questions) {
+    throw new Error(`${name}: the reading is over ${String(stated)} questions of ${String(questions)} asked, `
+      + 'so it was written when a call that produced no reply was dropped from the denominator — '
+      + 're-dispatch that arm, its answers replay from the store, and the vector it writes will be the split');
+  }
   // Every asked question is in the reading, so the denominator is the split: a failed call scores zero
   // inside it rather than shrinking it.
   const scored = questions;

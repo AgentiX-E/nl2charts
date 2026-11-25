@@ -197,6 +197,7 @@ jobs:
           ASK: ${{ inputs.ask }}
           RULES: ${{ inputs.rules }}
           REPLICA: ${{ inputs.replica }}
+          MT: ${{ inputs.max_tokens }}
         run: |
           # `count,variants` is an arm and so is `count`: the slug names it, so two arms do not share
           # a cache entry and a save from one cannot hide from the other.
@@ -212,6 +213,10 @@ jobs:
           # `none` rather than the empty string, because a dispatch input left empty falls back to its
           # default and an arm that says "no rules" must not quietly run with both of them.
           if [ "$RULES" = "none" ]; then echo "list=" >> "$GITHUB_OUTPUT"; else echo "list=$RULES" >> "$GITHUB_OUTPUT"; fi
+          # The output cap is a number, and a cache key refuses anything containing a comma — so it is
+          # flattened here rather than interpolated from the input, which `check-workflows.mjs` rejects
+          # for every input because an input's declared values are not constrained to be key-safe.
+          echo "mt=$MT" >> "$GITHUB_OUTPUT"
 
       # The answers, keyed by the request rather than by the calendar: model, split, k, the output cap
       # and the code that builds the prompt.
@@ -232,9 +237,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: eval/.cache/nvbench2/answers
-          key: nvbench2-answers-${{ steps.instrument.outputs.slug }}-mt${{ inputs.max_tokens }}-${{ hashFiles('eval/nvbench2/arm.ts', 'eval/nvbench2/facts.ts', 'eval/nvbench2/judge.ts', 'eval/nvbench2/corpus-text.ts', 'eval/nvbench2/corpus-prompt.ts') }}
+          key: nvbench2-answers-${{ steps.instrument.outputs.slug }}-mt${{ steps.instrument.outputs.mt }}-${{ hashFiles('eval/nvbench2/arm.ts', 'eval/nvbench2/facts.ts', 'eval/nvbench2/judge.ts', 'eval/nvbench2/corpus-text.ts', 'eval/nvbench2/corpus-prompt.ts') }}
           restore-keys: |
-            nvbench2-answers-${{ steps.instrument.outputs.slug }}-mt${{ inputs.max_tokens }}-
+            nvbench2-answers-${{ steps.instrument.outputs.slug }}-mt${{ steps.instrument.outputs.mt }}-
 
       - name: Ask every question
         env:

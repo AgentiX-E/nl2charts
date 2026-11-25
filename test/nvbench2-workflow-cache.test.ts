@@ -36,7 +36,7 @@ describe('the answer archive is keyed by the request, not by the calendar', () =
     // The defect: one archive for two caps. `--max-tokens` is not cosmetic — a reply cut at 900
     // tokens is a different answer from one that finished, which is why `content-store.ts` puts it in
     // the key material and why the archive has to agree.
-    expect(primaryKeyLine()).toContain('mt${{ inputs.max_tokens }}');
+    expect(primaryKeyLine()).toContain('mt${{ steps.instrument.outputs.mt }}');
   });
 
   it('restores only from the same cap, so a restore cannot hand back entries for another one', () => {
@@ -44,7 +44,7 @@ describe('the answer archive is keyed by the request, not by the calendar', () =
     // quote above: the run pays for everything and the archive looks populated.
     const prefixes = workflow.split('\n').filter((line) => line.includes('nvbench2-answers-') && line.trimStart().startsWith('nvbench2-answers-'));
     expect(prefixes).not.toHaveLength(0);
-    for (const prefix of prefixes) expect(prefix).toContain('mt${{ inputs.max_tokens }}-');
+    for (const prefix of prefixes) expect(prefix).toContain('mt${{ steps.instrument.outputs.mt }}-');
   });
 
   it('names every input that changes an answer key in the arm slug', () => {

@@ -71,6 +71,19 @@ describe('censusOf', () => {
     expect(census.width).toBeCloseTo(2100 / 738, 10);
   });
 
+  it('refuses an artifact whose reading covered fewer questions than it asked', () => {
+    // Two conventions cannot share one table. An artifact from before the failed-row fix states a
+    // reading over 749 of its 751 questions; this file would print a share over 751 beside a mean over
+    // 749, and the two numbers would look like one reading. The remedy is a re-dispatch, which is free
+    // because the answers are in the store.
+    expect(() => censusOf(report({ failed: 2, reading: { questions: 749 } }), 'a.json'))
+      .toThrow(/the reading is over 749 questions of 750 asked/);
+    expect(() => censusOf(report({ failed: 2, reading: { questions: 749 } }), 'a.json'))
+      .toThrow(/re-dispatch that arm/);
+    // An artifact that answered every question is consistent under both conventions and is read.
+    expect(censusOf(report({ reading: { questions: 750 } })).scored).toBe(750);
+  });
+
   it('reads an artifact written before the counters existed as an arm that had none', () => {
     const census = censusOf({
       split: 'dev', model: 'deepseek-chat', k: 3, questions: 4, produced: 8,
@@ -218,8 +231,12 @@ describe('main', () => {
   });
 
   it('prints the censuses without the move table when the corpus map is cold', async () => {
+    // `--cache` names a directory this test just made, so "cold" is a property of the fixture rather
+    // than of the checkout. The earlier version read the repository's own cache and passed only while
+    // nobody had run `bench:nvbench2:metadata` here — a test that fails when a documented command has
+    // been run is a test that punishes the reader for following the instructions.
     const { log, lines } = printed();
-    expect(await main([artifact(report())], log)).toBe(1);
+    expect(await main([artifact(report()), '--cache', scratch()], log)).toBe(1);
     expect(lines.join('\n')).toContain('no corpus map at');
     expect(lines.join('\n')).toContain('pnpm bench:nvbench2:metadata');
   });
@@ -266,10 +283,10 @@ describe('the command', () => {
   it('prints a census for an artifact and exits zero', () => {
     const path = join(scratch(), 'nvbench2-arm.json');
     writeFileSync(path, JSON.stringify(report()));
-    const { status, out } = run([path]);
+    const { status, out } = run([path, '--cache', scratch()]);
     expect(status).toBe(1);
     expect(out).toContain('dev deepseek-chat rules=count,corpus k=3');
-    // Exit 1 rather than 0 because this checkout's corpus cache is not where the run looked; the
+    // Exit 1 rather than 0 because the cache directory this test named holds no corpus map; the
     // census is still printed, which is what the code promises for a cold map.
     expect(out).toContain('no corpus map at');
   });
