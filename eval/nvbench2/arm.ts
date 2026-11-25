@@ -123,7 +123,7 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
  *   does name. Asked as a preamble, it makes the enumeration explicit instead of implicit, and step
  *   two is exactly the set the golds are.
  */
-export const RULES = ['count', 'ranks', 'variants', 'values', 'corpus', 'corpus2', 'steps'] as const;
+export const RULES = ['count', 'ranks', 'variants', 'values', 'corpus', 'corpus2', 'steps', 'spread'] as const;
 export type Rule = (typeof RULES)[number];
 
 /**
@@ -209,6 +209,14 @@ const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
     'the set the way the corpus does: the measure sits on the aggregated channel, each column the',
     'question names sits on the channel it names, and every column still free is a chart of its own on',
     'the remaining axis, most plausible first. No chart puts one column on two channels.',
+  ],
+  spread: [
+    'Check the array before you send it: no entry may name only columns an earlier entry already named.',
+    'Each entry is one guess, so an entry built from the same columns as an earlier one is a guess you',
+    'did not make. When the table holds a column that neither the question nor the measure needs, give',
+    'that column an entry of its own on the free channel instead of repeating a column you already',
+    'used. Only when every column is already taken may two entries share one, and then they differ in',
+    'the mark or in the filter.',
   ],
   steps: [
     'Decide before you answer. Start a line "STEPS:" and then three numbered lines, each one short and',

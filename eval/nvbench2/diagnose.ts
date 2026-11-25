@@ -63,6 +63,64 @@ export type Comparison =
   | { readonly equal: true; readonly aspects: Readonly<Record<Aspect, boolean>>; readonly first: null }
   | { readonly equal: false; readonly aspects: Readonly<Record<Aspect, boolean>>; readonly first: Aspect };
 
+/**
+ * How much of the reply width went to different columns.
+ *
+ * A set of `k` charts is a budget of `k` guesses, and a guess that repeats a column already used is
+ * a guess not made. The reasoning arm spends 2.56 distinct columns per question while the golds use
+ * 3.15, so about one entry in seven is such a repeat; that gap is the shape of the `elsewhere` and
+ * `misplaced` buckets, seen from the side the model controls. Counted on the same normalised charts
+ * the judge scores, so the number cannot describe a different run than the F1 next to it.
+ */
+export interface Spread {
+  /** Questions with a gold and at least one usable prediction. */
+  readonly questions: number;
+  /** Predictions examined inside those questions. */
+  readonly entries: number;
+  /** Sum over questions of the distinct columns the golds use. */
+  readonly goldColumns: number;
+  /** Sum over questions of the distinct columns the predictions name. */
+  readonly predictedColumns: number;
+  /** Sum over questions of the columns both sides name. */
+  readonly coveredColumns: number;
+  /** Entries that name a column an earlier entry of the same question already named. */
+  readonly repeatedEntries: number;
+}
+
+/** Every field a chart names on any channel, once each. */
+export function columnsOf(chart: Chart): string[] {
+  const encoding = chart['encoding'];
+  if (!isRecord(encoding)) return [];
+  const columns = new Set<string>();
+  for (const slot of Object.values(encoding)) {
+    if (!isRecord(slot)) continue;
+    const field = slot['field'];
+    if (typeof field === 'string') columns.add(field);
+    else if (Array.isArray(field)) for (const entry of field) if (typeof entry === 'string') columns.add(entry);
+  }
+  return [...columns];
+}
+
+/**
+ * How many distinct columns a reply uses, and how many of its entries repeat one.
+ *
+ * An entry repeats only when every column it names has already been named by an earlier entry: one
+ * that introduces a new column is a new guess even if it shares the measure's column with the rest.
+ * An entry with no column never repeats anything — two count charts are two charts, and calling them
+ * a duplicate would make the widest arms look wasteful for a reason that is not about coverage.
+ */
+export function spreadOf(charts: readonly Chart[]): { columns: number; repeated: number } {
+  const used = new Set<string>();
+  let repeated = 0;
+  for (const chart of charts) {
+    const columns = columnsOf(chart);
+    if (columns.length === 0) continue;
+    if (columns.every((column) => used.has(column))) repeated += 1;
+    for (const column of columns) used.add(column);
+  }
+  return { columns: used.size, repeated };
+}
+
 /** How a split failed, counted over the charts that were scored. */
 export interface Diagnostic {
   /** Predictions examined — the top `k` of every question that has a gold. */
@@ -119,6 +177,8 @@ export interface Diagnostic {
    * with one cause.
    */
   readonly extraKeys: Readonly<Record<string, number>>;
+  /** How much of the reply width went to different columns, over the same questions. */
+  readonly spread: Spread;
 }
 
 /**
@@ -315,12 +375,28 @@ export function diagnose(cases: readonly Case[], k: number): Diagnostic {
   let predictions = 0;
   let matched = 0;
   let countFieldless = 0;
+  const spread: {
+    questions: number; entries: number; goldColumns: number;
+    predictedColumns: number; coveredColumns: number; repeatedEntries: number;
+  } = { questions: 0, entries: 0, goldColumns: 0, predictedColumns: 0, coveredColumns: 0, repeatedEntries: 0 };
   for (const item of cases) {
     if (item.golds.length === 0) continue;
     const golds = preprocess(item.golds, item.types).filter((gold): gold is Chart => gold !== null);
     if (golds.length === 0) continue;
-    for (const candidate of preprocess(item.predictions, item.types).slice(0, k)) {
-      if (candidate === null) continue;
+    const candidates = preprocess(item.predictions, item.types)
+      .slice(0, k)
+      .filter((candidate): candidate is Chart => candidate !== null);
+    if (candidates.length > 0) {
+      const goldColumns = new Set(golds.flatMap(columnsOf));
+      const predictedColumns = new Set(candidates.flatMap(columnsOf));
+      spread.questions += 1;
+      spread.entries += candidates.length;
+      spread.goldColumns += goldColumns.size;
+      spread.predictedColumns += predictedColumns.size;
+      spread.coveredColumns += [...predictedColumns].filter((column) => goldColumns.has(column)).length;
+      spread.repeatedEntries += spreadOf(candidates).repeated;
+    }
+    for (const candidate of candidates) {
       predictions += 1;
       const closest = nearest(candidate, golds);
       const comparison = compareAspects(candidate, closest);
@@ -341,7 +417,7 @@ export function diagnose(cases: readonly Case[], k: number): Diagnostic {
       if (golds.some((gold) => canonical(withoutCountFields(gold)) === stripped)) countFieldless += 1;
     }
   }
-  return { predictions, matched, agree, first, fieldRepair, countFieldless, extraKeys };
+  return { predictions, matched, agree, first, fieldRepair, countFieldless, extraKeys, spread };
 }
 
 function emptyCounts(): Record<Aspect, number> {

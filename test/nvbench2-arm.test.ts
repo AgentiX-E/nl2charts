@@ -66,6 +66,21 @@ describe('the prompt', () => {
     expect(system).toContain('"transform"');
   });
 
+  it('asks for the entries to spend different columns, and only when the arm names that rule', () => {
+    // The shipped prompt already says every free column is a chart of its own, and the replies still
+    // spend 2.56 distinct columns where the golds use 3.15. `spread` is the same demand phrased as a
+    // check on the array rather than as a description of the set, so the two are separate rules: the
+    // ablation can tell whether the phrasing or the demand is what was missing.
+    const [shipped] = buildSpecPrompt({ question: 'q' }, TYPES, 3);
+    expect(shipped).not.toContain('no entry may name only columns');
+    const [withSpread] = buildSpecPrompt({ question: 'q' }, TYPES, 3, ['count', 'corpus', 'corpus2', 'spread']);
+    expect(withSpread).toContain('no entry may name only columns an earlier entry already named');
+    expect(withSpread).not.toBe(shipped);
+    // And it is not in the product's prompt, because nothing has measured it yet.
+    const [product] = productPrompt({ question: 'q' }, TYPES, 3);
+    expect(product).not.toContain('no entry may name only columns');
+  });
+
   it('names the budget it was given, so two k values are two prompts', () => {
     const [five] = buildSpecPrompt({ question: 'q' }, TYPES, 5);
     expect(five).toContain('at most 5 charts');
@@ -690,6 +705,9 @@ describe('the arm', () => {
     expect(rulesOf('variants,count')).toEqual(['count', 'variants']);
     expect(rulesOf('corpus2,count')).toEqual(['count', 'corpus2']);
     expect(rulesOf('steps')).toEqual(['steps']);
+    expect(rulesOf('spread')).toEqual(['spread']);
+    // The order is the module's, not the caller's, because the sentence order is the prompt's.
+    expect(rulesOf('spread,count')).toEqual(['count', 'spread']);
     expect(() => rulesOf('count,bogus')).toThrow(/bogus/);
   });
 

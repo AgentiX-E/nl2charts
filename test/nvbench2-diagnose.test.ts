@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ASPECTS, FIELD_REPAIRS, compareAspects, diagnose, fieldRepairOf, nearest, withoutCountFields, type Aspect,
+  ASPECTS, FIELD_REPAIRS, compareAspects, diagnose, fieldRepairOf, nearest, spreadOf, withoutCountFields, type Aspect,
 } from '../eval/nvbench2/diagnose.js';
 import { canonical, normalizeOrder, type Case, type Chart, type FieldTypes } from '../eval/nvbench2/judge.js';
 
@@ -371,5 +371,80 @@ describe('why a field parted, as a repair path', () => {
     // A gold whose encoding is not an object is still a gold the counter has to look at.
     const badGold = { mark: 'line', encoding: 'x' };
     expect(fieldRepairOf(gold, badGold, [badGold], TYPES)).toBe('unused');
+  });
+});
+
+describe('spread: how much of the reply width the model actually spends on different columns', () => {
+  // The reasoning arm's replies use 2.56 distinct columns per question while the golds use 3.15, so
+  // about one answer in seven repeats a column already used and buys nothing. That reading has to
+  // come from the same normalised charts the judge scores, or it describes a different run.
+  const at = (x: string, y = 'authorder'): Chart =>
+    normal({ mark: 'line', encoding: { x: { field: x }, y: { field: y, aggregate: 'mean' } } });
+
+  it('counts a second entry on the same column as a repeat, and not the first', () => {
+    // The second entry adds no column the first did not name, so it spends the budget without
+    // buying a guess. The third adds `name`, so it is a guess even though it shares `authorder`.
+    const spread = spreadOf([at('paperid'), at('paperid'), at('name')]);
+    expect(spread.columns).toBe(3);
+    expect(spread.repeated).toBe(1);
+  });
+
+  it('does not count an entry that shares one column but adds another as a repeat', () => {
+    const first = normal({ mark: 'point', encoding: { x: { field: 'paperid' }, y: { field: 'authorder' } } });
+    const second = normal({ mark: 'point', encoding: { x: { field: 'authorder' }, y: { field: 'name' } } });
+    expect(spreadOf([first, second])).toEqual({ columns: 3, repeated: 0 });
+  });
+
+  it('never calls an entry with no column a repeat, however many of them there are', () => {
+    // A count chart names no field. Two of them are two charts and zero repeated columns, and
+    // reporting them as a duplicate would make the widest arms look wasteful.
+    const count: Chart = normal({ mark: 'bar', encoding: { x: { field: 'name' }, y: { aggregate: 'count' } } });
+    const bare: Chart = normal({ mark: 'bar', encoding: {} });
+    expect(spreadOf([count, count])).toEqual({ columns: 1, repeated: 1 });
+    expect(spreadOf([bare, bare])).toEqual({ columns: 0, repeated: 0 });
+  });
+
+  it('reads a channel that holds an array of fields as every field in it', () => {
+    const stacked = normal({ mark: 'arc', encoding: { color: { field: ['name', 'paperid'] } } });
+    expect(spreadOf([stacked]).columns).toBe(2);
+  });
+
+  it('ignores everything in an encoding that is not a named string field', () => {
+    // Model output, so the shapes are whatever the model wrote: a channel that is a string, a field
+    // that is a number, and an array with a number in it. None of them names a column.
+    const odd = {
+      mark: 'arc',
+      encoding: { color: 'name', theta: { field: 7 }, detail: { field: ['paperid', 3] } },
+    } as Chart;
+    expect(spreadOf([odd])).toEqual({ columns: 1, repeated: 0 });
+    expect(spreadOf([{ mark: 'arc', encoding: 'name' } as Chart])).toEqual({ columns: 0, repeated: 0 });
+  });
+
+  it('sums over the questions it was given and skips the ones with no gold', () => {
+    // `at('name')` normalises to {name on x, authorder on y}: two columns, one of which the gold
+    // also names, so the covered count is one rather than two.
+    const diagnostic = diagnose([
+      { predictions: [at('name'), at('name')], golds: [GOLD], types: TYPES },
+      { predictions: [at('name')], golds: [], types: TYPES },
+    ], 3);
+    expect(diagnostic.spread.questions).toBe(1);
+    expect(diagnostic.spread.entries).toBe(2);
+    expect(diagnostic.spread.predictedColumns).toBe(2);
+    expect(diagnostic.spread.goldColumns).toBe(2);
+    expect(diagnostic.spread.coveredColumns).toBe(1);
+    expect(diagnostic.spread.repeatedEntries).toBe(1);
+  });
+
+  it('counts a gold column once even when two golds of the question name it', () => {
+    const second: Chart = normal({ mark: 'bar', encoding: { x: { field: 'paperid' }, y: { field: 'authorder', aggregate: 'sum' } } });
+    const diagnostic = diagnose([{ predictions: [at('name')], golds: [GOLD, second], types: TYPES }], 3);
+    expect(diagnostic.spread.goldColumns).toBe(2);
+  });
+
+  it('reports zeroes on an empty split rather than an empty object', () => {
+    const empty = diagnose([], 3);
+    expect(empty.spread).toEqual({
+      questions: 0, entries: 0, goldColumns: 0, predictedColumns: 0, coveredColumns: 0, repeatedEntries: 0,
+    });
   });
 });
