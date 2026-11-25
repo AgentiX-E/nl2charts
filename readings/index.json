@@ -3,35 +3,40 @@
  "readings": {
   "bird-dev": {
    "kind": "bench-readback",
-   "commit": "a5e58f94052515bebbbd81b84a62891515c1e23c",
+   "commit": "656404a639b0527c1a262920d0492b79552c90d7",
    "workflow": "bird-dev",
-   "runId": "45117268824",
+   "runId": "45663072306",
    "split": "dev",
    "dataset": "bird-dev",
    "model": "deepseek-chat",
    "secondModel": null,
-   "generatedAt": "2026-11-23T05:25:52.201Z",
+   "generatedAt": "2026-11-25T17:22:19.474Z",
    "corpus": {
     "digest": "db9e8a1aba23ddd9",
     "rows": 1534,
     "questions": 1534
    },
    "selection": {
-    "requested": 100,
-    "scored": 100
+    "requested": 1534,
+    "scored": 1532
    },
    "arms": [
     {
-     "arm": "macsql-bird-os",
-     "passed": 70,
-     "total": 100,
-     "accuracy": 0.7,
+     "arm": "macsql-prompt",
+     "passed": 1008,
+     "total": 1532,
+     "accuracy": 0.6579634464751958,
      "calls": 1,
-     "promptTokens": 3827,
-     "completionTokens": 142,
-     "strictPassed": 66
+     "promptTokens": 3694,
+     "completionTokens": 140,
+     "strictPassed": 915
     }
-   ]
+   ],
+   "rves": {
+    "rves": 0,
+    "repeats": 5,
+    "floor": 0
+   }
   }
  }
 }
