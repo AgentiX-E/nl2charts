@@ -18449,6 +18449,11 @@ set. On the chat tier, 750 questions, ¥3.02:
 Inside the noise and pointing down. The branch is closed: a rule that cannot bind does not help
 when it is followed, and this one did not separate even though the model produced 40 more charts.
 
+The base in that table is a re-dispatch of the same prompt rather than the 28.16 published above:
+a re-run of a paid arm reads 28.12, because two dispatches of one prompt are not bit-identical
+(temperature 0 narrows the spread; it does not remove it). Every paired interval in this file is
+taken within one such re-read, which is why the deltas here are quoted against 28.12 and not 28.16.
+
 **Reading the 465 misses as cases, not as a number.** `labelsOf` writes one verdict per prediction
 into every kept sample — the group it parted on and, for a column-first miss, the repair bucket — so
 a case can be found from an artifact instead of re-derived from a mean. Reading them found the thing
