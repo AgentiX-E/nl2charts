@@ -327,6 +327,22 @@ function fieldAt(chart: Chart, channel: string): string | undefined {
 }
 
 /**
+ * The channel the two charts part on, and the column the prediction put there.
+ *
+ * `field` is `undefined` when the channel names no column — a blank channel, or a count — which is a
+ * repair of its own (`absent`) before any column can be looked for. Shared by the repair verdict and
+ * the move tally so the two cannot scan the channels in different orders.
+ */
+function partedOf(candidate: Chart, closest: Chart): { channel: string; field: string | undefined } | undefined {
+  const encoding = candidate.encoding;
+  if (!isRecord(encoding)) return undefined;
+  const channel = Object.keys(encoding)
+    .sort()
+    .find((name) => fieldAt(candidate, name) !== fieldAt(closest, name));
+  return channel === undefined ? undefined : { channel, field: fieldAt(candidate, channel) };
+}
+
+/**
  * Why two charts that both name columns part on `field`, as the cheapest thing that would repair it.
  *
  * Returns `undefined` when they agree on every channel's column — the caller only asks after
@@ -346,18 +362,148 @@ export function fieldRepairOf(
   golds: readonly Chart[],
   types: Readonly<Record<string, unknown>>,
 ): FieldRepair | undefined {
-  const encoding = candidate.encoding;
-  if (!isRecord(encoding)) return undefined;
-  const parted = Object.keys(encoding)
-    .sort()
-    .find((channel) => fieldAt(candidate, channel) !== fieldAt(closest, channel));
+  const parted = partedOf(candidate, closest);
   if (parted === undefined) return undefined;
-  const field = fieldAt(candidate, parted);
+  const field = parted.field;
   if (field === undefined) return 'absent';
   if (!Object.prototype.hasOwnProperty.call(types, field)) return 'offSchema';
-  if (golds.some((gold) => gold !== closest && fieldAt(gold, parted) === field)) return 'elsewhere';
+  if (golds.some((gold) => gold !== closest && fieldAt(gold, parted.channel) === field)) return 'elsewhere';
   if (golds.some((gold) => slotsOf(gold).some(([, slot]) => slot['field'] === field))) return 'misplaced';
   return 'unused';
+}
+
+/** One column the prediction put on a channel and the golds put on another: the move that repairs it. */
+export interface Move {
+  /** The column both sides use, in the two different places. */
+  readonly column: string;
+  /** The channel this prediction gave it. */
+  readonly from: string;
+  /** The channel the golds give it. */
+  readonly to: string;
+}
+
+/**
+ * The `misplaced` verdict with the two channels named, or `undefined` when the miss is not one.
+ *
+ * `first.field` says the reply named a different column; `fieldRepair` says it was a column the golds
+ * do use, somewhere else. Neither says *where* — and where is the whole of the repair: a column moved
+ * from `x` to `color` is a chart that should have had two axes and a third encoding, while a column
+ * moved from `x` to `y` is the orientation problem `withMirrors` already prices. The two need
+ * different sentences in the prompt, so the count of one bucket cannot be the input to a decision.
+ *
+ * The gold searched is the nearest one, then any other gold of the question: a question whose golds
+ * differ only in which column carries the free axis can put a column on a channel the nearest gold
+ * does not use, and the move is still the same move.
+ *
+ * This is the same predicate `fieldRepairOf` returns `misplaced` for, expressed as the move rather
+ * than as a name — `test/nvbench2-diagnose.test.ts` holds the two to one answer over every pair of
+ * charts it can build, so the tally and the bucket cannot describe different runs.
+ */
+export function misplacedOf(candidate: Chart, closest: Chart, golds: readonly Chart[]): Move | undefined {
+  const parted = partedOf(candidate, closest);
+  if (parted === undefined) return undefined;
+  const column = parted.field;
+  if (column === undefined) return undefined;
+  // A column another gold puts on this same channel is a tie-break (`elsewhere`), not a move: the
+  // prediction assigned it exactly where a gold does.
+  if (golds.some((gold) => gold !== closest && fieldAt(gold, parted.channel) === column)) return undefined;
+  for (const gold of [closest, ...golds]) {
+    for (const [channel, slot] of slotsOf(gold)) {
+      if (slot['field'] !== column || channel === parted.channel) continue;
+      return { column, from: parted.channel, to: channel };
+    }
+  }
+  return undefined;
+}
+
+/** The same chart with two channels exchanged, which is the repair a `misplaced` miss needs. */
+function swapped(candidate: Chart, move: Move): Chart {
+  // Both channels exist: `misplacedOf` found the parted one in this encoding and the other one in a
+  // gold that agreed with it on the channel set. The cast is that argument, not a hope.
+  const encoding = candidate.encoding as Record<string, unknown>;
+  const { from, to } = move;
+  return { ...candidate, encoding: { ...encoding, [from]: encoding[to], [to]: encoding[from] } };
+}
+
+/** One channel pair of the `misplaced` bucket, and how many of its cases one exchange repairs. */
+export interface PairCounts {
+  /** Predictions that gave this column to `from` where the golds give it to `to`. */
+  readonly count: number;
+  /** Of those, how many become equal to a gold when `x` and `y` are exchanged. */
+  readonly swapped: number;
+}
+
+/** How the `misplaced` bucket is built: which channel pair, and what the cheapest repair buys. */
+export interface Moves {
+  /** Predictions whose column the golds use on another channel — the bucket, counted. */
+  readonly misplaced: number;
+  /**
+   * Of those, how many name one column on two channels — the measure's own column carried as the
+   * dimension, or a column the question names reused as the free axis.
+   *
+   * The two are different repairs from the channel pair: a column put where the golds put it but
+   * *also* kept somewhere else is not a transposition of two assignments, it is one assignment too
+   * many, and the chart is missing the column the golds use. Counted because the corpus's own
+   * construction forbids it in words (`corpus2`: no chart puts one column on two channels) and the
+   * bucket says how often that sentence is not enough.
+   */
+  readonly selfRepeats: number;
+  /** Counts keyed `from→to`, so the dominant misplacement is a row rather than an anecdote. */
+  readonly pairs: Readonly<Record<string, PairCounts>>;
+}
+
+/**
+ * Decompose the `misplaced` bucket by where the column went, and price the cheapest repair.
+ *
+ * `repairBySwap` is a *bound*, not a reading: it says how many misses a model would have got right if
+ * it had put the two columns the other way round, and the judge is untouched by it. What it is worth
+ * is the decision it makes possible — a bucket that is 90% one channel pair and mostly one exchange
+ * away is a prompt rule with a measurable ceiling, and a bucket spread over six pairs is not a rule
+ * at all. Costs nothing, because it compares charts the run already paid for.
+ */
+export function movesOf(cases: readonly Case[], k: number): Moves {
+  const pairs: Record<string, PairCounts> = {};
+  let misplaced = 0;
+  let selfRepeats = 0;
+  for (const item of cases) {
+    const golds = preprocess(item.golds, item.types).filter((gold): gold is Chart => gold !== null);
+    if (golds.length === 0) continue;
+    for (const candidate of preprocess(item.predictions, item.types).slice(0, k)) {
+      if (candidate === null) continue;
+      const closest = nearest(candidate, golds);
+      // The bucket is only defined for a miss that parts on the column: a reply that differs first in
+      // its mark is a different repair, and the column it names may still agree with the gold.
+      if (compareAspects(candidate, closest).first !== 'field') continue;
+      const move = misplacedOf(candidate, closest, golds);
+      if (move === undefined) continue;
+      misplaced += 1;
+      if (namesTwice(candidate)) selfRepeats += 1;
+      const key = `${move.from}→${move.to}`;
+      const at = pairs[key] ?? { count: 0, swapped: 0 };
+      // An exchange is the repair for two position channels and a guess anywhere else: swapping `x`
+      // with `color` leaves the colour slot holding what belonged on the axis, so a case that happens
+      // to match a gold that way is a coincidence rather than a repair worth counting.
+      const positions = move.from !== move.to && ['x', 'y'].includes(move.from) && ['x', 'y'].includes(move.to);
+      const repaired = positions && golds.some((gold) => canonical(gold) === canonical(swapped(candidate, move)));
+      pairs[key] = { count: at.count + 1, swapped: at.swapped + (repaired ? 1 : 0) };
+    }
+  }
+  return { misplaced, selfRepeats, pairs };
+}
+
+/**
+ * Whether one column is named on two channels, which is one assignment more than the gold makes.
+ *
+ * No shape guards: a chart that reaches this call carries an encoding of channel objects —
+ * `misplacedOf` found a parted channel in it, and `normalizeOrder` leaves an object behind for every
+ * channel it keeps. A guard here would be a branch no input can reach, and the count would be the
+ * same on every input that can.
+ */
+function namesTwice(candidate: Chart): boolean {
+  const named = Object.values(candidate.encoding as Record<string, unknown>)
+    .map((slot) => asSlot(slot)['field'])
+    .filter((field): field is string => typeof field === 'string');
+  return new Set(named).size < named.length;
 }
 
 /** One prediction's verdict, as the counter sees it and as a reader needs to see it. */

@@ -1122,5 +1122,201 @@
         "why": "The first stepsFull dispatch read 0.00 F1@3 with 569 of 750 replies unparsed and ¥50.33 spent. The prompt was not at fault: `finalOutputOf` read the last fenced block for `final_output`, and this prompt ends with `step_6.answer`, so a correct answer parsed as no answer. The reading was withheld rather than published, the parser was given both contracts (`76648e10`, with three tests), and the arm was re-dispatched with 750 of 750 answers served from the cache and 0 API calls: `readings.stepsFull` is that re-read of the same paid bytes, 25.63."
       }
     ]
+  },
+  "census": {
+    "question": "A reading is a mean over questions, and three kinds of row are counted without being answers: a truncated reply, an unreadable one, and a call that returned nothing. How much of each published number is one of those, and where does the largest miss bucket put its columns?",
+    "tool": "pnpm bench:nvbench2:census <artifact.json> --cache eval/.cache/nvbench2",
+    "because": "The counts are on the artifacts already paid for, so this is the one question in the queue that costs nothing to answer. `dropouts` are in the reading's denominator and contribute zero; `absent` rows are dropped from it entirely — that asymmetry is why a share is quoted beside every count. `oneExchange` is a bound and not a gain: it counts the misses that become equal to a gold when the two position channels are exchanged, which is what `--mirrors` offers as a slot.",
+    "arms": {
+      "chat": {
+        "run": 45631097059,
+        "artifact": "deepseek-chat-dev-3-count_ranks_corpus_corpus2_steps",
+        "model": "deepseek-chat",
+        "rules": [
+          "count",
+          "ranks",
+          "corpus",
+          "corpus2",
+          "steps"
+        ],
+        "k": 3,
+        "questions": 750,
+        "scored": 750,
+        "produced": 2098,
+        "width": 2.8,
+        "truncated": 0,
+        "unparsed": 2,
+        "failed": 0,
+        "dropouts": 2,
+        "dropoutShare": 0.0027,
+        "f1@3": 28.12,
+        "ceiling@3": 28.39,
+        "misplaced": 236,
+        "oneExchange": 60,
+        "sameColumnTwice": 26,
+        "pairs": {
+          "x→y": 146,
+          "color→theta": 21,
+          "x→color": 20,
+          "y→x": 19,
+          "color→y": 19,
+          "y→color": 7,
+          "color→x": 3,
+          "theta→color": 1
+        }
+      },
+      "chat+mirrors": {
+        "run": 45635014097,
+        "artifact": "deepseek-chat-dev-3-count_ranks_corpus_corpus2_steps",
+        "mirrors": "interleave",
+        "model": "deepseek-chat",
+        "rules": [
+          "count",
+          "ranks",
+          "corpus",
+          "corpus2",
+          "steps"
+        ],
+        "k": 3,
+        "questions": 750,
+        "scored": 750,
+        "produced": 2613,
+        "width": 3.48,
+        "truncated": 0,
+        "unparsed": 2,
+        "failed": 0,
+        "dropouts": 2,
+        "dropoutShare": 0.0027,
+        "f1@3": 28.2,
+        "ceiling@3": 28.47,
+        "misplaced": 253,
+        "oneExchange": 81,
+        "sameColumnTwice": 25,
+        "pairs": {
+          "x→y": 165,
+          "color→y": 22,
+          "color→theta": 21,
+          "x→color": 20,
+          "y→x": 15,
+          "y→color": 6,
+          "color→x": 3,
+          "theta→color": 1
+        }
+      },
+      "chat+spread": {
+        "run": 45630240129,
+        "artifact": "deepseek-chat-dev-3-count_ranks_corpus_corpus2_steps_spread",
+        "model": "deepseek-chat",
+        "rules": [
+          "count",
+          "ranks",
+          "corpus",
+          "corpus2",
+          "steps",
+          "spread"
+        ],
+        "k": 3,
+        "questions": 750,
+        "scored": 750,
+        "produced": 2138,
+        "width": 2.86,
+        "truncated": 0,
+        "unparsed": 2,
+        "failed": 0,
+        "dropouts": 2,
+        "dropoutShare": 0.0027,
+        "f1@3": 27.25,
+        "ceiling@3": 27.52,
+        "misplaced": 253,
+        "oneExchange": 58,
+        "sameColumnTwice": 35,
+        "pairs": {
+          "x→y": 147,
+          "color→theta": 24,
+          "y→x": 22,
+          "color→y": 19,
+          "x→color": 17,
+          "color→x": 12,
+          "theta→color": 8,
+          "y→color": 4
+        }
+      },
+      "reasoning": {
+        "run": 45633104710,
+        "artifact": "deepseek-reasoner-dev-3-count_corpus_corpus2_steps",
+        "model": "deepseek-reasoner",
+        "rules": [
+          "count",
+          "corpus",
+          "corpus2",
+          "steps"
+        ],
+        "k": 3,
+        "questions": 750,
+        "scored": 750,
+        "produced": 1518,
+        "width": 2.06,
+        "truncated": 12,
+        "unparsed": 0,
+        "failed": 0,
+        "dropouts": 12,
+        "dropoutShare": 0.016,
+        "f1@3": 32.23,
+        "ceiling@3": 33.83,
+        "misplaced": 151,
+        "oneExchange": 67,
+        "sameColumnTwice": 0,
+        "pairs": {
+          "x→y": 107,
+          "color→theta": 13,
+          "color→y": 13,
+          "y→x": 10,
+          "x→color": 5,
+          "y→color": 2,
+          "color→x": 1
+        }
+      },
+      "reasoning+mirrors": {
+        "run": 45634989699,
+        "artifact": "deepseek-reasoner-dev-3-count_corpus_corpus2_steps",
+        "mirrors": "interleave",
+        "model": "deepseek-reasoner",
+        "rules": [
+          "count",
+          "corpus",
+          "corpus2",
+          "steps"
+        ],
+        "k": 3,
+        "questions": 750,
+        "scored": 750,
+        "produced": 1961,
+        "width": 2.66,
+        "truncated": 12,
+        "unparsed": 0,
+        "failed": 0,
+        "dropouts": 12,
+        "dropoutShare": 0.016,
+        "f1@3": 32.57,
+        "ceiling@3": 34.17,
+        "misplaced": 181,
+        "oneExchange": 88,
+        "sameColumnTwice": 0,
+        "pairs": {
+          "x→y": 134,
+          "color→y": 16,
+          "color→theta": 13,
+          "y→x": 11,
+          "x→color": 5,
+          "y→color": 1,
+          "color→x": 1
+        }
+      }
+    },
+    "closed": {
+      "placement": "100% of the reasoning arm's 88 one-exchange misses are `rect` — exactly the mark `--mirrors` covers — and that arm read +0.34 [−0.31, +0.99]. So the exchange is not a lever and a placement rule has no premise: the slot the orientation costs is worth what it buys.",
+      "selfRepeat": "The chat tier names one column on two channels 26 times; the reasoning tier never does. `corpus2` already states the prohibition in words, so a second sentence would be a rule aimed at 1.2% of one tier's predictions.",
+      "dropouts": "12 of 750 reasoning rows are truncated at the 900-token budget and are scored as zero: a bound of +1.60pp. Buying them back is a full re-dispatch at a larger budget (the budget is in the cache key) at ¥19.72, or 12 targeted calls at ≈¥0.32 whose interval on 12 rows cannot separate from zero. The bound is recorded and the rows are not bought."
+    }
   }
 }

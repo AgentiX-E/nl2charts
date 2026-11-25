@@ -21201,3 +21201,80 @@ normalises it to an empty encoding, which scores zero.
 **Cost of this reading: ¥0.** It downloads a public archive and compares two implementations over
 1,501 questions; no model was called. The row is `instrumented` and the remaining step is a
 predictions file.
+
+## A reading is a mean over answers, and three kinds of row are not answers
+
+Every number in this document is a mean over questions. The mean does not say how many of those
+questions were answered, and three different things make a row contribute nothing:
+
+| row | what happened | what the reading does with it |
+| --- | --- | --- |
+| `truncated` | the endpoint said the reply hit its token budget | counts it, scores it zero |
+| `unparsed` | a reply arrived and held nothing this repository can score | counts it, scores it zero |
+| `failed` | no reply at all — a deadline or transport fault that survived every attempt | **drops it from the denominator** |
+
+The first two are in the reading and the third is not, which is deliberate — a network fault must not
+move a benchmark — but it means "32.23 F1@3" and "32.23 F1@3" can be means over different sets. So the
+counters are now read off the artifacts rather than off the run log:
+
+    pnpm bench:nvbench2:census eval/out/nvbench2-arm.json --cache eval/.cache/nvbench2
+
+| arm | run | charts | charts/question | truncated | unparsed | failed | dropouts | F1@3 | bound |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| chat, shipped rules | 45631097059 | 2,098 | 2.80 | 0 | 2 | 0 | 2 (0.27%) | 28.12 | 28.39 |
+| chat, `--mirrors interleave` | 45635014097 | 2,613 | 3.48 | 0 | 2 | 0 | 2 (0.27%) | 28.20 | 28.47 |
+| chat, + `spread` | 45630240129 | 2,138 | 2.86 | 0 | 2 | 0 | 2 (0.27%) | 27.25 | 27.52 |
+| reasoning, shipped rules | 45633104710 | 1,518 | 2.06 | **12** | 0 | 0 | 12 (1.60%) | 32.23 | 33.83 |
+| reasoning, `--mirrors interleave` | 45634989699 | 1,961 | 2.66 | **12** | 0 | 0 | 12 (1.60%) | 32.57 | 34.17 |
+
+`bound` is `F1@3 + dropouts/scored`: a mean where 12 rows of 750 are zero rises by at most 1.60 points
+when those rows are answered perfectly. It is a ceiling and not an estimate — the only thing known
+about a truncated row is that it said nothing.
+
+Charts per question above 3 in a `--mirrors` row is not a counting bug: `produced` is what the ask
+returned, and the mirror flag inserts an entry behind each chart it mirrors. The scored list is still
+the first `k`.
+
+**The 12 truncated rows were not bought.** The budget is in the cache key, so raising it to 1600 for a
+reasoning dispatch re-asks all 750 questions: ¥19.72 to buy a bound of 1.60 points, of which the
+honest expectation is about a fifth. A targeted retry of the 12 costs ≈¥0.32 and its interval on 12
+questions covers every value from −3 to +3. The row is recorded instead, the workflow's reasoning
+budget is the thing to change before the next full dispatch, and a cheap purchase that cannot be
+separated from noise is not a purchase.
+
+### Where the largest miss bucket puts its columns
+
+`first.field` is the biggest single break on every arm, and `fieldRepair` says why. The largest repair
+inside it is `misplaced`: a column the golds do use, on a channel the reply did not. That count was
+the last unknown with a price on it, because the two plausible repairs — an orientation the reference
+does not normalise, or a column assigned to the wrong channel — need different sentences.
+
+| arm | misplaced | one exchange away | share | same column twice | `x→y` | `y→x` | other pairs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| chat, shipped rules | 236 | 60 | 25.4% | 26 | 146 | 19 | 71 |
+| chat, `--mirrors` | 253 | 81 | 32.0% | 25 | 165 | 15 | 73 |
+| chat, + `spread` | 253 | 58 | 22.9% | 35 | 147 | 22 | 84 |
+| reasoning, shipped rules | 151 | 67 | 44.4% | 0 | 107 | 10 | 34 |
+| reasoning, `--mirrors` | 181 | 88 | 48.6% | 0 | 134 | 11 | 36 |
+
+Two things closed here, and both closed the cheap way.
+
+**The exchange is not a lever.** `x→y` is 62–71% of the bucket, and on the reasoning tier 85 of the 88
+one-exchange cases are `rect` — the exact mark `withMirrors` was built for. That arm ran: 32.23 →
+32.57, +0.34 [−0.31, +0.99]. The orientation is worth what the slot it costs is worth, and there is
+nothing left in the bucket for a placement rule to collect. Plan item "explicit `channels`
+constraint" is withdrawn on this measurement rather than on the argument that produced it.
+
+**The chat tier's one-column-two-channels habit is 26 predictions.** `corpus2` already states the
+prohibition in words ("no chart puts one column on two channels") and the reasoning tier never does
+it at all, so a second sentence would be a rule aimed at 1.2% of one tier.
+
+**Cost of this reading: ¥0.** It reads artifacts that were already paid for; no model was called. The
+instrument is `eval/nvbench2/census.ts`, which enters `eval/coverage-ledger.json` and is held by two
+test files: the census arithmetic and its refusals, and the move tally against the bucket `diagnose`
+counts on the same cases.
+
+The split no arm has answered is scorable too, and that is a gate rather than a note: `check.ts` reads
+both splits on every run, and test reads 751 questions over 87 tables, 2,260 gold charts, 5,340 field
+references with none untyped, and 4,794 table columns agreeing with the corpus's own
+`column_examples` on every one.

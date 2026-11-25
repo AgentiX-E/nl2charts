@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ASPECTS, FIELD_REPAIRS, compareAspects, diagnose, fieldRepairOf, labelsOf, nearest, spreadOf, withoutCountFields, type Aspect,
+  ASPECTS, FIELD_REPAIRS, compareAspects, diagnose, fieldRepairOf, labelsOf, misplacedOf, movesOf, nearest, spreadOf,
+  withoutCountFields, type Aspect,
 } from '../eval/nvbench2/diagnose.js';
 import { canonical, normalizeOrder, type Case, type Chart, type FieldTypes } from '../eval/nvbench2/judge.js';
 
@@ -490,5 +491,118 @@ describe('labelsOf: the same verdicts as `diagnose`, one per prediction', () => 
     // In the order the model wrote them: the column-first miss, then the chart that is the gold.
     expect(labels[0]).toEqual({ equal: false, first: 'field', repair: 'unused' });
     expect(labels[1]).toEqual({ equal: true, first: null });
+  });
+});
+
+describe('misplacedOf', () => {
+  // A heat map whose colour is a row count: no axis carries an aggregate, so the reference reverses
+  // nothing and the two orientations are two different charts. That is the shape 88 of the reasoning
+  // arm's one-exchange reads were, and the shape these tests are about.
+  const CATEGORIES: FieldTypes = { a: 'category', b: 'category', c: 'category' };
+  const heat = (x: string, y: string): Chart => ({ mark: 'rect', encoding: { x: { field: x }, y: { field: y }, color: { aggregate: 'count' } } });
+  const GOLDS: Chart[] = [heat('a', 'c'), heat('a', 'b')].map(normal);
+
+  it('names the two channels when the column the golds use sits on another one', () => {
+    const reply = normal(heat('b', 'c'));
+    expect(misplacedOf(reply, nearest(reply, GOLDS), GOLDS)).toEqual({ column: 'b', from: 'x', to: 'y' });
+  });
+
+  it('says nothing when another gold puts the same column on the same channel — that is `elsewhere`', () => {
+    // `b` on `x` is exactly what one gold does not want and another gold of the same question does:
+    // a tie-break between two readings, not a column assigned to the wrong channel.
+    const reply = normal(heat('b', 'c'));
+    const tieBreak = normal(heat('b', 'a'));
+    expect(fieldRepairOf(reply, normal(heat('a', 'c')), [normal(heat('a', 'c')), tieBreak], CATEGORIES)).toBe('elsewhere');
+    expect(misplacedOf(reply, normal(heat('a', 'c')), [normal(heat('a', 'c')), tieBreak])).toBeUndefined();
+  });
+
+  it('says nothing when no gold uses the column, when the column is blank, or when the charts agree', () => {
+    const unused = normal(heat('b', 'c'));
+    expect(misplacedOf(unused, normal(heat('a', 'c')), [normal(heat('a', 'c'))])).toBeUndefined();
+    const blank = normal({ mark: 'rect', encoding: { x: { aggregate: 'count' }, y: { field: 'c' }, color: { aggregate: 'count' } } } as Chart);
+    expect(misplacedOf(blank, normal(heat('a', 'c')), GOLDS)).toBeUndefined();
+    expect(misplacedOf(normal(heat('a', 'c')), normal(heat('a', 'c')), GOLDS)).toBeUndefined();
+  });
+
+  it('is the same predicate `fieldRepairOf` names `misplaced`, over every pair it can be asked about', () => {
+    // The two functions scan the channels independently, so the drift test is a sweep rather than an
+    // assertion: every reply in this matrix is compared with every gold, and the two verdicts have to
+    // agree on which of them are `misplaced` — the tally and the bucket cannot describe two runs.
+    const replies: Chart[] = [heat('a', 'c'), heat('b', 'c'), heat('c', 'b'), heat('b', 'a'), heat('a', 'b')].map(normal);
+    for (const reply of replies) {
+      const closest = nearest(reply, GOLDS);
+      const named = fieldRepairOf(reply, closest, GOLDS, CATEGORIES) === 'misplaced';
+      expect(misplacedOf(reply, closest, GOLDS) !== undefined).toBe(named);
+    }
+  });
+});
+
+describe('movesOf', () => {
+  const CATEGORIES: FieldTypes = { a: 'category', b: 'category', c: 'category' };
+  const heat = (x: string, y: string): Chart => ({ mark: 'rect', encoding: { x: { field: x }, y: { field: y }, color: { aggregate: 'count' } } });
+  const swapCase = (prediction: Chart, golds: Chart[]): Case => ({
+    predictions: [prediction],
+    golds,
+    types: CATEGORIES,
+  });
+
+  it('counts the bucket, keys it by channel pair, and prices the exchange', () => {
+    const moves = movesOf([
+      // `c` on `x` where the gold puts it on `y`: exchanging the two axes *is* the gold.
+      swapCase(heat('c', 'b'), [heat('b', 'c')]),
+      // `c` on `x` where the gold uses it on `y`, but the other axis differs too, so exchanging the
+      // two does not reach a gold: the bucket is bigger than the repair.
+      swapCase(heat('c', 'b'), [heat('a', 'c')]),
+      // A hit is not in the bucket at all.
+      swapCase(heat('a', 'c'), [heat('a', 'c')]),
+    ], 3);
+    expect(moves.misplaced).toBe(2);
+    expect(moves.pairs['x→y']).toEqual({ count: 2, swapped: 1 });
+    expect(Object.keys(moves.pairs).sort()).toEqual(['x→y']);
+  });
+
+  it('does not count an exchange for a pair that is not two position channels', () => {
+    // Swapping `x` with `color` leaves the colour slot holding what belonged on the axis; a case that
+    // coincides with a gold that way is a coincidence, and counting it would overstate the repair.
+    const replied: Chart = { mark: 'rect', encoding: { x: { field: 'b' }, y: { field: 'c' }, color: { field: 'a' } } };
+    const gold: Chart = { mark: 'rect', encoding: { x: { field: 'a' }, y: { field: 'c' }, color: { field: 'b' } } };
+    const moves = movesOf([swapCase(replied, [gold])], 3);
+    // `color` parts first because the channels are compared in name order, and `a` — the column the
+    // reply painted — is the one the gold puts on `x`. Exchanging the two does reproduce the gold,
+    // which is exactly the coincidence the pair restriction is there to refuse.
+    expect(moves.misplaced).toBe(1);
+    expect(Object.keys(moves.pairs)).toEqual(['color→x']);
+    expect(moves.pairs['color→x']).toEqual({ count: 1, swapped: 0 });
+  });
+
+  it('counts a chart that names one column twice, which is one assignment more than the gold makes', () => {
+    const twice: Chart = { mark: 'rect', encoding: { x: { field: 'c' }, y: { field: 'a' }, color: { field: 'c' } } };
+    const gold: Chart = { mark: 'rect', encoding: { x: { field: 'b' }, y: { field: 'a' }, color: { field: 'c' } } };
+    const moves = movesOf([swapCase(twice, [gold])], 3);
+    expect(moves.misplaced).toBe(1);
+    expect(moves.selfRepeats).toBe(1);
+  });
+
+  it('skips a prediction that is not a chart, and one whose column no gold uses', () => {
+    // A reply that is not a chart is not a candidate, and a column the golds never name is `unused`
+    // rather than a move: neither is in the bucket, and both are shapes a real run produces.
+    const moves = movesOf([{
+      predictions: ['nonsense', heat('b', 'c')],
+      golds: [heat('a', 'c')],
+      types: CATEGORIES,
+    }], 3);
+    expect(moves.misplaced).toBe(0);
+    expect(moves.pairs).toEqual({});
+  });
+
+  it('skips a question with no usable gold, and stops at k', () => {
+    expect(movesOf([{ predictions: [heat('c', 'b')], golds: [], types: CATEGORIES }], 3).misplaced).toBe(0);
+    const two = movesOf([swapCase(heat('c', 'b'), [heat('b', 'c')])], 0);
+    expect(two.misplaced).toBe(0);
+  });
+
+  it('agrees with the bucket `diagnose` counts on the same cases', () => {
+    const cases = [swapCase(heat('c', 'b'), [heat('b', 'c')]), swapCase(heat('c', 'b'), [heat('a', 'c')])];
+    expect(movesOf(cases, 3).misplaced).toBe(diagnose(cases, 3).fieldRepair.misplaced);
   });
 });
