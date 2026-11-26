@@ -26,7 +26,7 @@ on:
         default: 'deepseek-chat'
         type: string
       arm:
-        description: 'Prompt arm: schema (the first reading) or grammar (the same, plus the four restrictions Spider\'s parser enforces)'
+        description: "Prompt arm: schema (the first reading) or grammar (the same, plus the four restrictions the reference parser enforces)"
         required: true
         default: 'schema'
         type: choice
