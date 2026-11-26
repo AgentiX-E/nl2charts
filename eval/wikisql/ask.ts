@@ -57,8 +57,15 @@ import type { SplitRow } from './exec.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
-/** What this prompt is. A reading is comparable with another only under the same version. */
-export const PROMPT_VERSION = 'wikisql-ask@1';
+/**
+ * What this prompt is. A reading is comparable with another only under the same version.
+ *
+ * `@1` never published a reading: its two dispatches were refused by their own gates — the first
+ * because a cell was a number, the second because every statement named a column the database does
+ * not have. The version moved when the bytes did, which is the rule; it is written down here because
+ * "v1" would otherwise be a name for three different prompts.
+ */
+export const PROMPT_VERSION = 'wikisql-ask@2';
 
 /** Rows of the table shown to the model, as the corpus's own prompt experiments do. */
 export const SAMPLE_ROWS = 5;
@@ -223,9 +230,23 @@ export function parseTables(text: string): Map<string, Table> {
   return tables;
 }
 
-/** One cell as the prompt spells it: quoted, with a quote inside it escaped the way SQL escapes one. */
+/**
+ * One cell as the prompt spells it: quoted, lowercased, and with a quote escaped the way SQL escapes
+ * one.
+ *
+ * The lowercase is not cosmetic. `dev.db` stores its text folded — `'duke'`, not `'Duke'` — while
+ * `dev.tables.jsonl` keeps the case the page had, and the first pilot read its sample rows from the
+ * JSON. A model that copies `'Butler CC (KS)'` from the prompt into a `WHERE` writes a statement that
+ * executes and returns nothing, and 21 of the pilot's 40 cases did exactly that. The prompt shows the
+ * table as the engine will see it, which is the only rendering a copied literal can be right against.
+ */
 export function cellOf(value: unknown): string {
-  return `'${String(value ?? '').replaceAll("'", "''")}'`;
+  return `'${String(value ?? '').toLowerCase().replaceAll("'", "''")}'`;
+}
+
+/** The name SQL uses for the `index`-th column. WikiSQL's databases name them `col0`, `col1`, … */
+export function sqlNameOf(index: number): string {
+  return `col${String(index)}`;
 }
 
 /**
@@ -237,11 +258,17 @@ export function cellOf(value: unknown): string {
  * because the corpus's numbers were produced with the corpus's words.
  */
 export function promptFor(question: string, table: Table): readonly LlmMessage[] {
-  const columns = table.header.map((name, index) => `  ${String(index)}: ${name} (${table.types[index] ?? 'text'})`);
+  // Two names per column, because the corpus has two. The database calls the third column of every
+  // table `col2`; the corpus's `tables.jsonl` calls it `Position`; and the first pilot sent only the
+  // second, so a model that wrote `SELECT "Position"` produced `OperationalError: no such column`
+  // on 19 of 40 cases. Both are shown, and the instruction says which one SQL takes.
+  const columns = table.header.map(
+    (name, index) => `  ${sqlNameOf(index)} (${table.types[index] ?? 'text'}) — "${name}"`,
+  );
   const sample = table.rows.slice(0, SAMPLE_ROWS).map((row) => `  ${row.map(cellOf).join(', ')}`);
   const system = 'You write one SQLite statement for one table. You answer with the statement only.';
   const user = [
-    `The table is called "${tableNameOf(table.id)}" and its columns are, in order:`,
+    `The table is called "${tableNameOf(table.id)}". Its columns are, in order:`,
     ...columns,
     '',
     `The first ${String(sample.length)} rows, as this table stores them:`,
@@ -249,8 +276,10 @@ export function promptFor(question: string, table: Table): readonly LlmMessage[]
     '',
     `Question: ${question}`,
     '',
-    'Write one SELECT statement that answers the question. Use only this table and the columns',
-    'listed above. When the question names a value, copy it exactly as the rows above spell it.',
+    'Write one SELECT statement that answers the question. Name a column by the SQL name before the',
+    'dash (col0, col1, …) and never by the label in quotes after it; the label is what the question',
+    'means by a column, and the name is what the statement must say. When the question names a value,',
+    'copy it exactly as the rows above spell it.',
     'Answer with the statement and nothing else.',
   ].join('\n');
   return [

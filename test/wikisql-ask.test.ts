@@ -17,6 +17,8 @@ import {
   PER_CASE,
   PROMPT_VERSION,
   SAMPLE_ROWS,
+  cellOf,
+  sqlNameOf,
   askAll,
   main,
   parseTables,
@@ -85,15 +87,18 @@ describe('the prompt is the observation, so its shape is asserted', () => {
     expect(user?.content).not.toContain('"1-2-3"');
   });
 
-  it('numbers the columns, because a WikiSQL statement names one by position', () => {
+  it('gives each column the SQL name the database uses and the label the question means', () => {
+    // The two are different in this corpus — `col2` in `dev.db`, `Position` in `tables.jsonl` — and
+    // the first pilot sent only the label, so 19 of 40 statements named a column that does not exist.
     const [, user] = promptFor('q', TABLE);
-    expect(user?.content).toContain('0: Pick (real)');
-    expect(user?.content).toContain('1: Player (text)');
+    expect(user?.content).toContain('col0 (real) — "Pick"');
+    expect(user?.content).toContain('col1 (text) — "Player"');
+    expect(user?.content).toContain('never by the label in quotes after it');
   });
 
   it('falls back to text when the corpus ships no type for a column', () => {
     const [, user] = promptFor('q', { ...TABLE, types: ['real'] });
-    expect(user?.content).toContain('1: Player (text)');
+    expect(user?.content).toContain('col1 (text) — "Player"');
   });
 
   it('shows at most SAMPLE_ROWS rows, and every row it shows', () => {
@@ -113,7 +118,16 @@ describe('the prompt is the observation, so its shape is asserted', () => {
 
   it('escapes a quote the way SQL escapes one, so the literal it copies is the literal stored', () => {
     const [, user] = promptFor('q', TABLE);
-    expect(user?.content).toContain("'O''Hare'");
+    expect(user?.content).toContain("'o''hare'");
+  });
+
+  it('folds the sample rows to lower case, because that is how the database stores its text', () => {
+    // `dev.tables.jsonl` keeps `Duke`; `dev.db` holds `duke`. A literal copied from the first is a
+    // statement that executes and returns nothing, which is what 21 of the pilot's 40 cases did.
+    expect(cellOf('Duke')).toBe("'duke'");
+    expect(cellOf(null)).toBe("''");
+    expect(cellOf(7)).toBe("'7'");
+    expect(sqlNameOf(12)).toBe('col12');
   });
 
   it('carries the question and the instruction that makes a value question answerable', () => {
@@ -124,7 +138,7 @@ describe('the prompt is the observation, so its shape is asserted', () => {
   });
 
   it('is a constant, because two versions are two instruments', () => {
-    expect(PROMPT_VERSION).toBe('wikisql-ask@1');
+    expect(PROMPT_VERSION).toBe('wikisql-ask@2');
   });
 });
 
