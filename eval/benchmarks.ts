@@ -118,29 +118,22 @@ export const BENCHMARKS: readonly Benchmark[] = [
     source: 'https://yale-lily.github.io/spider',
     corpus: '1,034 dev questions over 20 databases; 200 databases and 10,181 questions in the corpus',
     metrics: ['EM', 'EX'],
-    status: 'absent',
+    status: 'instrumented',
     gap:
-      'The corpus is the databases, not the question file. `process_sql.get_sql` resolves every '
-      + 'column through a `Schema` built from a live SQLite file, so exact match is not a string '
-      + 'comparison and cannot be computed from `dev.json` alone; the reference `evaluate()` parses '
-      + 'gold and prediction through that same schema. The twenty `.sqlite` files ship only inside '
-      + '`spider_data.zip`, and four routes were tried: the project site answers 404 for it, the '
-      + 'Drive mirror does not answer, the git repository carries '
-      + '`evaluation_examples/examples/dev.json` (3,629,512 B, fetched) and no `database/` directory, '
-      + 'and three mirrors that do vendor `database/<db>/<db>.sqlite` report 0 bytes over 237 to 332 '
-      + 'files because they are LFS pointers — the one decoded reads `version https://git-lfs.'
-      + 'github.com/spec/v1`, and the media endpoint returns 404. Rebuilding the databases is not a '
-      + 'substitute: the only publicly fetchable schema export (jkkummerfeld/text2sql-data\'s '
-      + '`spider-schema.csv`, which its own converter turns into 166 empty databases) normalises '
-      + 'identifiers, so `pets_1`\'s `PetType` arrives as `pet_type` and **300 of 1,034 dev golds no '
-      + 'longer parse** — measured, not guessed. Two facts about the judge itself are now assertions '
-      + 'in `eval/spider/judge.py --self-test`: `Evaluator.eval_partial_match` mutates the label it '
-      + 'is given (`eval_sel` calls `label_sel.remove(...)`), so a harness that parses a gold once '
-      + 'and reuses it reads **279 of the 734 parsing golds as 0 against themselves**; and the judge '
-      + 'imports `nltk` and needs the `punkt_tab` model, so it is not the standard-library program '
-      + 'WikiSQL\'s is. `eval/spider/check.ts` is the gate that would receive a checkout — twenty '
-      + 'databases, every gold parsed, every gold agreeing with itself — and it is tested against a '
-      + 'stub, so the day the corpus lands the reading is one command rather than a port.',
+      'The corpus is the databases, not the question file — `process_sql.get_sql` resolves every '
+      + 'column through a `Schema` built from a live SQLite file — and the twenty `.sqlite` files '
+      + 'ship only inside a 350 MB `spider_data.zip` this repository cannot reach. Four routes to '
+      + 'that archive failed; the fifth is `eval/spider/fetch.mjs`, which takes the corpus\'s own '
+      + '`tables.json` (810,971 B, fetched and pinned by sha256) and builds one database per '
+      + 'database it declares. `get_schema` reads the catalogue — table names, column names, column '
+      + 'order — and never a row, so a skeleton has the same schema as the official file, and the '
+      + 'proof is the check `eval/spider/check.ts` already ran: **1,034 of 1,034 dev golds parse and '
+      + 'read exact match against themselves** on 4.4 MB instead of 350 MB. An earlier round '
+      + 'concluded rebuilding was impossible because one public schema export normalises '
+      + 'identifiers (`PetType` arrives as `pet_type`, and 300 of 1,034 golds stop parsing); that '
+      + 'finding stands against that export and does not generalise to the corpus\'s own. What is '
+      + 'still missing is a reading: `eval/spider/ask.ts` asks the schema-only arm and '
+      + '`eval/spider/score.ts` scores with the reference judge, both tested, neither dispatched.',
   },
   {
     id: 'bird-mini-dev',

@@ -31,6 +31,30 @@ interface Baseline {
   readonly yuan: number;
   readonly run: number;
   readonly note: string;
+  readonly arms: readonly {
+    readonly arm: string;
+    readonly promptVersion: string;
+    readonly sampleRows: number;
+    readonly asked: number;
+    readonly scored: number;
+    readonly exact: number;
+    readonly exactPct: number;
+    readonly yuan: number;
+    readonly run: number;
+    readonly model?: string;
+  }[];
+  readonly paired: readonly {
+    readonly first: string;
+    readonly second: string;
+    readonly cases: number;
+    readonly onlyFirst: number;
+    readonly onlySecond: number;
+    readonly deltaPp: number;
+    readonly lowPp: number;
+    readonly highPp: number;
+    readonly p: number;
+    readonly verdict: string;
+  }[];
 }
 
 const BASELINE = read('eval/baseline/wikisql.json') as Baseline;
@@ -76,6 +100,46 @@ describe('the WikiSQL baseline is a citation, so its arithmetic has to close', (
     const reading = row?.reading;
     if (reading === undefined) throw new Error('the wikisql row cites no reading');
     expect(resolveReading(reading, (file) => read(file))).toBe(85.3);
+  });
+
+  it('records each arm as counts that produce its own percentage', () => {
+    // The rule the top-level row obeys, applied to every arm under it: a percentage that its own
+    // counts cannot produce is a number nobody can correct in a year.
+    for (const arm of BASELINE.arms) {
+      expect(arm.exactPct).toBeCloseTo((100 * arm.exact) / arm.scored, 2);
+      expect(arm.scored).toBeLessThanOrEqual(arm.asked);
+    }
+    const schema = BASELINE.arms.find((arm) => arm.arm === 'schema');
+    expect(schema?.exact).toBe(6_899);
+    expect(schema?.exactPct).toBe(81.93);
+    expect(schema?.sampleRows).toBe(0);
+    // Cheaper and worse, in that order and in the record: the ablation is a trade, not a defect.
+    expect(schema?.yuan).toBeLessThan(BASELINE.yuan);
+  });
+
+  it('records the paired difference, not the distance between two percentages', () => {
+    const row = BASELINE.paired.find((pair) => pair.second === 'schema');
+    expect(row).toBeDefined();
+    if (row === undefined) throw new Error('no paired row for the schema arm');
+    expect(row.cases).toBe(8_421);
+    // The cells must add up to the cases, or the interval was computed over a denominator that was
+    // not the run.
+    expect(row.cases).toBe(6_656 + row.onlyFirst + row.onlySecond + 995);
+    expect(row.deltaPp).toBeCloseTo((100 * (row.onlySecond - row.onlyFirst)) / row.cases, 2);
+    expect(row.lowPp).toBeLessThan(row.deltaPp);
+    expect(row.highPp).toBeGreaterThan(row.deltaPp);
+    expect(row.verdict).toContain('3.37pp');
+  });
+
+  it('records the reasoning-tier comparison as unresolved rather than as a win', () => {
+    const row = BASELINE.paired.find((pair) => pair.second === 'values@reasoner');
+    expect(row?.cases).toBe(800);
+    // An interval that holds zero is the finding: on a corpus of values the tier buys nothing
+    // measurable, and the record says so with the width that made it unsayable.
+    expect(row?.lowPp).toBeLessThan(0);
+    expect(row?.highPp).toBeGreaterThan(0);
+    expect(row?.p).toBeGreaterThan(0.5);
+    expect(row?.verdict).toContain('indistinguishable');
   });
 
   it('says in its own note what a reader would otherwise have to infer', () => {

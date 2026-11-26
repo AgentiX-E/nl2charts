@@ -1,0 +1,133 @@
+name: spider-ask
+
+# Spider, answered rather than only reachable.
+#
+# `eval/spider/check.ts` established two rounds ago that this split is scorable — 1,034 dev questions,
+# every gold parsed through the reference's `get_sql`, every gold agreeing with itself — and then said
+# the split was absent because the twenty databases ship inside a 350 MB archive this repository cannot
+# reach. `eval/spider/fetch.mjs` is the answer to that: the corpus's own `tables.json` declares every
+# table, column and type, `get_schema` reads the catalogue and never a row, so a skeleton database has
+# the same schema as the official file. 4.4 MB instead of 350 MB, and the check that proves it is the
+# one that already existed.
+#
+# **Dispatch-only.** 1,034 calls is a number that moves when the prompt or the model moves, and a
+# `push` trigger would spend it on every commit to `eval/spider/**` for the same number.
+#
+# **The metric is exact match, and the row says so.** A skeleton cannot answer `SELECT` for real, so
+# execution accuracy is out of reach from here; the reference's component match is the comparison, and
+# it is the one Spider's own leaderboard reports as EM.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Model that answers (a chat tier is the baseline; a reasoning tier is the strong arm)'
+        required: true
+        default: 'deepseek-chat'
+        type: string
+      limit:
+        description: 'Ask only the first N questions (blank asks the whole split)'
+        required: false
+        default: ''
+        type: string
+      accept_cost:
+        description: 'Yuan this dispatch may project (blank = the ¥45 ceiling in eval/spider/ask.ts)'
+        required: false
+        default: ''
+        type: string
+      concurrency:
+        description: 'Calls in flight at once'
+        required: true
+        default: '6'
+        type: string
+      timeout_ms:
+        description: 'Per-call deadline in milliseconds'
+        required: false
+        default: '120000'
+        type: string
+
+permissions:
+  contents: read
+
+# One slot shared with every other heavyweight run: they draw from the same provider quota, and two
+# dispatches that overlap do not produce a wrong number — they produce a slow one, which trips the
+# per-call deadline and gets read as an endpoint verdict.
+concurrency:
+  group: bird-eval-DEEPSEEK_API_KEY
+  cancel-in-progress: false
+
+jobs:
+  ask:
+    name: what a model answers, judged by the reference judge
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      LLM_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: ${{ inputs.model }}
+      # The corpus transport is `api.github.com`, whose unauthenticated rate limit is sixty requests
+      # an hour — a cache miss on a busy morning would spend it on other jobs.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The judge is the reference's, and it imports `nltk` for tokenisation. A missing model is a
+      # traceback from inside `tokenize()`, which reads like a corpus error.
+      - name: Install the judge's one dependency
+        run: python3 -m pip install --quiet nltk && python3 -m nltk.downloader --quiet punkt_tab
+
+      # Both files are pinned by byte count and sha256 in `fetch.mjs`, so a mirror that serves
+      # something else fails there rather than producing a split whose counts happen to match.
+      - name: Cache the corpus
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/spider
+          key: spider-v1-${{ runner.os }}
+      - name: Fetch the split (no-op when the cache is warm)
+        run: node eval/spider/fetch.mjs --split dev
+
+      # Zero model calls: every gold is parsed through the reference and compared with itself before
+      # a single token is bought. A split whose golds cannot be judged cannot produce an accuracy.
+      - name: Every gold parses, and agrees with itself
+        run: pnpm bench:spider:check --spider eval/.cache/spider
+
+      - name: Ask every question once
+        env:
+          ACCEPT_COST: ${{ inputs.accept_cost }}
+          LIMIT: ${{ inputs.limit }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+        run: |
+          ARGS="--concurrency $CONCURRENCY --out eval/out/spider-predictions.jsonl"
+          if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
+          if [ -n "$ACCEPT_COST" ]; then ARGS="$ARGS --accept-cost $ACCEPT_COST"; fi
+          pnpm bench:spider:ask $ARGS
+
+      - name: Score the predictions
+        env:
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          ARGS="--predictions eval/out/spider-predictions.jsonl --out eval/out/spider-reading.json"
+          if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
+          pnpm bench:spider:score $ARGS
+
+      - name: Keep the artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spider-dev-${{ inputs.model }}
+          path: |
+            eval/out/spider-predictions.jsonl
+            eval/out/spider-predictions.unreadable.jsonl
+            eval/out/spider-reading.json
+          if-no-files-found: warn

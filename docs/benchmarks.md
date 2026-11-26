@@ -18039,8 +18039,9 @@ reader can act on, and a missing row for a leaderboard the plan names.
 
 | leaderboard | corpus | metrics | status | number |
 |---|---|---|---|---|
-| WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% |
-| Spider 1.0 dev | 1,034 questions, 20 databases | EM, EX | **absent** | — |
+| WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% (`values` arm) |
+| WikiSQL dev | the same questions, no sample rows | EX | measured | 81.93% (`schema` arm, **−3.37pp**, p<0.0001) |
+| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **instrumented** | — (corpus parses 1,034/1,034; no dispatch yet) |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) |
 | BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) |
@@ -19268,6 +19269,72 @@ levers were priced this round and both were refused on their own numbers — the
 +1 on this one, net nothing) and the tie gate (−2 against a free policy that already held the answer).
 `select-cross-pooled-tie` stays in `ON_DEMAND_ARMS` as the arm that holds the refutation, and `gate: 'tie'`
 stays configurable because a config with no arm is observable and a deleted enum is not.
+
+## What the five sample rows are worth, and what a reasoning tier is worth on a corpus of values
+
+This round turned the WikiSQL prompt into two arms and read the difference case by case, because a
+reading of 85.30% cannot say which part of it the prompt is responsible for. The arms differ in one
+block: `values` is the prompt the baseline was measured with (schema, five sample rows, "copy the
+literal as the rows spell it"); `schema` removes the rows and states in words what they carried
+(this database stores text folded to lowercase). Everything else — table name, both names per column,
+the question, the instruction's first three lines — is byte-identical.
+
+| reading | EX | calls | ¥ | ¥/case |
+|---|---:|---:|---:|---:|
+| `values` (85.30%, run 45772639103) | 7,183 / 8,421 | 8,421 | 8.66 | 0.00103 |
+| `schema` (81.93%, run 45791827836) | 6,899 / 8,421 | 8,421 | 5.72 | 0.00068 |
+| `values` @ `deepseek-reasoner`, first 800 (88.63%, run 45791855710) | 709 / 800 | 800 | 3.37 | 0.00421 |
+
+The paired comparison is not the difference between two percentages: **527 cases the `values` arm got
+right and the `schema` arm did not, against 243 the other way**, over the same 8,421 questions.
+McNemar's exact test on those 770 discordant cases gives p < 0.0001, and the paired interval on the
+difference is **−3.37pp [−4.02, −2.73]**. A design of this size resolves 0.92pp at 80% power, so the
+five rows are not a rounding error: they are worth about three and a third points on a corpus whose
+questions name cells, and they cost ¥2.94 per full split — which is the price at which a smaller
+prompt would be a false economy.
+
+The third row is the one to read carefully, because it is the counter-intuitive one. On the first 800
+questions the reasoning tier scores 88.63% against the chat tier's 88.88% on **the same 800 cases**:
+−0.25pp, 95% interval [−1.59, +1.09], p = 0.86. The tier is *indistinguishable* from the chat tier
+here, and the design would not have resolved anything smaller than 1.92pp. Three explanations were
+checked before writing that down: the prompt is identical (same `wikisql-ask@2` bytes, asserted by a
+test that compares the first three lines of the two arms), the judge is the same port, and the
+reasoning tokens are billed rather than dropped (¥3.37 for 800 cases against ¥0.82 for 800 chat
+cases, a four-fold bill for no measurable gain). The remaining explanation is the corpus: WikiSQL
+rewards copying a spelling, not composing a plan, and thinking adds tokens without adding information
+about which cell holds `duke`. **That is a routing fact about the product, not a defect of the
+contract**: the pipeline supports both tiers, and which tier to send is a decision the benchmark now
+prices. Whether the tier pays on a compositional corpus is a question for Spider and BIRD, and Spider
+is the next dispatch.
+
+## Spider's corpus: 4.4 MB instead of 350 MB, and the check that proves it
+
+Two rounds ago this file recorded Spider as absent, with the reasoning that the corpus *is* the
+databases — `process_sql.get_sql` resolves columns through a `Schema` read from a live SQLite file —
+and that four routes to the 350 MB archive had failed. The last step of that reasoning was too
+strong: rebuilding was rejected because one public schema export normalises identifiers (`PetType`
+arrives as `pet_type`, and 300 of 1,034 golds stop parsing). That finding stands against that export.
+It does not stand against the corpus's own `tables.json`, which declares every table, column, type and
+primary key with the identifiers untouched.
+
+`get_schema` reads the catalogue — table names, column names, column order — and never a row. So a
+database created from the declaration has the same schema as the official file, and the proof is the
+gate that already existed: `eval/spider/check.ts` parses every gold through the reference and compares
+it with itself. On the real dev split that reads **1,034 of 1,034 golds parsed, 1,034 of 1,034
+agreeing with themselves**, on a corpus of 4.4 MB.
+
+| piece | what it does | state |
+|---|---|---|
+| `eval/spider/fetch.mjs` | fetches `dev.json` (3,629,512 B) and `tables.json` (810,971 B), pinned by byte count and sha256; builds one skeleton database per database the split names | tested; `--check` re-verifies a cache |
+| `eval/spider/ask.ts` | one question, one statement, the schema as `CREATE TABLE` text; reuses WikiSQL's reader and unreadable-reply gate | tested; not dispatched |
+| `eval/spider/score.ts` | the reference judge over the predictions, with gold and prediction parse failures counted apart | tested; reads 100% on gold-as-prediction |
+| `.github/workflows/spider-ask.yml` | cache, fetch, check every gold, ask, score, keep artifact | dispatch-only |
+
+Two consequences are stated in the corpus manifest rather than left to a reader: the metric here is
+**exact match (component match)**, because a skeleton cannot answer a `SELECT` for real, so execution
+accuracy is out of reach from this corpus; and three Spider databases ship a table literally named
+`sqlite_sequence`, which SQLite refuses to create as a table — `world_1` is in dev, so the builder
+takes the name through `PRAGMA writable_schema` instead of quietly dropping it.
 
 ### Where each of the three absent rows would have to go, and what WikiSQL now has
 

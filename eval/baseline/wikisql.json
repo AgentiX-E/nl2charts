@@ -14,6 +14,83 @@
   "calls": 8421,
   "yuan": 8.66,
   "run": 45772639103,
-  "note": "One call a question, one statement back, the judge's own ordered comparison. `exact` and `bag` are the same count, which is the useful half of the row: no statement was right in content and wrong in row order, so the leaderboard's ordered comparison costs nothing on this split. The 14 statements that did not execute stay in the denominator as `predErrors`. The row is a parent, not an arm: one prompt, one call, no candidate set, no repair loop, no vote. Comparability is the caveat that travels with it: dev split, chat-tier model, no training, while every published WikiSQL figure above 90% is a fine-tuned system on test, so the number stands beside the model and the split rather than between them.",
-  "because": "the first reading this corpus has ever had, after four rounds in which the judge existed and nothing was ever handed to it"
+  "note": "One call a question, one statement back, the judge's own ordered comparison. `exact` and `bag` are the same count, which is the useful half of the row: no statement was right in content and wrong in row order, so the leaderboard's ordered comparison costs nothing on this split. The 14 statements that did not execute stay in the denominator as `predErrors`. The row is a parent, not an arm: one prompt, one call, no candidate set, no repair loop, no vote. Comparability is the caveat that travels with it: dev split, chat-tier model, no training, while every published WikiSQL figure above 90% is a fine-tuned system on test, so the number stands beside the model and the split rather than between them. The row is the `values` arm; `arms` records the three readings this prompt has been compared against and `paired` records what the differences are, with the interval and the exact test the shipment gate uses, so a later arm is a delta against a measured fact rather than against a memory.",
+  "because": "the first reading this corpus has ever had, after four rounds in which the judge existed and nothing was ever handed to it",
+  "arms": [
+    {
+      "arm": "values",
+      "promptVersion": "wikisql-ask@2",
+      "sampleRows": 5,
+      "asked": 8421,
+      "scored": 8421,
+      "exact": 7183,
+      "exactPct": 85.3,
+      "predErrors": 14,
+      "calls": 8421,
+      "yuan": 8.66,
+      "run": 45772639103,
+      "note": "the reading the row above cites: schema, five sample rows, and an instruction to copy a literal as the rows spell it"
+    },
+    {
+      "arm": "schema",
+      "promptVersion": "wikisql-schema@1",
+      "sampleRows": 0,
+      "asked": 8421,
+      "scored": 8421,
+      "exact": 6899,
+      "exactPct": 81.93,
+      "predErrors": 3,
+      "calls": 8421,
+      "yuan": 5.72,
+      "run": 45791827836,
+      "note": "the same prompt with the five rows removed and the fact they carried said in words; 34% cheaper per case and 3.37pp worse"
+    },
+    {
+      "arm": "values@reasoner",
+      "promptVersion": "wikisql-ask@2",
+      "sampleRows": 5,
+      "model": "deepseek-reasoner",
+      "asked": 800,
+      "scored": 800,
+      "exact": 709,
+      "exactPct": 88.63,
+      "predErrors": 2,
+      "calls": 800,
+      "yuan": 3.37,
+      "run": 45791855710,
+      "note": "the first 800 questions of dev under the reasoning tier: 88.63% against 88.88% for the chat tier on the same 800, which is a difference this design cannot separate"
+    }
+  ],
+  "paired": [
+    {
+      "first": "values",
+      "second": "schema",
+      "cases": 8421,
+      "both": 6656,
+      "onlyFirst": 527,
+      "onlySecond": 243,
+      "neither": 995,
+      "deltaPp": -3.37,
+      "lowPp": -4.02,
+      "highPp": -2.73,
+      "p": 0.0,
+      "mdePp": 0.92,
+      "verdict": "the five sample rows are worth 3.37pp (95% CI 2.73 to 4.02) on a corpus of values"
+    },
+    {
+      "first": "values",
+      "second": "values@reasoner",
+      "cases": 800,
+      "both": 695,
+      "onlyFirst": 16,
+      "onlySecond": 14,
+      "neither": 75,
+      "deltaPp": -0.25,
+      "lowPp": -1.59,
+      "highPp": 1.09,
+      "p": 0.8555,
+      "mdePp": 1.92,
+      "verdict": "the reasoning tier is indistinguishable from the chat tier here; this design resolves nothing smaller than 1.92pp"
+    }
+  ]
 }
