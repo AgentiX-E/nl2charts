@@ -1052,6 +1052,30 @@
           "f1@3": 0.332182,
           "hit@3": 0.531292,
           "yuan": 14.253088
+        },
+        "reasoner-default@2600": {
+          "model": "deepseek-reasoner",
+          "rules": [
+            "count",
+            "ranks",
+            "corpus",
+            "corpus2",
+            "steps"
+          ],
+          "maxTokens": 2600,
+          "run": 45745187498,
+          "artifact": {
+            "sha256": "747b3664829a8e39a3b20b198b154043af77c396371b3c00cb142d9e0ecc1e4c"
+          },
+          "questions": 751,
+          "asked": 751,
+          "failed": 7,
+          "truncated": 33,
+          "unparsed": 1,
+          "f1@1": 0.244563,
+          "f1@3": 0.344598,
+          "hit@3": 0.528628,
+          "yuan": 25.43
         }
       },
       "pairs": {
@@ -1106,6 +1130,20 @@
           "separated": true,
           "questions": 751,
           "resamples": 2000
+        },
+        "rules-on-reasoning": {
+          "base": "reasoner-cc2@2600",
+          "arm": "reasoner-default@2600",
+          "varies": "rules",
+          "question": "Does the rule set the chat tier ships also help the reasoning tier on questions nobody tuned against? Dev said no on 750 questions (steps +1.16 [-0.52, 2.79], ranks -0.23 [-1.63, 1.26]) and a dev answer is partly a measurement of the rows the list was chosen on, so the same question is asked here. The arm it is read against is the list the reasoning tier ships, which is the only form in which \"these rules do not help this tier\" is about the tier rather than about a configuration nobody deploys.",
+          "k": 3,
+          "delta": 0.012416,
+          "low": -0.0046,
+          "high": 0.0301,
+          "separated": false,
+          "questions": 751,
+          "resamples": 2000,
+          "because": "+1.24pp, inside the noise and inside the 1.25pp resolution, for 1.78x the bill: 25.43 against 14.25 for the same 751 questions, and the arm truncated 33 replies against 14 because the two extra rules spend the output cap before the array is written. Two splits now agree that this tier does not want the chat tier's rules. The reading is a floor by 7 failures (0.9% of the split, under the 1% the run tolerates), which narrows the gap rather than the verdict: 7 perfect answers would add at most 0.9pp and the interval has to clear 1.25 to be a claim."
         }
       }
     }

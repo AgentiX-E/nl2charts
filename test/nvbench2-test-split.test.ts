@@ -96,7 +96,11 @@ describe('the test split is recorded beside the ablation, not inside it', () => 
 
 describe('a pair is only a pair when the thing it names is the only thing that differs', () => {
   it('holds four pairs, each naming two arms the table holds and a different free variable', () => {
-    expect(pairEntries.map(([name]) => name).sort()).toEqual(['aa', 'decision', 'mechanism', 'selection']);
+    expect(pairEntries.map(([name]) => name).sort())
+      .toEqual(['aa', 'decision', 'mechanism', 'rules-on-reasoning', 'selection']);
+    // Five pairs, four free variables: `rules` is asked twice because the two tiers ship different
+    // lists, and a rule set that helps one tier has to be tested against the other before it is
+    // shipped there.
     expect(new Set(pairEntries.map(([, p]) => p.varies)).size).toBe(4);
     for (const [name, pair] of pairEntries) {
       expect(test.arms[pair.base], `${name} names a base the table does not hold`).toBeDefined();
@@ -146,6 +150,10 @@ describe('a pair is only a pair when the thing it names is the only thing that d
       expect(arm.questions, `${name} asked another split`).toBe(metrics.splits[test.split]?.questions);
       expect(arm.failed, `${name} failed more questions than it asked`).toBeGreaterThanOrEqual(0);
       expect(arm.failed).toBeLessThanOrEqual(arm.questions);
+      // The same bar the run itself is held to (`MAX_FAILED_SHARE`): a failure scores zero, so an arm
+      // above it is a floor whose distance to the truth nobody can bound, and it may not sit in a
+      // table of measurements. An arm that lands above the line has to be re-dispatched, not recorded.
+      expect(arm.failed * 100, `${name} is a floor, not a reading`).toBeLessThanOrEqual(arm.questions);
       expect(Number.isInteger(arm.run), `${name} names no run`).toBe(true);
       expect(arm.artifact.sha256, `${name} names no artifact digest`).toMatch(/^[0-9a-f]{64}$/);
       expect(arm.yuan, `${name} has no bill`).toBeGreaterThan(0);
@@ -214,12 +222,26 @@ describe('the recorded pairs are the arithmetic of the arms they name', () => {
     // Two claims, in order: a gap has to be wider than the A/A movement to be a finding at all, and its
     // pessimistic end has to clear that movement for the finding to survive a pessimistic reading. The
     // second is stricter, and it is the one a deployment decision needs.
+    // Only a pair that claims a difference has to clear the instrument; one that reports no
+    // difference is allowed to be smaller than the resolution, and two of these are (`decision` sits
+    // above it on the point estimate and under it at the lower bound, `rules-on-reasoning` sits under
+    // it outright). What may not happen is the reverse: a separated pair narrower than what the same
+    // arm produces against itself, which would be a claim the instrument cannot support.
     for (const [name, pair] of pairEntries) {
-      if (name === 'aa') continue;
-      expect(Math.abs(pair.delta), `${name} is inside the resolution`).toBeGreaterThan(test.resolution);
+      if (name === 'aa' || !pair.separated) continue;
+      expect(Math.abs(pair.delta), `${name} is separated but inside the resolution`).toBeGreaterThan(test.resolution);
     }
     const clears = pairEntries.filter(([, p]) => p.low > test.resolution);
     expect(clears.map(([name]) => name).sort()).toEqual(['mechanism', 'selection']);
+    // The rule set the chat tier ships does not separate on the reasoning tier, on either split, so it
+    // is not shipped there: the pair's base is the three-rule list and the five-rule list is the arm.
+    // A rule that starts separating would have to be sent, and this assertion would have to change
+    // with `REASONING_RULES` — which is the coupling that keeps the two from drifting apart.
+    const rulesOnReasoning = test.pairs['rules-on-reasoning'] as Pair;
+    expect(rulesOnReasoning.varies).toBe('rules');
+    expect([...(test.arms[rulesOnReasoning.base] as Arm).rules].sort())
+      .toEqual([...metrics.arms.layers.reasoning.rules].sort());
+    expect(rulesOnReasoning.separated).toBe(false);
     // `decision` clears the first bar and not the second: its delta (2.71) is more than twice the
     // resolution, and its lower bound (0.74) is under it. That is why the shipped default stays on the
     // chat tier while the reasoning tier stays available — the pessimistic end of the tier's advantage

@@ -18450,6 +18450,28 @@ would have spent are the tokens the cap refused. `census.ts` prices exactly that
 751-question reading is 1.86 points a perfect answer to them would add — and the reason not to buy
 them yet is that a bigger cap costs a re-dispatch of the whole split, not a patch.
 
+**The rule set the chat tier ships does not transfer to the reasoning tier, and now two splits say so.**
+Dev put `steps` at +1.16 [−0.52, +2.79] and `ranks` at −0.23 [−1.63, +1.26] on the reasoning tier, which
+is why `REASONING_RULES` drops both. A dev reading is partly a measurement of the rows the list was
+chosen on, so the question was asked again on the test split — the shipped three-rule list against the
+shipped chat five-rule list, same cap, same judge, one model:
+
+```console
+$ pnpm bench:nvbench2:compare --base reasoner-cc2.json --arm reasoner-5rules.json --k 3
+F1@3: 33.22% → 34.46% (+1.24%, 95% [-0.46%, 3.01%], inside the noise) over 751 paired questions, 2000 resamples
+```
+
+Inside the noise, inside the 1.25-point resolution, and for **1.78× the bill**: ¥25.43 against ¥14.25
+for the same 751 questions, because the two extra rules spend the output cap before the array is
+written — 33 replies truncated against 14. `REASONING_RULES` stays at three rules, and it now stays
+for a reason that is a reading rather than an inference from dev. The arm is a floor by seven failures
+(0.9% of the split, under the 1% the run tolerates), which narrows the gap and not the verdict: seven
+perfect answers add at most 0.9 points, and the interval has to clear 1.25 to be a claim.
+
+That is also what `test/nvbench2-test-split.test.ts` now refuses: a `rules` pair whose base is not the
+list the tier ships, or a separated pair narrower than the instrument. Both are structural, so a rule
+that starts separating on the reasoning tier fails CI until `REASONING_RULES` follows it.
+
 **Where the misses are, on the test split.** The first disagreement, counted over every produced
 chart:
 
