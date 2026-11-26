@@ -28,7 +28,7 @@ const TREE = {
   'eval/baseline/wikisql.json': { exact: 7183, exactPct: 85.3, scored: 8421 },
   // Spider's row carries the reading its corpus was built for this round; the counts are checked
   // against the percentage in `test/spider-baseline.test.ts`.
-  'eval/baseline/spider.json': { exact: 593, exactPct: 57.35, scored: 1034 },
+  'eval/baseline/spider.json': { exact: 618, exactPct: 59.77, scored: 1034 },
   // Held as the manifest reads it: a percent under `arms.selected.published`, because every row of
   // this table is a percent and the arm's raw fraction stays in `arms.readings`.
   'eval/nvbench2/metrics.json': { arms: { selected: { published: { 'f1@3': 32.23 } } } },

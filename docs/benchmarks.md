@@ -18041,7 +18041,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 |---|---|---|---|---|
 | WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% (`values` arm) |
 | WikiSQL dev | the same questions, no sample rows | EX | measured | 81.93% (`schema` arm, **−3.37pp**, p<0.0001) |
-| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | 57.35% (chat tier), 50.68% (reasoning tier) |
+| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | **59.77%** (`grammar`, chat); 57.35% (`schema`, chat), 50.68% (`schema`, reasoner) |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) |
 | BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) |
@@ -19350,8 +19350,16 @@ dialect is where the loss is, and it is not the model's fault or SQLite's: Spide
 computed by Spider's grammar, and 137 of the 185 refusals fall in four classes a prompt can name. The
 reasoning tier refuses **314** of 1,034 (30.4%) and its first refusal is `SELECT Country,
 COUNT(Singer_ID) AS number_of_singers …` — it decorates more, so it loses more. **The tier comparison
-above is therefore a measurement of dialect, not of reasoning**, and `grammar` is the arm that prices
-the difference: same schema, same question, four sentences naming the restrictions.
+above is therefore a measurement of dialect, not of reasoning**, and `grammar` prices the difference:
+same schema, same question, four sentences naming the restrictions.
+
+It reads **618 of 1,034 = 59.77%** (run `45807713388`, ¥2.90) with **45** refusals instead of 185. The
+paired comparison against the `schema` arm is **+2.42pp [+0.42, +4.41]**, McNemar p = 0.022 over 111
+discordant cases — and the honest half of the result is what did *not* happen: the four sentences made
+140 statements readable, and only 25 of them became right. **Naming the dialect was worth 2.4pp, not the
+13.2pp the refusal count suggested**, because a statement that parses and answers the wrong question
+still scores zero. That is the same lesson WikiSQL's pilot taught in a different key: a refused answer
+and a wrong answer are different facts, and only the second is a fact about the model.
 
 Two consequences are stated in the corpus manifest rather than left to a reader: the metric here is
 **exact match (component match)**, because a skeleton cannot answer a `SELECT` for real, so execution

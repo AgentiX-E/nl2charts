@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildDatabase } from '../eval/spider/fetch.mjs';
 import {
+  casesTextOf,
   main,
   parsePredictions,
   readingOf,
@@ -70,6 +71,19 @@ describe('reading a predictions file', () => {
 
   it('refuses a line that is not a prediction, and says which one', () => {
     expect(() => parsePredictions('{"index":0}\n', 'p.jsonl')).toThrow('p.jsonl line 1 is not a prediction');
+  });
+});
+
+describe('the per-case file', () => {
+  it('writes nothing for a split with no scored case, rather than one empty line', () => {
+    expect(casesTextOf([], [])).toBe('');
+  });
+
+  it('reads a missing verdict as a case that was not answered, not as a wrong answer', () => {
+    // A verdict list shorter than the pair list is a judge that answered fewer cases than it was
+    // given; the reading refuses that, and this writer must not turn the gap into an `exact: false`.
+    const text = casesTextOf([{ index: 4 }], []);
+    expect(JSON.parse(text)).toEqual({ index: 4, ordered: false, bag: false, predOk: false });
   });
 });
 
@@ -224,11 +238,12 @@ describe('the tool, with the judge handed to it', () => {
 
 describe('the flags', () => {
   it('reads every flag it documents, and refuses a limit that is not a count', () => {
-    expect(resolveSettings(['--predictions', 'p', '--out', 'o', '--cache', 'c', '--limit', '5'])).toEqual({
+    expect(resolveSettings(['--predictions', 'p', '--out', 'o', '--cache', 'c', '--limit', '5', '--cases', 'k'])).toEqual({
       predictions: 'p',
       out: 'o',
       cache: 'c',
       limit: 5,
+      cases: 'k',
     });
     expect(() => resolveSettings(['--limit', '0'])).toThrow('positive integer');
   });
@@ -236,6 +251,27 @@ describe('the flags', () => {
   it('refuses a flag that needs a value and ignores none of them silently', () => {
     expect(resolveSettings([])).toEqual({ predictions: undefined, out: undefined, cache: undefined, limit: undefined });
     expect(() => resolveSettings(['--limit', 'x'])).toThrow('positive integer');
+  });
+
+  it('writes one verdict per judged case, in the shape the paired comparison reads', () => {
+    const cache = corpus();
+    const predictions = join(dirOf(), 'p.jsonl');
+    const cases = join(dirOf(), 'c.jsonl');
+    writeFileSync(
+      predictions,
+      `${JSON.stringify({ index: 0, sql: 'SELECT count(*) FROM singer' })}\n${JSON.stringify({ index: 1, sql: 'SELECT nope FROM singer' })}\n`,
+    );
+    const lines: string[] = [];
+    const code = main(['--cache', cache, '--predictions', predictions, '--cases', cases], (line) => lines.push(line), {
+      judge: (pairs) => pairs.map((pair, position) => (position === 0 ? { em: 1, gold: 'ok', pred: 'ok' } : { em: 0, gold: 'ok', pred: 'error' })),
+    });
+    expect(code).toBe(0);
+    const written = readFileSync(cases, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(written[0]).toEqual({ index: 0, ordered: true, bag: true, predOk: true });
+    // The second statement never parsed, so `predOk` is false: an unreadable answer is not a wrong
+    // one, and a paired test must be able to tell them apart.
+    expect(written[1]).toEqual({ index: 1, ordered: false, bag: false, predOk: false });
+    expect(lines.join('\n')).toContain(`cases    ${cases} (2)`);
   });
 
   it('refuses a run with no predictions file at all', () => {

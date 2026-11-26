@@ -71,6 +71,27 @@ export function readingOf(
   };
 }
 
+/**
+ * One line per judged case, in the shape `eval/wikisql/paired.ts` reads.
+ *
+ * `predOk` is false when the reference could not parse the statement: that is a different failure from
+ * a statement that parsed and was wrong, and a paired comparison that folded them together would
+ * credit an arm for turning an unreadable statement into a readable wrong one.
+ */
+export function casesTextOf(
+  asked: readonly { readonly index: number }[],
+  verdicts: readonly { readonly em?: number; readonly pred?: string }[],
+): string {
+  return asked
+    .map((entry, position) => {
+      const verdict = verdicts[position];
+      const exact = verdict?.em === 1;
+      return JSON.stringify({ index: entry.index, ordered: exact, bag: exact, predOk: verdict?.pred === 'ok' });
+    })
+    .join('\n')
+    .concat(asked.length === 0 ? '' : '\n');
+}
+
 /** The report, as lines. */
 export function reportLines(reading: Reading): readonly string[] {
   return [
@@ -86,6 +107,8 @@ export interface Settings {
   readonly out: string | undefined;
   readonly cache: string | undefined;
   readonly limit: number | undefined;
+  /** One line per judged case, so a later arm is a paired comparison rather than a subtraction. */
+  readonly cases: string | undefined;
 }
 
 export function resolveSettings(argv: readonly string[]): Settings {
@@ -93,6 +116,7 @@ export function resolveSettings(argv: readonly string[]): Settings {
   let out: string | undefined;
   let cache: string | undefined;
   let limit: number | undefined;
+  let cases: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index] as string;
     const value = argv[index + 1];
@@ -108,12 +132,15 @@ export function resolveSettings(argv: readonly string[]): Settings {
     } else if (flag === '--limit' && value !== undefined) {
       limit = Number(value);
       index += 1;
+    } else if (flag === '--cases' && value !== undefined) {
+      cases = value;
+      index += 1;
     }
   }
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     throw new Error(`--limit must be a positive integer, got ${String(limit)}`);
   }
-  return { predictions, out, cache, limit };
+  return { predictions, out, cache, limit, cases };
 }
 
 /** The judge, as this file calls it: pairs in, verdicts out. A parameter so a test needs no python. */
@@ -152,6 +179,10 @@ export function main(
   for (const line of reportLines(reading)) log(line);
   if (reading.firstGoldError !== undefined) log(`  first gold error: ${reading.firstGoldError.slice(0, 160)}`);
   if (reading.firstPredError !== undefined) log(`  first refused prediction: ${reading.firstPredError.slice(0, 160)}`);
+  if (settings.cases !== undefined) {
+    writeFileSync(settings.cases, casesTextOf(asked, verdicts));
+    log(`  cases    ${settings.cases} (${String(asked.length)})`);
+  }
   if (settings.out !== undefined) {
     writeFileSync(settings.out, `${JSON.stringify({ split: 'dev', reading }, null, 1)}\n`);
     log(`  wrote    ${settings.out}`);

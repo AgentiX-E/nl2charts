@@ -1,19 +1,19 @@
 {
   "instrument": "eval/spider/ask.ts",
-  "promptVersion": "spider-ask@1",
-  "arm": "schema",
+  "promptVersion": "spider-grammar@1",
+  "arm": "grammar",
   "corpus": "Spider 1.0 dev: 1,034 questions over 20 databases, corpus 4.4 MB of dev.json + tables.json, databases built from the declaration in eval/spider/fetch.mjs",
   "model": "deepseek-chat",
   "split": "dev",
   "asked": 1034,
   "scored": 1034,
-  "exact": 593,
-  "exactPct": 57.35,
-  "predErrors": 185,
+  "exact": 618,
+  "exactPct": 59.77,
+  "predErrors": 45,
   "goldErrors": 0,
   "calls": 1034,
-  "yuan": 2.09,
-  "run": 45802615591,
+  "yuan": 2.9,
+  "run": 45807713388,
   "metric": "exact match (component match), the reference's own comparison; execution accuracy is out of reach from a skeleton corpus",
   "arms": [
     {
@@ -39,6 +39,18 @@
       "predErrors": 314,
       "yuan": 9.6,
       "run": 45802860221
+    },
+    {
+      "arm": "grammar",
+      "promptVersion": "spider-grammar@1",
+      "model": "deepseek-chat",
+      "asked": 1034,
+      "scored": 1034,
+      "exact": 618,
+      "exactPct": 59.77,
+      "predErrors": 45,
+      "yuan": 2.9,
+      "run": 45807713388
     }
   ],
   "unparseable": {
@@ -50,6 +62,40 @@
     "other": 48,
     "note": "Classes measured by re-running the reference parser on each refused statement: `FROM t x` needs `AS`, `IN ('a','b')` is not in the grammar (a subquery is), `SELECT AVG(x) AS y` is not either, and an OUTER JOIN is not a table reference. Each class is a sentence the grammar arm adds; `other` is left unnamed because it mixes unknown columns with constructs not worth a rule."
   },
-  "note": "The first reading this corpus has ever had, on a corpus built from the declaration instead of the 350 MB archive. 185 of 1,034 statements (17.9%) were refused by the reference parser, which is a fact about dialect before it is a fact about reasoning: 137 of them fall in four grammar classes and are what the `grammar` arm prices. Among the 849 that parsed, 593 read exact (69.85%).",
-  "because": "the corpus was reachable this round after two rounds of saying it was not, and the first thing it showed was that the instrument was measuring SQLite's dialect rather than Spider's"
+  "note": "The row cites the highest arm measured on this corpus (grammar, chat tier). The first reading was the schema arm at 57.35% (run 45802615591), and it is kept as the baseline every later arm pairs against. 185 statements of that first reading were refused by the reference parser — 88 bare table aliases, 22 value-list IN, 20 column aliases in SELECT, 7 outer joins — which is why the grammar arm exists: naming those four restrictions takes refusals to 45 and exact match to 59.77%, but only 25 of the 140 statements it made readable were also right, so the dialect was worth 2.4pp of accuracy and not the 13pp the refusal count suggested. Among the 849 statements the parser accepted in the first reading, 593 read exact (69.85%).",
+  "because": "the corpus was reachable this round after two rounds of saying it was not, and the first thing it showed was that the instrument was measuring SQLite's dialect rather than Spider's",
+  "paired": [
+    {
+      "first": "schema",
+      "second": "grammar",
+      "model": "deepseek-chat",
+      "cases": 1034,
+      "both": 550,
+      "onlyFirst": 43,
+      "onlySecond": 68,
+      "neither": 373,
+      "deltaPp": 2.42,
+      "lowPp": 0.42,
+      "highPp": 4.41,
+      "p": 0.0223,
+      "mdePp": 2.85,
+      "verdict": "naming the four restrictions is worth 2.42pp and takes refusals from 185 to 45, but only 25 of the 140 statements it made readable were also right"
+    },
+    {
+      "first": "schema",
+      "second": "schema@reasoner",
+      "model": "deepseek-reasoner",
+      "cases": 1034,
+      "both": 478,
+      "onlyFirst": 115,
+      "onlySecond": 46,
+      "neither": 395,
+      "deltaPp": -6.67,
+      "lowPp": -9.08,
+      "highPp": -4.27,
+      "p": 0.0,
+      "mdePp": 3.44,
+      "verdict": "under the schema arm the reasoning tier is 6.67pp behind, and 314 of its statements were refused against 185 for chat"
+    }
+  ]
 }

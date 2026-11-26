@@ -32,6 +32,19 @@ interface Baseline {
   readonly predErrors: number;
   readonly goldErrors: number;
   readonly arms: readonly Arm[];
+  readonly paired: readonly {
+    readonly first: string;
+    readonly second: string;
+    readonly cases: number;
+    readonly both: number;
+    readonly onlyFirst: number;
+    readonly onlySecond: number;
+    readonly neither: number;
+    readonly deltaPp: number;
+    readonly lowPp: number;
+    readonly highPp: number;
+    readonly verdict: string;
+  }[];
   readonly unparseable: {
     readonly total: number;
     readonly bareAlias: number;
@@ -47,15 +60,17 @@ const BASELINE = JSON.parse(readFileSync('eval/baseline/spider.json', 'utf8')) a
 describe('the Spider baseline is a citation, so its arithmetic has to close', () => {
   it('states a percentage its own counts produce', () => {
     expect(BASELINE.exactPct).toBeCloseTo((100 * BASELINE.exact) / BASELINE.scored, 2);
-    expect(BASELINE.exact).toBe(593);
+    // The row cites the highest arm measured (grammar, chat); the first reading is in `arms`.
+    expect(BASELINE.exact).toBe(618);
     expect(BASELINE.scored).toBe(1_034);
-    expect(BASELINE.exactPct).toBe(57.35);
+    expect(BASELINE.exactPct).toBe(59.77);
   });
 
   it('keeps the refused statements in the denominator, because Spider scores them zero', () => {
-    // 185 statements the reference parser would not read. Dropping them would report 593 of 849 —
-    // 69.9% — which is a fact about the parser's input rather than about the model.
-    expect(BASELINE.predErrors).toBe(185);
+    // 45 statements the reference parser would not read even under the grammar arm; 185 under the
+    // arm before it. Dropping them would report a share of what the parser accepted, which is a fact
+    // about the parser's input rather than about the model.
+    expect(BASELINE.predErrors).toBe(45);
     expect(BASELINE.scored).toBe(BASELINE.asked);
     expect(BASELINE.goldErrors).toBe(0);
   });
@@ -70,14 +85,32 @@ describe('the Spider baseline is a citation, so its arithmetic has to close', ()
     expect(
       anatomy.bareAlias + anatomy.valueListIn + anatomy.selectAlias + anatomy.outerJoin + anatomy.other,
     ).toBe(anatomy.total);
-    expect(anatomy.total).toBe(BASELINE.predErrors);
+    // The anatomy describes the *first* reading, which is the arm with 185 refusals; the row cites the
+    // grammar arm, whose refusals are 45. Comparing the two would conflate an arm with a corpus.
+    const first = BASELINE.arms.find((arm) => arm.arm === 'schema' && arm.model === 'deepseek-chat');
+    expect(anatomy.total).toBe(first?.predErrors);
     // The four grammar classes are what the `grammar` arm prices; if this number moved, that arm is
     // arguing about a smaller thing than it says it is.
     expect(anatomy.bareAlias + anatomy.valueListIn + anatomy.selectAlias + anatomy.outerJoin).toBe(137);
   });
 
+  it('records the paired rows, and their cells add up to their cases', () => {
+    const grammar = BASELINE.paired.find((row) => row.second === 'grammar');
+    const reasoner = BASELINE.paired.find((row) => row.second === 'schema@reasoner');
+    if (grammar === undefined || reasoner === undefined) throw new Error('a paired row is missing');
+    for (const row of BASELINE.paired) {
+      expect(row.deltaPp).toBeCloseTo((100 * (row.onlySecond - row.onlyFirst)) / row.cases, 2);
+      expect(row.cases).toBe(row.both + row.onlyFirst + row.onlySecond + row.neither);
+      expect(row.lowPp).toBeLessThan(row.deltaPp);
+      expect(row.highPp).toBeGreaterThan(row.deltaPp);
+    }
+    // The dialect lever: fewer refusals, and only a quarter of them convert.
+    expect(grammar.verdict).toContain('2.42pp');
+    expect(reasoner.verdict).toContain('6.67pp');
+  });
+
   it('records both tiers as counts that produce their own percentage', () => {
-    const chat = BASELINE.arms.find((arm) => arm.model === 'deepseek-chat');
+    const chat = BASELINE.arms.find((arm) => arm.arm === 'schema' && arm.model === 'deepseek-chat');
     const reasoner = BASELINE.arms.find((arm) => arm.model === 'deepseek-reasoner');
     for (const arm of BASELINE.arms) expect(arm.exactPct).toBeCloseTo((100 * arm.exact) / arm.scored, 2);
     expect(chat?.exact).toBe(593);
