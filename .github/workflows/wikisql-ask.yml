@@ -134,5 +134,6 @@ jobs:
           name: wikisql-${{ inputs.split }}-${{ inputs.model }}
           path: |
             eval/out/wikisql-predictions.jsonl
+            eval/out/wikisql-predictions.unreadable.jsonl
             eval/out/wikisql-reading.json
           if-no-files-found: warn

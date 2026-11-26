@@ -352,6 +352,41 @@ export function predictionsText(records: readonly AskRecord[]): string {
   return lines.length === 0 ? '' : `${lines.join('\n')}\n`;
 }
 
+/**
+ * Why the replies that were not read were not read.
+ *
+ * The first pilot refused 14 of 40 and the artifact held only the 26 that worked, so the refusal
+ * named a count and nobody could see the reason — a refusal without evidence is a gate that has to be
+ * re-run to be understood, and a re-run costs money. Three facts per case explain all of it: whether
+ * the endpoint cut the reply, what it threw if it did, and the first 300 characters of what it said.
+ */
+export function unreadableText(records: readonly AskRecord[]): string {
+  const lines: string[] = [];
+  for (const record of records) {
+    if (record.sql !== undefined) continue;
+    lines.push(
+      JSON.stringify({
+        index: record.index,
+        truncated: record.truncated,
+        error: record.error ?? null,
+        reply: record.reply.slice(0, 300),
+      }),
+    );
+  }
+  return lines.length === 0 ? '' : `${lines.join('\n')}\n`;
+}
+
+/** The distinct reasons, in the order they first appeared, for the log line that names them. */
+export function reasonsOf(records: readonly AskRecord[]): readonly string[] {
+  const reasons: string[] = [];
+  for (const record of records) {
+    if (record.sql !== undefined) continue;
+    const reason = record.error ?? (record.truncated ? 'reply cut at the token cap' : 'reply held no SELECT');
+    if (!reasons.includes(reason)) reasons.push(reason);
+  }
+  return reasons;
+}
+
 /** The report, as lines: one per count, and the share the refusal is about. */
 export function reportLines(tally: AskCounts, bill: string | undefined): readonly string[] {
   const lines = [
@@ -445,6 +480,12 @@ export async function main(
     const out = resolve(ROOT, settings.out);
     writeFileSync(out, predictionsText(records));
     log(`  predictions ${out}`);
+    // The evidence for the refusal, written whether or not there is a refusal: a run that read every
+    // reply leaves an empty file, which is itself the answer to "did anything fail and why".
+    const diagnostics = `${out.replace(/\.jsonl$/u, '')}.unreadable.jsonl`;
+    writeFileSync(diagnostics, unreadableText(records));
+    log(`  unreadable ${diagnostics}`);
+    for (const reason of reasonsOf(records).slice(0, 5)) log(`  because ${reason}`);
     if (unreadable(tally)) {
       log(`REFUSED: ${String(tally.unreadable)} of ${String(tally.asked)} replies held no statement, above the 1% ceiling; nothing is scored`);
       return 3;

@@ -31,6 +31,8 @@ import {
   resolveSettings,
   statementOfReply,
   tallyOf,
+  unreadableText,
+  reasonsOf,
   type AskRecord,
   type Table,
 } from '../eval/wikisql/ask.js';
@@ -177,6 +179,21 @@ describe('the counters a reading is published with', () => {
     expect(reportLines(tally, '¥1.00').join('\n')).toContain('bill ¥1.00');
     expect(reportLines(tally, undefined).join('\n')).not.toContain('bill');
     expect(reportLines(tally, undefined).join('\n')).toContain('unreadable 3 (75.0%)');
+  });
+
+  it('leaves the evidence for a refusal: what each unread reply said, and why', () => {
+    const text = unreadableText(records);
+    const lines = text.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toEqual({ index: 1, truncated: false, error: null, reply: 'no idea' });
+    expect(lines[1]).toMatchObject({ index: 2, truncated: true, error: null, reply: '' });
+    expect(lines[2]).toMatchObject({ index: 3, error: 'ECONNRESET' });
+    expect(unreadableText(records.slice(0, 1))).toBe('');
+  });
+
+  it('names the distinct reasons once, and says which of the three it was', () => {
+    expect(reasonsOf(records)).toEqual(['reply held no SELECT', 'reply cut at the token cap', 'ECONNRESET']);
+    expect(reasonsOf(records.slice(0, 1))).toEqual([]);
   });
 
   it('refuses past one percent and not at one percent', () => {

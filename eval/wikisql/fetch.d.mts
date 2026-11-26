@@ -23,6 +23,14 @@ export const ARCHIVE: ArchiveShape;
 export const FILES: Record<string, string>;
 
 export function sourceUrl(): string;
+export const ORIGIN: { readonly repo: string; readonly ref: string };
+/**
+ * The second transport, declared with the seam a test uses.
+ *
+ * `fetchImpl` is `typeof fetch`, so a case can hand it a canned GitHub and assert what the fetcher
+ * writes; the default is the platform's `fetch`, which is what a runner gets.
+ */
+export function fetchFromApi(target: string, fetchImpl?: typeof fetch): Promise<void>;
 export function planOf(split: string): { split: string; members: string[]; files: string[]; shape: SplitShape };
 export function sha256Of(path: string): Promise<string>;
 export function countLines(path: string): number;
