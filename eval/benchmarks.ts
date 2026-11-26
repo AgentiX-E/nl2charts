@@ -118,7 +118,17 @@ export const BENCHMARKS: readonly Benchmark[] = [
     source: 'https://yale-lily.github.io/spider',
     corpus: '1,034 dev questions over 20 databases; 200 databases and 10,181 questions in the corpus',
     metrics: ['EM', 'EX'],
-    status: 'instrumented',
+    status: 'measured',
+    reading: {
+      file: 'eval/baseline/spider.json',
+      path: ['exactPct'],
+      kind: 'run',
+      unit: 'percent',
+      note: 'one call a question, schema-only prompt, chat tier; 185 of 1,034 statements (17.9%) were '
+        + 'refused by the reference parser — 88 bare table aliases, 22 value-list `IN`, 20 column '
+        + 'aliases in `SELECT`, 7 outer joins — and stay in the denominator, because Spider scores '
+        + 'them zero',
+    },
     gap:
       'The corpus is the databases, not the question file — `process_sql.get_sql` resolves every '
       + 'column through a `Schema` built from a live SQLite file — and the twenty `.sqlite` files '

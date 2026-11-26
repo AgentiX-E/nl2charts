@@ -46,6 +46,41 @@ const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 export const PROMPT_VERSION = 'spider-ask@1';
 
 /**
+ * The arms this file can run.
+ *
+ * `schema` is the prompt the first reading was taken with: the schema, the question, and the two
+ * sentences that make a compositional answer possible. Its 1,034 answers included **185 statements
+ * the reference parser refuses** — 88 with a bare table alias (`FROM Student s`), 22 with `IN` and a
+ * list of values, 20 aliasing a column in `SELECT`, 7 with an outer join. None of those is SQLite's
+ * fault and none is the model's: Spider's exact match is computed by its own grammar, and a
+ * statement outside it scores zero however right it is. So the first arm measures *dialect awareness*
+ * as much as it measures SQL, which is why the second arm exists.
+ *
+ * `grammar` adds the four restrictions the parser enforces and nothing else. Everything before the
+ * instruction block is byte-identical, so the difference between the two readings is one paragraph.
+ */
+export const ARMS = {
+  schema: { version: PROMPT_VERSION },
+  grammar: { version: 'spider-grammar@1' },
+} as const;
+
+export type ArmName = keyof typeof ARMS;
+
+/** The arms, as the strings a flag may carry. */
+export const ARM_NAMES = Object.keys(ARMS) as readonly ArmName[];
+
+/** The arm a flag value names, or a refusal that lists the ones that exist. */
+export function armNamed(name: string): ArmName {
+  if (Object.hasOwn(ARMS, name)) return name as ArmName;
+  throw new Error(`--arm must be one of ${ARM_NAMES.join(', ')}, got ${name}`);
+}
+
+/** The prompt version an arm writes into its log line. */
+export function promptVersionFor(arm: ArmName): string {
+  return ARMS[arm].version;
+}
+
+/**
  * A case's cost bound, before it is asked.
  *
  * A Spider schema is five tables of six columns — nine hundred prompt tokens is above every database
@@ -143,8 +178,21 @@ export function schemaText(database: Database): string {
   return lines.join('\n');
 }
 
+/** The four sentences the grammar arm adds. Each one is a class measured in the first reading. */
+export const GRAMMAR_RULES = [
+  'The statement is read by Spider\'s own parser, which accepts a narrower grammar than SQLite. Write:',
+  '- a table alias only as `FROM table AS alias`; `FROM table alias` is not read;',
+  '- no alias on a selected column; `SELECT AVG(x) AS avg_x` is not read;',
+  '- `IN` with a subquery, never with a list of values: `col = \'a\' OR col = \'b\'` instead;',
+  '- no LEFT, RIGHT or FULL OUTER JOIN; a subquery expresses the same question inside this grammar.',
+] as const;
+
 /** The prompt for one question: the database's schema, then the question. */
-export function promptFor(question: string, database: Database): readonly { readonly role: 'system' | 'user'; readonly content: string }[] {
+export function promptFor(
+  question: string,
+  database: Database,
+  arm: ArmName = 'schema',
+): readonly { readonly role: 'system' | 'user'; readonly content: string }[] {
   return [
     { role: 'system', content: 'You write one SQLite statement for one database. You answer with the statement only.' },
     {
@@ -158,7 +206,9 @@ export function promptFor(question: string, database: Database): readonly { read
         '',
         'Write one SELECT statement that answers the question. Use only the tables and columns above,',
         'spelled exactly as they are declared. When the question asks for a superlative or a ranking,',
-        'the statement needs the ORDER BY and LIMIT that express it. Answer with the statement only.',
+        'the statement needs the ORDER BY and LIMIT that express it.',
+        ...(arm === 'grammar' ? ['', ...GRAMMAR_RULES] : []),
+        'Answer with the statement only.',
       ].join('\n'),
     },
   ];
@@ -189,7 +239,7 @@ export interface Settings {
   readonly out: string;
   readonly cache: string | undefined;
   readonly concurrency: number;
-  readonly arm: string;
+  readonly arm: ArmName;
   readonly acceptCost: number | undefined;
   readonly budget: number;
 }
@@ -199,6 +249,7 @@ export function resolveSettings(argv: readonly string[]): Settings {
   let out = 'eval/out/spider-predictions.jsonl';
   let cache: string | undefined;
   let concurrency = 6;
+  let arm: ArmName = 'schema';
   let acceptCost: number | undefined;
   let budget = BUDGET_YUAN;
   for (let index = 0; index < argv.length; index += 1) {
@@ -212,6 +263,9 @@ export function resolveSettings(argv: readonly string[]): Settings {
       index += 1;
     } else if (flag === '--cache' && value !== undefined) {
       cache = value;
+      index += 1;
+    } else if (flag === '--arm' && value !== undefined) {
+      arm = armNamed(value);
       index += 1;
     } else if (flag === '--concurrency' && value !== undefined) {
       concurrency = Number(value);
@@ -238,7 +292,7 @@ export function resolveSettings(argv: readonly string[]): Settings {
   }
   // One arm, named rather than assumed: the workflow passes it so a log line says which prompt was
   // sent, and a second arm later changes this default rather than every caller.
-  return { split: 'dev', limit, out, cache, concurrency, arm: 'schema', acceptCost, budget };
+  return { split: 'dev', limit, out, cache, concurrency, arm, acceptCost, budget };
 }
 
 /** One line of `dev.json`, in the three fields this file reads. */
@@ -261,10 +315,11 @@ export async function askAll(
   tables: readonly Database[],
   provider: LlmProvider,
   concurrency: number,
+  arm: ArmName = 'schema',
 ): Promise<readonly AskRecord[]> {
   return pool(questions, concurrency, async (question, index) => {
     try {
-      const response = await provider.complete({ messages: promptFor(question.question, databaseOf(tables, question.db_id)), temperature: 0, purpose: 'generate' });
+      const response = await provider.complete({ messages: promptFor(question.question, databaseOf(tables, question.db_id), arm), temperature: 0, purpose: 'generate' });
       const truncated = response.finishReason === 'length';
       return {
         index,
@@ -329,7 +384,7 @@ export async function main(
   const cache = settings.cache ?? process.env.SPIDER_CACHE ?? join(ROOT, 'eval/.cache/spider');
   const { questions, tables } = readCorpus(cache);
   const rows = settings.limit === undefined ? questions : questions.slice(0, settings.limit);
-  log(`spider ask: ${String(rows.length)} question(s) on dev, ${String(tables.length)} database(s) declared, ${provider.model}, ${PROMPT_VERSION}`);
+  log(`spider ask: ${String(rows.length)} question(s) on dev, ${String(tables.length)} database(s) declared, ${provider.model}, arm ${settings.arm}, ${promptVersionFor(settings.arm)}`);
   const projected = projectedYuan(rows.length, provider.model);
   if (projected === undefined && settings.acceptCost === undefined) {
     log(`REFUSED: no price on file for ${provider.model}, so this dispatch cannot be projected; pass --accept-cost to name the ceiling`);
@@ -353,7 +408,7 @@ export async function main(
       return response;
     },
   };
-  const records = await askAll(rows, tables, metered, settings.concurrency);
+  const records = await askAll(rows, tables, metered, settings.concurrency, settings.arm);
   const tally = tallyOf(records);
   const bill = billOf(provider.model, { promptTokens, completionTokens });
   for (const line of reportLines(tally, bill === undefined ? undefined : formatYuan(bill))) log(line);

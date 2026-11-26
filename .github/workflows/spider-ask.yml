@@ -25,6 +25,14 @@ on:
         required: true
         default: 'deepseek-chat'
         type: string
+      arm:
+        description: 'Prompt arm: schema (the first reading) or grammar (the same, plus the four restrictions Spider\'s parser enforces)'
+        required: true
+        default: 'schema'
+        type: choice
+        options:
+          - 'schema'
+          - 'grammar'
       limit:
         description: 'Ask only the first N questions (blank asks the whole split)'
         required: false
@@ -104,11 +112,12 @@ jobs:
 
       - name: Ask every question once
         env:
+          ARM: ${{ inputs.arm }}
           ACCEPT_COST: ${{ inputs.accept_cost }}
           LIMIT: ${{ inputs.limit }}
           CONCURRENCY: ${{ inputs.concurrency }}
         run: |
-          ARGS="--concurrency $CONCURRENCY --out eval/out/spider-predictions.jsonl"
+          ARGS="--arm $ARM --concurrency $CONCURRENCY --out eval/out/spider-predictions.jsonl"
           if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
           if [ -n "$ACCEPT_COST" ]; then ARGS="$ARGS --accept-cost $ACCEPT_COST"; fi
           pnpm bench:spider:ask $ARGS
@@ -125,7 +134,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: spider-dev-${{ inputs.model }}
+          name: spider-dev-${{ inputs.arm }}-${{ inputs.model }}
           path: |
             eval/out/spider-predictions.jsonl
             eval/out/spider-predictions.unreadable.jsonl

@@ -103,18 +103,38 @@ describe('the arithmetic', () => {
   });
 });
 
-describe('the tool, through the reference judge', () => {
-  it('reads 100% when every prediction is the gold, which is the corpus check the split already passed', () => {
+describe('the tool, with the judge handed to it', () => {
+  /**
+   * A judge that answers from the statements it is given.
+   *
+   * The reference judge is python and needs `nltk` and `sqlparse`; the quality job that runs this
+   * suite installs neither, and a test that needs them is a test that fails on a machine with a
+   * correct tree. What is asserted here is the wiring — which pairs are handed over, and what the
+   * reading does with the verdicts — and `check.ts --self-test` is where the judge itself is proven.
+   */
+  const judgeOf = (verdictFor: (pair: { pred: string; gold: string }) => { em?: number; gold?: string; pred?: string }) =>
+    (pairs: readonly { pred: string; gold: string }[]) => pairs.map((pair) => verdictFor(pair));
+
+  it('reads 100% when every prediction is the gold', () => {
     const cache = corpus();
     const predictions = join(dirOf(), 'p.jsonl');
     writeFileSync(
       predictions,
       `${JSON.stringify({ index: 0, sql: 'SELECT count(*) FROM singer' })}\n${JSON.stringify({ index: 1, sql: 'SELECT name FROM singer' })}\n`,
     );
+    const seen: string[] = [];
     const lines: string[] = [];
-    const code = main(['--cache', cache, '--predictions', predictions], (line) => lines.push(line));
+    const code = main(['--cache', cache, '--predictions', predictions], (line) => lines.push(line), {
+      judge: (pairs) => {
+        for (const pair of pairs) seen.push(pair.gold);
+        return judgeOf(() => ({ em: 1, gold: 'ok', pred: 'ok' }))(pairs);
+      },
+    });
     expect(code).toBe(0);
     expect(lines.join('\n')).toContain('exact    2 / 2 = 100.00%');
+    // Both golds reached the judge, in corpus order: a pair list that lost one would read as 100% of
+    // one, which is the failure mode a percentage cannot show.
+    expect(seen).toEqual(['SELECT count(*) FROM singer', 'SELECT name FROM singer']);
   });
 
   it('reads a wrong statement as a wrong answer, and a broken one as a refusal', () => {
@@ -125,7 +145,9 @@ describe('the tool, through the reference judge', () => {
       `${JSON.stringify({ index: 0, sql: 'SELECT name FROM singer' })}\n${JSON.stringify({ index: 1, sql: 'SELECT nope FROM singer' })}\n`,
     );
     const lines: string[] = [];
-    const code = main(['--cache', cache, '--predictions', predictions, '--out', join(dirOf(), 'r.json')], (line) => lines.push(line));
+    const code = main(['--cache', cache, '--predictions', predictions, '--out', join(dirOf(), 'r.json')], (line) => lines.push(line), {
+      judge: judgeOf((pair) => (pair.pred.includes('nope') ? { em: 0, gold: 'ok', pred: 'error' } : { em: 0, gold: 'ok', pred: 'ok' })),
+    });
     expect(code).toBe(0);
     expect(lines.join('\n')).toContain('exact    0 / 2 = 0.00%');
     expect(lines.join('\n')).toContain('1 prediction(s) did not parse');
@@ -137,7 +159,9 @@ describe('the tool, through the reference judge', () => {
     const predictions = join(dirOf(), 'p.jsonl');
     const out = join(dirOf(), 'r.json');
     writeFileSync(predictions, `${JSON.stringify({ index: 0, sql: 'SELECT count(*) FROM singer' })}\n`);
-    const code = main(['--cache', cache, '--predictions', predictions, '--out', out], () => {});
+    const code = main(['--cache', cache, '--predictions', predictions, '--out', out], () => {}, {
+      judge: judgeOf(() => ({ em: 1, gold: 'ok', pred: 'ok' })),
+    });
     expect(code).toBe(0);
     const written = JSON.parse(readFileSync(out, 'utf8')) as { split: string; reading: { exact: number; scored: number } };
     expect(written.split).toBe('dev');
@@ -150,7 +174,7 @@ describe('the tool, through the reference judge', () => {
     writeFileSync(join(cache, 'dev.json'), JSON.stringify([{ db_id: 'gone', question: 'q', query: 'SELECT 1' }]));
     const predictions = join(dirOf(), 'p.jsonl');
     writeFileSync(predictions, `${JSON.stringify({ index: 0, sql: 'SELECT 1' })}\n`);
-    expect(() => main(['--cache', cache, '--predictions', predictions], () => {})).toThrow(
+    expect(() => main(['--cache', cache, '--predictions', predictions], () => {}, { judge: judgeOf(() => ({ em: 1 })) })).toThrow(
       'database gone is missing',
     );
   });
@@ -161,16 +185,40 @@ describe('the tool, through the reference judge', () => {
     const previous = process.env.SPIDER_CACHE;
     delete process.env.SPIDER_CACHE;
     try {
-      expect(() => main(['--predictions', predictions], () => {})).toThrow(/dev\.json/u);
+      expect(() => main(['--predictions', predictions], () => {}, { judge: judgeOf(() => ({ em: 1 })) })).toThrow(/dev\.json/u);
     } finally {
       if (previous !== undefined) process.env.SPIDER_CACHE = previous;
     }
   });
 
-  it('refuses a run with no predictions file at all', () => {
+  it('returns non-zero when a gold does not parse, and names the first one', () => {
+    const cache = corpus();
+    const predictions = join(dirOf(), 'p.jsonl');
+    writeFileSync(predictions, `${JSON.stringify({ index: 0, sql: 'SELECT name FROM singer' })}\n`);
     const lines: string[] = [];
-    expect(main([], (line) => lines.push(line))).toBe(2);
-    expect(lines.join('\n')).toContain('--predictions is required');
+    const code = main(['--cache', cache, '--predictions', predictions], (line) => lines.push(line), {
+      judge: judgeOf(() => ({ em: 0, gold: 'error', pred: 'unparsed' })),
+    });
+    expect(code).toBe(1);
+    expect(lines.join('\n')).toContain('first gold error: SELECT count(*) FROM singer');
+  });
+
+  it('calls the reference judge when it is not handed one', () => {
+    // The default path is python, and what it does with a corpus it cannot import is a fact worth
+    // knowing: it throws rather than reading every case as wrong.
+    const cache = corpus();
+    const predictions = join(dirOf(), 'p.jsonl');
+    writeFileSync(predictions, `${JSON.stringify({ index: 0, sql: 'SELECT name FROM singer' })}\n`);
+    let outcome: 'answered' | 'refused' = 'answered';
+    try {
+      main(['--cache', cache, '--predictions', predictions], () => {});
+    } catch (error) {
+      outcome = 'refused';
+      expect(String(error)).toMatch(/the judge exited|spawnSync|could not start/u);
+    }
+    // Either the reference is installed and scores, or it is not and the run refuses. Both are
+    // honest; a silent 0.00% would not be.
+    expect(['answered', 'refused']).toContain(outcome);
   });
 });
 
@@ -190,19 +238,10 @@ describe('the flags', () => {
     expect(() => resolveSettings(['--limit', 'x'])).toThrow('positive integer');
   });
 
-  it('names a gold the corpus cannot parse, which is a corpus failure rather than a model one', () => {
-    const cache = corpus();
-    writeFileSync(
-      join(cache, 'dev.json'),
-      JSON.stringify([{ db_id: 'shop', question: 'q', query: 'SELECT nope FROM singer' }]),
-    );
-    const predictions = join(dirOf(), 'p.jsonl');
-    writeFileSync(predictions, `${JSON.stringify({ index: 0, sql: 'SELECT name FROM singer' })}\n`);
+  it('refuses a run with no predictions file at all', () => {
     const lines: string[] = [];
-    const code = main(['--cache', cache, '--predictions', predictions], (line) => lines.push(line));
-    // A corpus whose gold does not parse cannot produce a reading, and the exit code says so.
-    expect(code).toBe(1);
-    expect(lines.join('\n')).toContain('first gold error: SELECT nope FROM singer');
+    expect(main([], (line) => lines.push(line))).toBe(2);
+    expect(lines.join('\n')).toContain('--predictions is required');
   });
 
   it('scores only the first N questions when a limit is given', () => {
@@ -210,7 +249,9 @@ describe('the flags', () => {
     const predictions = join(dirOf(), 'p.jsonl');
     writeFileSync(predictions, `${JSON.stringify({ index: 1, sql: 'SELECT name FROM singer' })}\n`);
     const lines: string[] = [];
-    main(['--cache', cache, '--predictions', predictions, '--limit', '1'], (line) => lines.push(line));
+    main(['--cache', cache, '--predictions', predictions, '--limit', '1'], (line) => lines.push(line), {
+      judge: (pairs) => pairs.map(() => ({ em: 1, gold: 'ok', pred: 'ok' })),
+    });
     // The one prediction names index 1, which is outside the first question: it is not scored, and
     // the reading says so rather than dividing by a split it did not look at.
     expect(lines.join('\n')).toContain('1 question(s), 0 answered, 1 missing');

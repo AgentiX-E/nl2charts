@@ -12,12 +12,16 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
+  ARMS,
+  ARM_NAMES,
   BUDGET_YUAN,
   PER_CASE,
   PROMPT_VERSION,
   askAll,
+  armNamed,
   columnsOf,
   perCaseFor,
+  promptVersionFor,
   databaseOf,
   main,
   predictionsText,
@@ -112,6 +116,25 @@ describe('the schema is the observation, so its shape is asserted', () => {
 
   it('is a version, because two prompts are two instruments', () => {
     expect(PROMPT_VERSION).toBe('spider-ask@1');
+    expect(ARMS.schema.version).toBe(PROMPT_VERSION);
+    expect(promptVersionFor('grammar')).toBe('spider-grammar@1');
+    expect(ARM_NAMES).toEqual(['schema', 'grammar']);
+    expect(armNamed('grammar')).toBe('grammar');
+    expect(() => armNamed('grammers')).toThrow('--arm must be one of schema, grammar, got grammers');
+  });
+
+  it('adds the four grammar restrictions and nothing else, so the arm moves one paragraph', () => {
+    const [, plain] = promptFor('q', SHOP);
+    const [, grammar] = promptFor('q', SHOP, 'grammar');
+    expect(plain?.content).not.toContain('Spider\'s own parser');
+    expect(grammar?.content).toContain("Spider's own parser");
+    expect(grammar?.content).toContain('`FROM table alias` is not read');
+    expect(grammar?.content).toContain('no alias on a selected column');
+    expect(grammar?.content).toContain('`IN` with a subquery');
+    expect(grammar?.content).toContain('no LEFT, RIGHT or FULL OUTER JOIN');
+    // Everything before the rules is the same string in both arms, including the schema itself.
+    const cut = (content: string): string => content.slice(0, content.indexOf('Write one SELECT'));
+    expect(cut(grammar?.content as string)).toEqual(cut(plain?.content as string));
   });
 });
 
@@ -235,8 +258,8 @@ describe('what a run writes and what it says', () => {
 
 describe('the paths a green run does not take', () => {
   it('reads every flag it documents, including the ceiling pair', () => {
-    const settings = resolveSettings(['--limit', '3', '--out', 'x.jsonl', '--cache', '/tmp/c', '--concurrency', '2', '--accept-cost', '5', '--budget', '9']);
-    expect(settings).toMatchObject({ limit: 3, out: 'x.jsonl', cache: '/tmp/c', concurrency: 2, acceptCost: 5, budget: 9 });
+    const settings = resolveSettings(['--limit', '3', '--out', 'x.jsonl', '--cache', '/tmp/c', '--concurrency', '2', '--arm', 'grammar', '--accept-cost', '5', '--budget', '9']);
+    expect(settings).toMatchObject({ limit: 3, out: 'x.jsonl', cache: '/tmp/c', concurrency: 2, arm: 'grammar', acceptCost: 5, budget: 9 });
   });
 
   it('runs an unpriced model when the caller names the ceiling, and prints no bill when it has no price', async () => {

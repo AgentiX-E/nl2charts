@@ -1,0 +1,55 @@
+{
+  "instrument": "eval/spider/ask.ts",
+  "promptVersion": "spider-ask@1",
+  "arm": "schema",
+  "corpus": "Spider 1.0 dev: 1,034 questions over 20 databases, corpus 4.4 MB of dev.json + tables.json, databases built from the declaration in eval/spider/fetch.mjs",
+  "model": "deepseek-chat",
+  "split": "dev",
+  "asked": 1034,
+  "scored": 1034,
+  "exact": 593,
+  "exactPct": 57.35,
+  "predErrors": 185,
+  "goldErrors": 0,
+  "calls": 1034,
+  "yuan": 2.09,
+  "run": 45802615591,
+  "metric": "exact match (component match), the reference's own comparison; execution accuracy is out of reach from a skeleton corpus",
+  "arms": [
+    {
+      "arm": "schema",
+      "promptVersion": "spider-ask@1",
+      "model": "deepseek-chat",
+      "asked": 1034,
+      "scored": 1034,
+      "exact": 593,
+      "exactPct": 57.35,
+      "predErrors": 185,
+      "yuan": 2.09,
+      "run": 45802615591
+    },
+    {
+      "arm": "schema",
+      "promptVersion": "spider-ask@1",
+      "model": "deepseek-reasoner",
+      "asked": 1034,
+      "scored": 1034,
+      "exact": 524,
+      "exactPct": 50.68,
+      "predErrors": 314,
+      "yuan": 9.6,
+      "run": 45802860221
+    }
+  ],
+  "unparseable": {
+    "total": 185,
+    "bareAlias": 88,
+    "valueListIn": 22,
+    "selectAlias": 20,
+    "outerJoin": 7,
+    "other": 48,
+    "note": "Classes measured by re-running the reference parser on each refused statement: `FROM t x` needs `AS`, `IN ('a','b')` is not in the grammar (a subquery is), `SELECT AVG(x) AS y` is not either, and an OUTER JOIN is not a table reference. Each class is a sentence the grammar arm adds; `other` is left unnamed because it mixes unknown columns with constructs not worth a rule."
+  },
+  "note": "The first reading this corpus has ever had, on a corpus built from the declaration instead of the 350 MB archive. 185 of 1,034 statements (17.9%) were refused by the reference parser, which is a fact about dialect before it is a fact about reasoning: 137 of them fall in four grammar classes and are what the `grammar` arm prices. Among the 849 that parsed, 593 read exact (69.85%).",
+  "because": "the corpus was reachable this round after two rounds of saying it was not, and the first thing it showed was that the instrument was measuring SQLite's dialect rather than Spider's"
+}

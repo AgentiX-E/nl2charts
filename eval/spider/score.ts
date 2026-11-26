@@ -13,6 +13,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { judgeAll, parseDev } from './check.js';
+import type { Verdict } from './check.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -115,7 +116,14 @@ export function resolveSettings(argv: readonly string[]): Settings {
   return { predictions, out, cache, limit };
 }
 
-export function main(argv: readonly string[] = process.argv.slice(2), log: (line: string) => void = console.log): number {
+/** The judge, as this file calls it: pairs in, verdicts out. A parameter so a test needs no python. */
+export type JudgeFn = (pairs: readonly { readonly db: string; readonly pred: string; readonly gold: string }[]) => readonly Verdict[];
+
+export function main(
+  argv: readonly string[] = process.argv.slice(2),
+  log: (line: string) => void = console.log,
+  deps: { readonly judge?: JudgeFn } = {},
+): number {
   const settings = resolveSettings(argv);
   if (settings.predictions === undefined) {
     log('spider score: --predictions is required');
@@ -135,7 +143,7 @@ export function main(argv: readonly string[] = process.argv.slice(2), log: (line
     if (!existsSync(path)) throw new Error(`database ${row.db_id} is missing: expected ${path}`);
     return { db: path, pred: predictions.get(index) as string, gold: row.query };
   });
-  const verdicts = judgeAll(pairs);
+  const verdicts = (deps.judge ?? judgeAll)(pairs);
   const reading: Reading = {
     ...readingOf(rows.length, verdicts, pairs.length),
     firstGoldError: pairs.find((_, index) => verdicts[index]?.gold === 'error')?.gold,
