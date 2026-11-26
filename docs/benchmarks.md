@@ -18402,27 +18402,47 @@ instrument's resolution on 751 questions, and it is the number every "better" in
 clear.** It is also the reason the cross-split comparisons in the tier table above are quoted as
 directions: they were never paired, so they never had an interval to clear.
 
-### The reasoning tier, on questions nobody tuned against
+### A tier is better, and a product is better, and they are not the same sentence
 
 Dev is where the rules were chosen, so a dev difference between tiers is partly a difference between
 two things chosen on the same rows. The test split is 751 questions the ablation never saw, and it is
-the first place where "the reasoning tier is better" is a claim rather than two means:
+the first place where "the reasoning tier is better" is a claim rather than two means. It is also the
+first place where the claim has to be split in two, because there are two questions behind that
+sentence and only one of them is about a model.
 
-```console
-$ pnpm bench:nvbench2:compare --base chat-2600.json --arm reasoner-2600.json --k 3
-F1@3: 26.58% → 33.22% (+6.63%, 95% [4.60%, 8.64%], separated from zero) over 751 paired questions, 2000 resamples
-```
+Four dispatches, four pairs, each varying one thing:
 
-| arm | rules | cap | F1@1 | F1@3 | hit@3 | truncated | failed | ¥ | ¥/question |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `deepseek-chat` (run 45723193514) | `count,corpus,corpus2` | 2600 | 19.02 | **26.58** | 41.28 | 0 | 0 | 1.73 | 0.0023 |
-| `deepseek-reasoner` (run 45723203464) | same | 2600 | 24.18 | **33.22** | 53.13 | 14 | 0 | 14.25 | 0.0190 |
+| pair | varies | base | arm | Δ | 95% | separated |
+| --- | --- | --- | --- | ---: | --- | --- |
+| `aa` | the cap, which never bound | `chat`,`cc2` @900 → @2600 | same arm | −0.08 | [−1.25, 1.08] | no |
+| `selection` | the rule list | `chat`,`cc2`@900 26.66 | `chat`, shipped rules 30.50 | **+3.84** | [1.89, 6.01] | yes |
+| `mechanism` | the model | `chat`,`cc2`@2600 26.58 | `reasoner`,`cc2`@2600 33.22 | **+6.63** | [4.60, 8.64] | yes |
+| `decision` | the tier, as shipped | `chat`, shipped 30.50 | `reasoner`, shipped 33.22 | **+2.71** | [0.74, 4.72] | yes |
 
-One split, one rule list, one ask, one cap, one judge — the model is the only free variable, which is
-the only form in which a tier comparison means anything. The interval is 4.04 points wide and sits
-2.6 points clear of zero, so it clears the 1.2-point resolution the A/A run measured by a factor of
-three. **The reasoning tier is better on this corpus, at 8.2× the bill.** That is the whole finding,
-and it is stated with both numbers because the second one is what a deployment decision turns on.
+The `mechanism` pair is the one this file used to report alone, and it was not wrong: one split, one
+rule list, one ask, one cap, one judge, so the model is the only free variable. But the rule list it
+held fixed is **not the one the product ships**. `DEFAULT_RULES` is `count,ranks,corpus,corpus2,steps`
+and it reads 30.50 on this split — 3.84 points above the three-rule list, at the same cap, on the same
+model, on questions nobody tuned against. So the same-rules comparison gives the chat arm 3.84 points
+of handicap and the tier comes out 6.63 ahead; on the configurations a caller actually gets, it comes
+out 2.71 ahead.
+
+**Both numbers are true and they answer different questions.** 6.63 is "is the reasoning model
+better"; 2.71 is "is the reasoning product better". A deployment turns on the second, and the second's
+interval is the narrower one: its lower bound, 0.74, sits **under** the 1.25-point resolution the A/A
+pair measured, while the mechanism pair's lower bound clears it by a factor of 3.7. That is a
+statement about evidence, not about the model — the pessimistic end of the tier's shipped advantage is
+indistinguishable from a re-run of chat, at 8.2× the bill. Hence the shipped default stays on the chat
+tier and the reasoning tier stays available, and `metrics.json` records the decision pair rather than
+letting a reader derive the wrong one from the mechanism pair.
+
+The `selection` pair is the other half of that argument and the first test of the ablation procedure
+itself. A default chosen on dev and reversed on test would be an overfitting finding, not a default:
+here the shipped list beats the runner-up by 3.84 [1.89, 6.01] on questions the selection never saw,
+so the procedure, and not just the list, has evidence behind it. The test that reads this table
+refuses a `decision` pair whose arms are not at `arms.layers`' own lists, and refuses any pair whose
+two arms differ in something its `varies` field did not name — the first test-split attempt failed
+exactly that way, at 900 tokens against 2600 where the 900 was binding.
 
 Fourteen of the reasoning tier's replies hit the 2,600-token cap and none of the chat tier's did, so
 the reasoning reading is a floor on that tier rather than its ceiling: the tokens those 14 replies

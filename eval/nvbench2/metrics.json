@@ -913,11 +913,40 @@
       "split": "test",
       "k": 3,
       "ask": 3,
-      "maxTokens": 2600,
-      "because": "The 751 questions nobody tuned against, answered by both tiers under one instrument: same rules, same ask, same output cap, same judge. The ablation in `readings` selects a rule set on dev and the product default is read off its highest reading, so a test-split number cannot live there without moving that binding; it lives here beside it. The pair is a paired bootstrap over the same 751 questions (`eval/nvbench2/compare.ts`), which is the only form in which \"the reasoning tier is better\" is a claim rather than two means.",
+      "because": "The 751 questions nobody tuned against, answered four times under one judge, and the four pairs those answers make. The ablation in `readings` selects a rule set on dev and the product default is read off its highest reading, so a test-split number cannot live there without moving that binding; it lives here beside it. Each pair names the one thing it varies (`varies`), because a difference is a claim about a cause only when everything else is held: `aa` repeats one arm to size the instrument, `selection` swaps the rule list to test the choice dev made, `mechanism` swaps the model to ask whether the tier is better, and `decision` puts each tier at its own shipped rules to ask whether the product is better. All four are paired bootstraps over the same 751 questions (`eval/nvbench2/compare.ts`), the only form in which a gap is a claim rather than two means.",
+      "resolution": 0.0125,
+      "resolutionBecause": "the widest excursion the same arm has produced against itself on this split, read off the `aa` pair below (low -1.25, high +1.08). It is a property of this instrument at 751 questions rather than of any model, so it is stated once here and every pair is compared against it rather than against zero alone.",
       "arms": {
-        "chat": {
+        "chat-cc2@900": {
           "model": "deepseek-chat",
+          "rules": [
+            "count",
+            "corpus",
+            "corpus2"
+          ],
+          "maxTokens": 900,
+          "run": 45676834711,
+          "artifact": {
+            "sha256": "d05d1f3a7ba24f8ac3f945bdc58a5d05e57a62323318f664f103f14be70f44f2"
+          },
+          "questions": 751,
+          "asked": 751,
+          "failed": 0,
+          "truncated": 0,
+          "unparsed": 0,
+          "f1@1": 0.192987,
+          "f1@3": 0.266606,
+          "hit@3": 0.414115,
+          "yuan": 1.733164
+        },
+        "chat-cc2@2600": {
+          "model": "deepseek-chat",
+          "rules": [
+            "count",
+            "corpus",
+            "corpus2"
+          ],
+          "maxTokens": 2600,
           "run": 45723193514,
           "artifact": {
             "sha256": "e2f6a570806769385bb8a3736afaf82b6c80ce9ec59b66dbd54ac5fadc681976"
@@ -927,12 +956,43 @@
           "failed": 0,
           "truncated": 0,
           "unparsed": 0,
+          "f1@1": 0.190191,
           "f1@3": 0.265849,
           "hit@3": 0.412783,
-          "yuan": 1.7335
+          "yuan": 1.733468
         },
-        "reasoner": {
+        "chat-default@900": {
+          "model": "deepseek-chat",
+          "rules": [
+            "count",
+            "ranks",
+            "corpus",
+            "corpus2",
+            "steps"
+          ],
+          "maxTokens": 900,
+          "run": 45660990108,
+          "artifact": {
+            "sha256": "3af7095a334d91d36c2197145acbccaa6eeb4538b033338e46bf701c33fcc5c7"
+          },
+          "questions": 751,
+          "asked": 751,
+          "failed": 0,
+          "truncated": 0,
+          "unparsed": 1,
+          "f1@1": 0.221438,
+          "f1@3": 0.305047,
+          "hit@3": 0.500666,
+          "yuan": 2.853508
+        },
+        "reasoner-cc2@2600": {
           "model": "deepseek-reasoner",
+          "rules": [
+            "count",
+            "corpus",
+            "corpus2"
+          ],
+          "maxTokens": 2600,
           "run": 45723203464,
           "artifact": {
             "sha256": "c5587eaa1998f6f59ed412675da3592d1d670323a87ecf25c9b4e9bb503894f7"
@@ -942,21 +1002,65 @@
           "failed": 0,
           "truncated": 14,
           "unparsed": 0,
+          "f1@1": 0.241767,
           "f1@3": 0.332182,
           "hit@3": 0.531292,
-          "yuan": 14.2531
+          "yuan": 14.253088
         }
       },
-      "pair": {
-        "base": "chat",
-        "arm": "reasoner",
-        "k": 3,
-        "delta": 0.0663,
-        "low": 0.046,
-        "high": 0.0864,
-        "separated": true,
-        "questions": 751,
-        "resamples": 2000
+      "pairs": {
+        "aa": {
+          "base": "chat-cc2@900",
+          "arm": "chat-cc2@2600",
+          "varies": "cap",
+          "question": "How far does one arm move when the product does not change at all? Nothing that reaches a prompt differs — the same model, the same rules, the same questions — and the cap is not binding on either arm (neither truncated a reply), so the two dispatches are one experiment drawn twice. The spread between them is this instrument’s resolution, and it is the number every other pair in this file has to clear.",
+          "k": 3,
+          "delta": -0.000757,
+          "low": -0.0125,
+          "high": 0.0108,
+          "separated": false,
+          "questions": 751,
+          "resamples": 2000
+        },
+        "selection": {
+          "base": "chat-cc2@900",
+          "arm": "chat-default@900",
+          "varies": "rules",
+          "question": "Was the rule set that dev selected worth what it cost on the questions dev never saw? Same model, same cap, same questions, two rule lists — the shipped one and the runner-up it beat on dev. This is the only test of the selection procedure itself: a default that dev picked and test reverses is an overfitting finding, not a default.",
+          "k": 3,
+          "delta": 0.038441,
+          "low": 0.0189,
+          "high": 0.0601,
+          "separated": true,
+          "questions": 751,
+          "resamples": 2000
+        },
+        "mechanism": {
+          "base": "chat-cc2@2600",
+          "arm": "reasoner-cc2@2600",
+          "varies": "model",
+          "question": "Is the reasoning tier a better model on this corpus? Same rules, same ask, same cap, same judge — the model is the only free variable, which is the only form in which a tier comparison is about the tier.",
+          "k": 3,
+          "delta": 0.066333,
+          "low": 0.046,
+          "high": 0.0864,
+          "separated": true,
+          "questions": 751,
+          "resamples": 2000
+        },
+        "decision": {
+          "base": "chat-default@900",
+          "arm": "reasoner-cc2@2600",
+          "varies": "tier",
+          "question": "Is the reasoning tier a better product on this corpus? Each arm at the rules its own tier ships, which is what a caller who names no rules gets. This is the pair a deployment turns on, and it is narrower than the mechanism pair because the shipped chat rules are worth 3.84 points that the same-rules comparison gives away.",
+          "k": 3,
+          "delta": 0.027135,
+          "low": 0.0074,
+          "high": 0.0472,
+          "separated": true,
+          "questions": 751,
+          "resamples": 2000
+        }
       }
     }
   },

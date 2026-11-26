@@ -255,11 +255,14 @@ export const BENCHMARKS: readonly Benchmark[] = [
         + 'rather than a comparison: its own prompts, sent byte for byte on the same model, read 29.49 '
         + '(full basic, -2.74, 95% [-4.91, -0.46]) and 25.63 (six steps), so the 29.5 points between its '
         + 'published 58.96 and its own prompt re-read here belong to the model tier and not to the '
-        + 'prompt. Ceiling 84.96. The 751-question **test** split holds the first paired tier reading: '
-        + '26.58 (chat) to 33.22 (reasoning) at one output cap, +6.63, 95% [4.60, 8.64], separated from '
-        + 'zero over 751 paired questions, at 8.2x the bill (¥1.73 against ¥14.25) — and the same '
-        + 'instrument drawn twice on one arm reads -0.08, 95% [-1.25, 1.08], which is the resolution '
-        + 'every claim here has to clear',
+        + 'prompt. Ceiling 84.96. The 751-question **test** split holds four readings and the four '
+        + 'pairs they make: the same arm twice (-0.08, 95% [-1.25, 1.08], the resolution), the shipped '
+        + 'chat rules against the runner-up they beat on dev (+3.84, 95% [1.89, 6.01]), the tiers on '
+        + 'one rule list (+6.63, 95% [4.60, 8.64]) and the tiers as each one ships (+2.71, 95% [0.74, '
+        + '4.72], at 8.2x the bill). The third is a mechanism and the fourth is the product: the shipped '
+        + 'chat arm is 3.84 points above the one the same-rules comparison held fixed, so the tier\'s '
+        + 'advantage narrows to 2.71 and its pessimistic end falls under the resolution — which is why '
+        + 'the default stays on the chat tier',
     },
     gap:
       'Measured, and the number is a prompt arm rather than a trained system. `eval/nvbench2/'
