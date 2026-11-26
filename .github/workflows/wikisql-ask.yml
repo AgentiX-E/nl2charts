@@ -1,0 +1,135 @@
+name: wikisql-ask
+
+# WikiSQL, answered rather than only scored.
+#
+# `wikisql-judge.yml` established that the split is scorable: 8,421 questions, every gold executed
+# twice, and a port of the reference's `dbengine` that agrees with the reference on all of them.
+# That workflow has never produced an *accuracy*, because the runner scores a predictions file and
+# nothing in this repository wrote one. `eval/wikisql/ask.ts` is that half: one call a question, one
+# statement back, the same table the model was shown, and the judge's own ordered comparison.
+#
+# **Dispatch-only, and the corpus is cached.** 8,421 calls is a number that moves when the prompt or
+# the model moves, and a `push` trigger would spend it on every commit to `eval/wikisql/**` for the
+# same number. The archive is immutable upstream, so caching it keeps a network failure from
+# arriving as a score.
+#
+# **The comparable number is the split's own leaderboard, and the model is part of the coordinate.**
+# Every published WikiSQL figure above 90% was produced by a fine-tuned system; this repository does
+# not train, so the reading is reported beside the model that produced it and the split's size, and
+# the first dispatch is a baseline rather than a claim to be first.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Model that answers (a chat tier is the baseline; a reasoning tier is the strong arm)'
+        required: true
+        default: 'deepseek-chat'
+        type: string
+      split:
+        description: 'Split to answer (dev carries the public labels; test is scored by submission only)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - 'dev'
+          - 'test'
+      limit:
+        description: 'Ask only the first N questions (blank asks the whole split)'
+        required: false
+        default: ''
+        type: string
+      accept_cost:
+        description: 'Yuan this dispatch may project (blank = the ¥45 ceiling in eval/wikisql/ask.ts)'
+        required: false
+        default: ''
+        type: string
+      concurrency:
+        description: 'Calls in flight at once'
+        required: true
+        default: '8'
+        type: string
+      timeout_ms:
+        description: 'Per-call deadline in milliseconds'
+        required: false
+        default: '120000'
+        type: string
+
+permissions:
+  contents: read
+
+# One slot shared with every other heavyweight run: they draw from the same provider quota, and two
+# dispatches that overlap do not produce a wrong number — they produce a slow one, which trips the
+# per-call deadline and gets read as an endpoint verdict.
+concurrency:
+  group: bird-eval-DEEPSEEK_API_KEY
+  cancel-in-progress: false
+
+jobs:
+  ask:
+    name: what a model answers, judged by the ported judge
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      LLM_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      LLM_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: ${{ inputs.model }}
+      WIKISQL_SPLIT: ${{ inputs.split }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The archive is pinned by size and sha256 in `fetch.mjs`, so a mirror that serves something
+      # else fails there rather than producing a split whose counts happen to match.
+      - name: Cache the corpus
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/wikisql
+          key: wikisql-v1-${{ runner.os }}
+      - name: Fetch the split (no-op when the cache is warm)
+        run: node eval/wikisql/fetch.mjs --split "$WIKISQL_SPLIT"
+
+      # Zero model calls: the gold is executed and the judge's own denominator is printed before
+      # anything is bought. A split whose gold cannot be judged cannot produce an accuracy, and the
+      # previous rounds established that this one can — the step is here so a corrupted cache is a
+      # red step rather than a low score.
+      - name: Every gold executes, twice
+        run: pnpm bench:wikisql --split "$WIKISQL_SPLIT" --limit 300
+
+      # One call a question. The asker prices the projection before it sends anything and refuses
+      # past the ceiling, so a dispatch that would cost more than it was authorised for stops here.
+      - name: Ask every question once
+        env:
+          ACCEPT_COST: ${{ inputs.accept_cost }}
+          LIMIT: ${{ inputs.limit }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+        run: |
+          ARGS="--split $WIKISQL_SPLIT --concurrency $CONCURRENCY --out eval/out/wikisql-predictions.jsonl"
+          if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
+          if [ -n "$ACCEPT_COST" ]; then ARGS="$ARGS --accept-cost $ACCEPT_COST"; fi
+          pnpm bench:wikisql:ask $ARGS
+
+      # The same judge the differential test holds against the reference, over the statements the
+      # model wrote. `exact` is the leaderboard's comparison; `bag` is the same multiset with order
+      # erased, and the distance between them is the judging artefact rather than the model.
+      - name: Score the predictions
+        run: |
+          pnpm bench:wikisql --split "$WIKISQL_SPLIT" \
+            --predictions eval/out/wikisql-predictions.jsonl \
+            --out eval/out/wikisql-reading.json
+      - name: Keep the artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wikisql-${{ inputs.split }}-${{ inputs.model }}
+          path: |
+            eval/out/wikisql-predictions.jsonl
+            eval/out/wikisql-reading.json
+          if-no-files-found: warn

@@ -118,6 +118,7 @@
     "bench:coverage": "tsx eval/benchmarks.ts",
     "bench:bird:ves": "tsx eval/bird/ves.ts",
     "bench:wikisql": "tsx eval/wikisql/run.ts",
+    "bench:wikisql:ask": "tsx eval/wikisql/ask.ts",
     "bench:wikisql:fetch": "node eval/wikisql/fetch.mjs",
     "bench:wikisql:digest": "tsx eval/wikisql/run.ts --digest",
     "bench:spider:check": "tsx eval/spider/check.ts",

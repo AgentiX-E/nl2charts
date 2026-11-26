@@ -21579,3 +21579,65 @@ The split no arm has answered is scorable too, and that is a gate rather than a 
 both splits on every run, and test reads 751 questions over 87 tables, 2,260 gold charts, 5,340 field
 references with none untyped, and 4,794 table columns agreeing with the corpus's own
 `column_examples` on every one.
+
+## WikiSQL's missing half: a judge with no one to judge
+
+The coverage table has said `instrumented` about WikiSQL since it had a row, and the word was
+precise: the corpus fetcher, the executed-twice gold validation, the port of `salesforce/WikiSQL`'s
+`dbengine` and the digest that holds the port against the reference were all in the tree, and not one
+of them had ever been handed a prediction. A judge with no one to judge is a gate on a door nobody
+opens.
+
+`eval/wikisql/ask.ts` is the other half. One call a question, one statement back, and the judge's own
+ordered comparison — the same one the corpus's published figures were produced with, because the
+`bag` reading beside it exists precisely to show how much of the number is the comparison rather than
+the model.
+
+### What the prompt says, and the one sentence it exists for
+
+The table is rendered, not named: five rows of the table the question is about, above the question,
+with the column list in **ordinal** form (`0: Pick (real)`), because a WikiSQL statement names a
+column by position and a model shown names-only has to invent the mapping. The types are the corpus's
+own strings rather than this repository's vocabulary, for the same reason: the corpus's numbers were
+produced with the corpus's words.
+
+The sentence the prompt exists for is the last one before the instruction:
+
+> When the question names a value, copy it exactly as the rows above spell it.
+
+WikiSQL is a value-matching corpus — `who was picked first`, `the writer of "The Duff"` — and the
+failure mode that dominates it is a statement that is structurally right and filters on a literal the
+table does not store. Five rows and that sentence are the whole of the "values" mechanism here. There
+is no candidate set, no repair loop and no vote: this is the reading every later arm is a delta
+against, and a baseline with three mechanisms in it prices all three at once.
+
+### What was registered before the dispatch, and what would falsify it
+
+1. **A reading over a broken reader is not a reading.** A reply that holds no `SELECT` is counted
+   as unreadable, not as wrong — and above **1% of the split** the run exits 3 and the workflow stops
+   before the judge runs, so no number is printed. The threshold is the one the chart bench settled
+   on for the same fault: 1% of 8,421 is 84 cases, under the 0.5pp a split this size can resolve, and
+   far above the zero a working reader produces. The artifact is still written; the refusal is about
+   publishing a number, not about hiding the evidence.
+2. **A cut reply is not an answer.** `finish_reason=length` means the endpoint stopped mid-statement;
+   the bytes look like SQL and are not. Those count as unreadable.
+3. **The bill is authorised before the calls.** A case is bounded at 400 prompt and 60 reply tokens
+   (above every case rendered offline), the projection is printed, and a dispatch whose projection is
+   over ¥45 refuses unless the caller names a ceiling. This is the rule `45090651019` bought for
+   ¥110.08: an estimate written against the wrong rate table is how a run is authorised by a field
+   nobody read.
+4. **No SOTA claim.** Every published WikiSQL figure above 90% was produced by a fine-tuned system.
+   This repository does not train, so the first reading is a **baseline with a model and a split
+   attached**, and the leaderboard comparison will be written only after the number exists, against
+   the systems that trained nothing.
+
+### What the first dispatch is for
+
+Not to win. To find out three things that no amount of reading can settle: whether the reader parses
+this corpus's answers (rule 1 above), what one call a question buys on a single-table corpus at all,
+and whether the value sentence is worth its tokens — the last one only by the next arm, which is the
+same prompt with the five rows removed.
+
+The order is fixed: a pilot at `--limit 40` establishes the reader for ¥0.16, and the full split
+follows only if the unreadable share is under the ceiling. A full 8,421-question run at the bound
+projects ¥34.6, which is why the pilot comes first and not in parallel.
