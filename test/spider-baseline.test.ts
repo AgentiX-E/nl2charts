@@ -57,6 +57,21 @@ interface Baseline {
     readonly run: number | null;
     readonly replayOf: number;
   };
+  readonly normalizedReasoner: {
+    readonly model: string;
+    readonly exact: number;
+    readonly exactPct: number;
+    readonly predErrors: number;
+    readonly yuan: number;
+    readonly run: number | null;
+    readonly replayOf: number;
+  };
+  readonly diagnosisReasoner: {
+    readonly of: number;
+    readonly readable: number;
+    readonly exact: number;
+    readonly classes: readonly { readonly cases: number; readonly readable: number; readonly exact: number }[];
+  };
   readonly diagnosis: {
     readonly instrument: string;
     readonly of: number;
@@ -185,5 +200,34 @@ describe('the Spider baseline is a citation, so its arithmetic has to close', ()
     // rather than bought: a sentence can only ask a model to write differently, and these are not
     // spellings — `||`, `NOT IN`, a derived table, a parenthesised `OR`, a scalar subquery on the left.
     expect(classes.filter((row) => row.rule === null).reduce((sum, row) => sum + row.cases, 0)).toBe(6);
+  });
+
+  it('does not reverse the tier ordering: the repair helps both tiers by about the same amount', () => {
+    // The question a repair layer has to survive is whether it favoured the weaker tier, because that
+    // would have made the earlier finding a fact about dialect rather than about reasoning.
+    const reasoner = BASELINE.normalizedReasoner;
+    expect(reasoner.model).toBe('deepseek-reasoner');
+    expect(reasoner.replayOf).toBe(45_807_912_450);
+    expect(reasoner.yuan).toBe(0);
+    expect(reasoner.exact).toBe(560 + BASELINE.diagnosisReasoner.exact);
+    expect(reasoner.exactPct).toBeCloseTo((100 * reasoner.exact) / BASELINE.asked, 2);
+    expect(reasoner.predErrors).toBe(86 - BASELINE.diagnosisReasoner.readable);
+    // Two statements of repair against chat's twenty-two: the ordering stands, and the distance is
+    // 0.10pp wider than the 5.61pp measured as written rather than 2pp narrower.
+    expect(BASELINE.exactAfterNormalize - reasoner.exactPct).toBeCloseTo(5.71, 2);
+    const written = BASELINE.arms.find((arm) => arm.arm === 'grammar' && arm.model === 'deepseek-chat');
+    expect((written?.exactPct as number) - 54.16).toBeCloseTo(5.61, 2);
+  });
+
+  it('classifies the reasoning tier refusals too, and says they are more varied', () => {
+    const classes = BASELINE.diagnosisReasoner.classes;
+    const total = (key: 'cases' | 'readable' | 'exact') => classes.reduce((sum, row) => sum + row[key], 0);
+    expect(BASELINE.diagnosisReasoner.of).toBe(86);
+    expect(total('cases')).toBe(86);
+    expect(total('readable')).toBe(BASELINE.diagnosisReasoner.readable);
+    expect(total('exact')).toBe(BASELINE.diagnosisReasoner.exact);
+    // The two tiers' failure shapes differ: chat's 45 were 100% inside eight named classes, the
+    // reasoner leaves 32 in `other` and refuses four times as many `NOT IN` statements.
+    expect(classes.find((row) => (row as { refusal?: string }).refusal === 'other')?.cases).toBe(32);
   });
 });

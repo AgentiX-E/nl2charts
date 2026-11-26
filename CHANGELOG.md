@@ -18,7 +18,11 @@ cannot be argued with.
   already bought. The repair is applied *only* where the parser refused, which is why the reading
   cannot fall — measured, not argued: 0 of the 618 accepted statements change under the rules.
   `pnpm bench:spider:residue`, `pnpm bench:spider:score --normalize` (which writes both `reading` and
-  `asWritten`), and `spider-ask.yml`'s `normalize` input, on by default.
+  `asWritten`), and `spider-ask.yml`'s `normalize` input, on by default. The same four rules applied to
+  the reasoning tier's answers read **560 → 581 = 56.19%**, so the tier ordering does not reverse under
+  canonicalisation either: 61.90% against 56.19% is 5.71pp, 0.10pp wider than the 5.61pp as written,
+  because the reasoner's 86 refusals spread over more shapes (32 outside chat's vocabulary, 8 `NOT IN`)
+  and the rules reach 45% of them against 82% of chat's.
 - **WikiSQL has a reading: 85.30% EX on dev, one call a question, ¥8.66.** `eval/wikisql/ask.ts`
 - **WikiSQL has a reading: 85.30% EX on dev, one call a question, ¥8.66.** `eval/wikisql/ask.ts`
   renders the table the corpus actually ships — both column names (`col1 (text) — "Player"`, because

@@ -19376,6 +19376,8 @@ chat tier is ahead, most of the difference is still dialect, and the tier costs 
 | `schema` | reasoner | 50.68% | 314 | 9.60 | 0.00928 |
 | `grammar` | chat | **59.77%** | 45 | 2.90 | 0.00280 |
 | `grammar` | reasoner | 54.16% | 86 | 5.70 | 0.00551 |
+| `grammar` + repair | chat | **61.90%** | 8 | 2.90 | 0.00280 |
+| `grammar` + repair | reasoner | 56.19% | 47 | 5.70 | 0.00551 |
 
 Two consequences are stated in the corpus manifest rather than left to a reader: the metric here is
 **exact match (component match)**, because a skeleton cannot answer a `SELECT` for real, so execution
@@ -19426,6 +19428,16 @@ would be a different query — and a harness that scores its own rewriter is not
 one statement that proves the line is drawable is `#754`: stripping its parentheses makes it parse, and
 it still reads wrong, so that rule would have bought **0.00pp** in exchange for changing which rows the
 query selects.
+
+**The ordering survives the repair, which is the test a repair layer has to pass.** If the four rules had
+helped the weaker tier more, the earlier finding would have been about dialect rather than about
+reasoning. They do not: the reasoning tier goes **560 → 581 = 56.19%** (+21 statements, replay of run
+`45807912450`) against chat's +22, so the gap is **5.71pp** — 0.10pp *wider* than the 5.61pp measured as
+written. The mechanism is in the residue: chat's 45 refusals sit entirely inside eight named classes and
+the repairs reach 82% of them; the reasoner's 86 spread wider — 8 `NOT IN` (four times chat's 2), 3
+scalar subqueries, 3 unstated, and **32 whose reason is outside chat's vocabulary altogether**
+(`Error col: lower`, `Error col: 0`, `Error col: null`, a family of `KeyError`s) — and the repairs reach
+45% of them. A tier that fails in more shapes is a tier that a fixed rule set reaches less often.
 
 Two things follow in the harness rather than in prose. `pnpm bench:spider:score --normalize` takes an
 optional second pass over refusals and writes **both** readings into the artifact (`reading` and

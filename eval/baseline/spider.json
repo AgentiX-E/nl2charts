@@ -214,5 +214,85 @@
       }
     ],
     "note": "Classified by re-running the reference parser on each refused statement and grouping its own reason, then judging the normalized statement again. Three counts per class, because they answer different questions: refused is what was lost, readable is what a repair reached, exact is what was also right. Twenty-two of thirty-seven is why this is a lever and the prompt rule was not — the prompt's 140 newly readable statements carried only 25 right ones, while these were right and merely misspelled. The four classes with no rule are the line this file does not cross: a repair that invents structure is a different query, and a harness that scores it is measuring its own rewriter."
+  },
+  "normalizedReasoner": {
+    "arm": "grammar+normalize",
+    "instrument": "eval/spider/normalize.ts",
+    "promptVersion": "spider-grammar@1",
+    "model": "deepseek-reasoner",
+    "asked": 1034,
+    "scored": 1034,
+    "exact": 581,
+    "exactPct": 56.19,
+    "predErrors": 47,
+    "yuan": 0,
+    "run": null,
+    "replayOf": 45807912450,
+    "note": "The same four repairs applied to the reasoning tier's 1,034 answers. They are worth +21 statements here against +22 for chat, so the ordering does not reverse under canonicalisation either: 61.90% against 56.19%, -5.71pp, and the gap it compares is 0.10pp wider than the 5.61pp measured as written. This is the question a repair layer has to survive — if it helped the weaker tier more, the earlier finding would have been about dialect rather than about reasoning — and it does not: the reasoner's 86 refusals spread over more classes (8 `NOT IN`, 3 scalar subqueries, 3 unstated, 32 other against chat's 2, 1, 1, 0), and the repairs reach 39 of them instead of 37."
+  },
+  "diagnosisReasoner": {
+    "instrument": "eval/spider/residue.ts",
+    "of": 86,
+    "readable": 39,
+    "exact": 21,
+    "classes": [
+      {
+        "refusal": "notEqual",
+        "cases": 17,
+        "readable": 17,
+        "exact": 10,
+        "rule": "notEqual"
+      },
+      {
+        "refusal": "duplicateAlias",
+        "cases": 20,
+        "readable": 19,
+        "exact": 10,
+        "rule": "duplicateAlias"
+      },
+      {
+        "refusal": "innerJoin",
+        "cases": 1,
+        "readable": 1,
+        "exact": 0,
+        "rule": "innerJoin"
+      },
+      {
+        "refusal": "cast",
+        "cases": 2,
+        "readable": 2,
+        "exact": 1,
+        "rule": "cast"
+      },
+      {
+        "refusal": "notIn",
+        "cases": 8,
+        "readable": 0,
+        "exact": 0,
+        "rule": null
+      },
+      {
+        "refusal": "subqueryInColumn",
+        "cases": 3,
+        "readable": 0,
+        "exact": 0,
+        "rule": null
+      },
+      {
+        "refusal": "unstated",
+        "cases": 3,
+        "readable": 0,
+        "exact": 0,
+        "rule": null
+      },
+      {
+        "refusal": "other",
+        "cases": 32,
+        "readable": 0,
+        "exact": 0,
+        "rule": null
+      }
+    ],
+    "note": "The reasoning tier's refusals are more varied than chat's: 32 of the 86 carry a reason outside the classes chat produced (`Error col: lower`, `Error col: 0`, `Error col: null`, and a family of KeyErrors), and the 8 `NOT IN` are four times chat's 2. The repairs reach 45% of them against 82% of chat's, which is the mechanism behind the 0.10pp widening rather than a claim that reasoning is harmful."
   }
 }
