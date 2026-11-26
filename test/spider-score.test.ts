@@ -263,7 +263,7 @@ describe('the flags', () => {
     );
     const lines: string[] = [];
     const code = main(['--cache', cache, '--predictions', predictions, '--cases', cases], (line) => lines.push(line), {
-      judge: (pairs) => pairs.map((pair, position) => (position === 0 ? { em: 1, gold: 'ok', pred: 'ok' } : { em: 0, gold: 'ok', pred: 'error' })),
+      judge: (pairs) => pairs.map((_pair, position) => (position === 0 ? { em: 1, gold: 'ok', pred: 'ok' } : { em: 0, gold: 'ok', pred: 'error' })),
     });
     expect(code).toBe(0);
     const written = readFileSync(cases, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
