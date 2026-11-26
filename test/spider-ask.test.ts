@@ -17,6 +17,7 @@ import {
   PROMPT_VERSION,
   askAll,
   columnsOf,
+  perCaseFor,
   databaseOf,
   main,
   predictionsText,
@@ -121,6 +122,14 @@ describe('the projection, because a bill is authorised before the calls', () => 
     expect(PER_CASE.promptTokens).toBeGreaterThanOrEqual(900);
     expect(PER_CASE.completionTokens).toBeGreaterThanOrEqual(120);
     expect(BUDGET_YUAN).toBe(45);
+  });
+
+  it('prices a reasoning tier at what it bills rather than at what it returns', () => {
+    expect(perCaseFor('deepseek-chat')).toEqual({ promptTokens: PER_CASE.promptTokens, completionTokens: PER_CASE.completionTokens });
+    expect(perCaseFor('deepseek-reasoner').completionTokens).toBeGreaterThan(1000);
+    const chat = projectedYuan(100, 'deepseek-chat') as number;
+    const reasoner = projectedYuan(100, 'deepseek-reasoner') as number;
+    expect(reasoner).toBeGreaterThan(chat * 3);
   });
 
   it('refuses a dispatch over the ceiling, and runs when the caller names one', async () => {

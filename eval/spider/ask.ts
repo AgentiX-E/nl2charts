@@ -29,7 +29,16 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { LlmProvider } from '@agentix-e/nl2charts-ai';
 import { billOf, formatYuan } from '../price.js';
-import { pool, providerFrom, reasonsOf, statementOfReply, unreadable, unreadableText } from '../wikisql/ask.js';
+import {
+  pool,
+  providerFrom,
+  reasonsFirst,
+  reasonsOf,
+  statementOfReply,
+  unreadable,
+  unreadableText,
+  REASONING_COMPLETION_TOKENS,
+} from '../wikisql/ask.js';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -49,9 +58,22 @@ export const PER_CASE = { promptTokens: 900, completionTokens: 120 } as const;
 /** The ceiling a dispatch may project without saying the number out loud. */
 export const BUDGET_YUAN = 45;
 
+/**
+ * The per-case bound for a model, in the tier it is billed at.
+ *
+ * A reasoning tier returns one statement and bills the thinking it never returns, so pricing it off
+ * the reply approves the dispatch at a fraction of its cost — the same defect the WikiSQL asker was
+ * fixed for, and the reason this file imports that predicate rather than writing a second one.
+ */
+export function perCaseFor(model: string): { readonly promptTokens: number; readonly completionTokens: number } {
+  return reasonsFirst(model)
+    ? { promptTokens: PER_CASE.promptTokens, completionTokens: REASONING_COMPLETION_TOKENS }
+    : PER_CASE;
+}
+
 /** What `questions` cases would cost at the bound, or nothing when the model has no price. */
 export function projectedYuan(questions: number, model: string): number | undefined {
-  const per = billOf(model, PER_CASE);
+  const per = billOf(model, perCaseFor(model));
   return per === undefined ? undefined : per * questions;
 }
 
