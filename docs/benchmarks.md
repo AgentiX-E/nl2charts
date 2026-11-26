@@ -18349,6 +18349,101 @@ lists under `arms.layers`, with each dropped rule and its interval, and a test r
 from that node: a rule that starts separating on a tier has to be added, and a dropped rule that
 separates has to be sent — otherwise CI fails rather than the document ageing.
 
+### The denominator is the split, and the instrument resolves one point two
+
+Two arms over nvBench 2.0's test split reported **749** and **751** questions. Neither number was a
+typo and neither was the split. `runArm` filtered failed rows out of `cases`, so every call that died
+took a question out of that arm's denominator — and the questions it took were exactly the ones it got
+stuck on. That is a selection on the outcome, and it ran in a fixed direction: the arm that failed
+more was the arm whose mean rose.
+
+| arm | asked | in the reading | F1@3 | pairable |
+| --- | --- | --- | --- | --- |
+| `deepseek-reasoner`, `count,corpus,corpus2`, cap 2600 | 751 | 749 (2 failed) | 33.30 | no |
+| `deepseek-chat`, same rules, cap 900 | 751 | 751 (0 failed) | 26.66 | no |
+
+6.64 points, and `compare.ts` refused them — correctly: two means over two question sets are not a
+pair. The fix is to keep the row and score it zero, which is what an execution-accuracy table means by
+a question it counted, and to keep `failed` beside the reading so how much of a reading is transport
+stays visible. `reading.questions === asked` is now an invariant, which is what `perQuestionOf`
+documented and what a paired test needs: index `i` is the same question in both arms.
+
+Two consequences. `summaryLine` prints the denominator as one number, because `N of M scored` is now
+always `N of N` and a ratio that is always 1 invites a reader to assume it can vary. And a dispatch
+where **nothing** answered refuses: exit 2 with the cause named and the artifact already written,
+because 0.00 over 751 questions is what a system that is wrong everywhere prints and what an endpoint
+outage prints too — the same indistinguishability as the R-VES 0.00%, and the same remedy.
+
+**The archive key cost more than the reading did.** The answer store is keyed by the request, and the
+request contains `max_tokens`, so a dispatch at 2600 and one at 900 hold different entries. The
+Actions archive was keyed by model, split, k, rules, replica and a source hash — not the cap:
+
+```console
+Failed to save: Unable to reserve cache with key nvbench2-answers-deepseek-reasoner-test-3-…-487be553…,
+another job may be creating this cache.
+```
+
+Two dispatches reserved one key, the second save was refused, and **750 paid reasoning answers
+(¥15.28) were discarded with the job green**. The next dispatch then quoted all 751 questions at
+¥19.75, because the store it restored held entries for the other cap. `mt` is in both the primary key
+and the restore prefix now; the prefix matters as much as the key, since a prefix spanning both caps
+restores a store whose entries all miss — an archive that looks populated, and a full-price run.
+
+**What an A/A run bought.** The chat arm was dispatched twice, at caps 900 and 2600, and neither run
+truncated a single reply — so the two are the same experiment drawn twice:
+
+```console
+$ pnpm bench:nvbench2:compare --base chat-900.json --arm chat-2600.json --k 3
+F1@3: 26.66% → 26.58% (-0.08%, 95% [-1.25%, 1.08%], inside the noise) over 751 paired questions, 2000 resamples
+```
+
+A re-run of one arm is worth 0.08 points of drift and its interval is 2.3 points wide. **That is this
+instrument's resolution on 751 questions, and it is the number every "better" in this section has to
+clear.** It is also the reason the cross-split comparisons in the tier table above are quoted as
+directions: they were never paired, so they never had an interval to clear.
+
+### The reasoning tier, on questions nobody tuned against
+
+Dev is where the rules were chosen, so a dev difference between tiers is partly a difference between
+two things chosen on the same rows. The test split is 751 questions the ablation never saw, and it is
+the first place where "the reasoning tier is better" is a claim rather than two means:
+
+```console
+$ pnpm bench:nvbench2:compare --base chat-2600.json --arm reasoner-2600.json --k 3
+F1@3: 26.58% → 33.22% (+6.63%, 95% [4.60%, 8.64%], separated from zero) over 751 paired questions, 2000 resamples
+```
+
+| arm | rules | cap | F1@1 | F1@3 | hit@3 | truncated | failed | ¥ | ¥/question |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `deepseek-chat` (run 45723193514) | `count,corpus,corpus2` | 2600 | 19.02 | **26.58** | 41.28 | 0 | 0 | 1.73 | 0.0023 |
+| `deepseek-reasoner` (run 45723203464) | same | 2600 | 24.18 | **33.22** | 53.13 | 14 | 0 | 14.25 | 0.0190 |
+
+One split, one rule list, one ask, one cap, one judge — the model is the only free variable, which is
+the only form in which a tier comparison means anything. The interval is 4.04 points wide and sits
+2.6 points clear of zero, so it clears the 1.2-point resolution the A/A run measured by a factor of
+three. **The reasoning tier is better on this corpus, at 8.2× the bill.** That is the whole finding,
+and it is stated with both numbers because the second one is what a deployment decision turns on.
+
+Fourteen of the reasoning tier's replies hit the 2,600-token cap and none of the chat tier's did, so
+the reasoning reading is a floor on that tier rather than its ceiling: the tokens those 14 replies
+would have spent are the tokens the cap refused. `census.ts` prices exactly that — 14 zeros in a
+751-question reading is 1.86 points a perfect answer to them would add — and the reason not to buy
+them yet is that a bigger cap costs a re-dispatch of the whole split, not a patch.
+
+**Where the misses are, on the test split.** The first disagreement, counted over every produced
+chart:
+
+| arm | predictions | matched | field | channels | mark | transform | aggregate | properties |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| chat | 1,665 | 531 (31.9%) | **601** | 335 | 113 | 49 | 24 | 12 |
+| reasoner | 1,643 | 626 (38.1%) | **500** | 313 | 121 | 46 | 26 | 17 |
+
+`field` is still the largest bucket and `channels` the second, on a split nothing was tuned against —
+so the next prompt rule has to be about which channel a column lands on, not about which mark to use.
+The column coverage says the same thing from the other side: the chat arm named 2,097 columns, of
+which **1,763 (84.1%) appear in the gold set**, against 2,461 gold columns. The model is mostly
+choosing real columns and then placing them somewhere the reference would not.
+
 ### What the 465 field-first misses are made of, counted by repair rather than by face
 
 `first.field` has been this file's largest number for two rounds and has never been a plan. It says

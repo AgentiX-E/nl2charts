@@ -908,6 +908,56 @@
         }
       ],
       "decision": "Closed against the hypothesis. Asked for five, the chat tier returns 3.85 charts per question — 37% more completion tokens — and reads 27.80 at k=3 and 27.70 at k=5, both intervals crossing zero and both point estimates below the arm that was asked for three. Within one run F1@5 is lower than its own F1@3, which is the corpus's precision term doing exactly what it is for: a fourth chart that matches nothing is a cost. The reasoning tier's 2.06 is therefore not a defect to fix, and no dispatch is bought for it."
+    },
+    "test": {
+      "split": "test",
+      "k": 3,
+      "ask": 3,
+      "maxTokens": 2600,
+      "because": "The 751 questions nobody tuned against, answered by both tiers under one instrument: same rules, same ask, same output cap, same judge. The ablation in `readings` selects a rule set on dev and the product default is read off its highest reading, so a test-split number cannot live there without moving that binding; it lives here beside it. The pair is a paired bootstrap over the same 751 questions (`eval/nvbench2/compare.ts`), which is the only form in which \"the reasoning tier is better\" is a claim rather than two means.",
+      "arms": {
+        "chat": {
+          "model": "deepseek-chat",
+          "run": 45723193514,
+          "artifact": {
+            "sha256": "e2f6a570806769385bb8a3736afaf82b6c80ce9ec59b66dbd54ac5fadc681976"
+          },
+          "questions": 751,
+          "asked": 751,
+          "failed": 0,
+          "truncated": 0,
+          "unparsed": 0,
+          "f1@3": 0.265849,
+          "hit@3": 0.412783,
+          "yuan": 1.7335
+        },
+        "reasoner": {
+          "model": "deepseek-reasoner",
+          "run": 45723203464,
+          "artifact": {
+            "sha256": "c5587eaa1998f6f59ed412675da3592d1d670323a87ecf25c9b4e9bb503894f7"
+          },
+          "questions": 751,
+          "asked": 751,
+          "failed": 0,
+          "truncated": 14,
+          "unparsed": 0,
+          "f1@3": 0.332182,
+          "hit@3": 0.531292,
+          "yuan": 14.2531
+        }
+      },
+      "pair": {
+        "base": "chat",
+        "arm": "reasoner",
+        "k": 3,
+        "delta": 0.0663,
+        "low": 0.046,
+        "high": 0.0864,
+        "separated": true,
+        "questions": 751,
+        "resamples": 2000
+      }
     }
   },
   "replicas": {
