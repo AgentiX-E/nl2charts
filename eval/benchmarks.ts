@@ -158,14 +158,14 @@ export const BENCHMARKS: readonly Benchmark[] = [
     status: 'measured',
     reading: {
       file: 'eval/baseline/bird.json',
-      path: ['floors', 'minidev', 'select'],
+      path: ['floors', 'minidev', 'macsql-prompt'],
       kind: 'floor',
       unit: 'percent',
-      note: 'the floor a rerun may not fall below, taken on `select` — an arm the product does not '
-        + 'send. The per-commit split keeps its floors on the chain rather than on the shipped arm '
-        + 'because no Mini-Dev reading of that arm exists yet; the shipped arm is guarded on dev, '
-        + 'where its floor is 65.9. Naming the arm is the point: a floor without one is a number '
-        + 'about the harness that reads as a number about the product',
+      note: 'the floor a rerun may not fall below, taken on `macsql-prompt` — the arm the product '
+        + 'sends. Until round 200 this row cited `select` and said why: no Mini-Dev reading of the '
+        + 'shipped arm existed, because the only way to run one arm was to edit the chain and push. '
+        + 'It exists now (64.31% on 496 questions, run 45846766964, dispatched with one arm and no '
+        + 'control), so the number a reader quotes is the one the product would have produced',
     },
     gap: '',
   },

@@ -18119,7 +18119,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% (`values` arm) |
 | WikiSQL dev | the same questions, no sample rows | EX | measured | 81.93% (`schema` arm, **−3.37pp**, p<0.0001) |
 | Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | **61.90%** (`grammar` + dialect repair, chat; 59.77% as written); 57.35% (`schema`, chat), 54.16% (`grammar`, reasoner), 50.68% (`schema`, reasoner) |
-| BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
+| BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | **64.3** (floor, `macsql-prompt` — the arm the product sends; 56.0 is `select`'s floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) |
 | BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
@@ -18812,7 +18812,7 @@ The row is `measured` now, cited at `arms.selected.published.f1@3`, and `pnpm be
 22.39 beside the other eight.
 
 Two things about the `number` column, both learned by watching it be misquoted. A printed line now
-carries the kind of number it printed — `EX = 56 (floor)`, `top-1 = 664 (count)`, `R-VES = 59.81` —
+carries the kind of number it printed — `EX = 64.3 (floor)`, `top-1 = 664 (count)`, `R-VES = 59.81` —
 because a floor is the minimum a rerun may land on and a count is not a percentage. A third form,
 `= 56.63 (600 of 1532)`, is what a subset reading prints; the table has none this round, and the two
 rounds it printed are the subject of the next section. And `BIRD dev` stops citing a floor. It cited
@@ -21933,3 +21933,63 @@ parent every later arm is a delta against, a prompt version, a cost per case (¥
 denominator that came from the judge rather than from an assumption. The first arm to try against it is
 the cheapest available: the same prompt with the five sample rows removed, which prices the value
 channel on a corpus built out of values.
+
+### The split CI runs, and the arm the product sends: 64.31 on Mini-Dev
+
+The Mini-Dev row in the coverage table cited `select`'s floor — 56.0 — and said why in its own note:
+*the per-commit split keeps its floors on the chain rather than on the shipped arm because no Mini-Dev
+reading of that arm exists yet.* That sentence was true for three rounds and it never expired, because
+the thing it described was not a missing run. It was a missing **way to ask**: the only route to a
+one-arm Mini-Dev reading was to edit `DEFAULT_ARMS` and push, which measures the edit as well as the
+arm, so nobody did it.
+
+**The first answer was wrong, and it was pushed.** `ci.yml` gained `arms` and `aa` dispatch inputs
+(`4d58c5a7`) so a caller could name one arm. Reading the steps before dispatching them said what
+running them would have said: eight steps in `bird-eval` pass `--arm select` and one passes
+`--arm inline+evidence`, and a missing arm is an error rather than a note — `eval/bird/cache.ts`:
+*there is no arm called select*. A one-arm dispatch of that job is red at the first of the eight, which
+is the "a step that demands an arm no run produces is red forever" this workflow had already paid for
+once. The dispatch was cancelled before the model was called, and the input was withdrawn (`38b489f7`).
+
+**The vehicle already existed.** `bird-model.yml` takes `arms`, `aa` and `split` as inputs and — the
+property that matters — names no arm anywhere in its steps, so every arm it audits is an arm its own
+artifact carries. It is titled "the same harness, a different model"; running it with `deepseek-chat`
+is that harness with the same model, which is a legitimate use of a tool whose axis happens to be
+pinned.
+
+```bash
+gh workflow run bird-model.yml -f model=deepseek-chat -f base_url=https://api.deepseek.com/v1 \
+  -f secret_name=DEEPSEEK_API_KEY -f split=minidev -f arms=macsql-prompt -f aa=none -f concurrency=8
+```
+
+`aa: none` is not a saving, it is the measurement: a control is a second full arm, and the question
+here is what one arm scores, not what two draws of it differ by.
+
+| coordinate | value | how it is enforced |
+| --- | --- | --- |
+| run | `45846766964` | the artifact's own `provenance.run` |
+| corpus | digest `7f9b2384df7fd655`, 500 rows / 498 ids, 496 scored | `corpus.minidev` pin |
+| asked / served | `deepseek-chat` / `deepseek-flash` | `served` pin — the name that answered, not the alias that was asked |
+| weights | `baseFingerprint` `170d0beaa768594b`, 3 probes × 2 draws, stable | the pin, or the run is refused rather than compared |
+| reading | **319 of 496 = 64.31%** | — |
+| cost | ¥1.01 (1,804,790 prompt tokens of which 1,684,310 cached, 87,588 completion) — the pre-dispatch projection was ¥1.83 | — |
+
+**What it changed.** `floors.minidev` gained `macsql-prompt` at **64.3** — the reading to one decimal,
+the single-run precedent `select-prune` set — and `eval/benchmarks.ts`'s row stopped citing `select`.
+So the number a reader quotes about this project on the split its own gates run is now the number the
+product would produce: **64.3** against `select`'s 56.0 floor, 8.3pp apart, on the same 496 questions.
+
+**What it cost the chain, stated rather than implied.** The arm is one more rung: 3,639 prompt tokens a
+question (3,396 of them served from the prefix cache) and one call, which takes the chain's call budget
+from 15 to **16 of 16**. There is no seventeenth slot, so the next arm has to arrive with a cut. That
+is the trade this rung makes against the one the comment on `select` records, and the reason
+`macsql-prompt` left `ON_DEMAND_ARMS`: an experiment is filed there until it has a verdict, and this
+one has had one since it won its registered criterion (+1.96pp over `inline+evidence`, 1,010 of 1,532,
+p = 0.0441).
+
+**What the two numbers are not.** 64.31 on Mini-Dev and 65.93 on dev are the same prompt on two
+corpora, not a regression and not an improvement: Mini-Dev's 496 questions are the ones with
+gold statements the engine can run, dev's are the ones a leaderboard scores, and the MDEs differ by a
+factor of 1.8 (2.78pp against 1.58pp). The floor guards against a regression larger than the split can
+resolve, which is what every floor in `eval/baseline/bird.json` does — and 64.3 is the first of them
+that is a threshold under the thing being sold.

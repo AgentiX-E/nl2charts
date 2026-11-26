@@ -2143,8 +2143,27 @@ export const DEFAULT_ARMS: readonly string[] = [
   // it every push buys no reading. What it buys is execution: the selector is the one codepath
   // that a prompt change, a provider change or a refactor can break without any unit test
   // noticing, and `inline+retrieval` is the precedent — written, wired, paired and never run.
-  // Its four calls are 2,540 of this chain's 11,075 prompt tokens per question.
+  // Its four calls are 2,540 prompt tokens per question. The chain's total is deliberately not
+  // restated here: it was 11,075 and every admission changes it, so a total in a comment is a
+  // number that goes stale in a commit nobody thinks of as arithmetic. A per-arm number is a
+  // property of the arm and survives the next addition.
   'select',
+  // The arm the product ships, now on the split CI runs.
+  //
+  // It arrives with the reading it was admitted on and leaves `ON_DEMAND_ARMS`, where it was
+  // filed as an experiment: registered before its dispatch at +12 of 600 cases against
+  // `inline+evidence` with exact McNemar p < 0.05 at 1.00 calls a case, it won at +1.96pp
+  // (1,010 of 1,532, p = 0.0441) and became the prompt `SHIPPED_SQL` sends.
+  //
+  // The dev split got this arm last round, with the argument that a split which decides adoption
+  // and never scores the arm that ships can notice the harness regressing and never the product.
+  // The same argument holds one split over: Mini-Dev is the corpus every dispatch and every
+  // published floor on this file is taken on, and it scored twelve arms the product does not send.
+  // The floor it now carries is its own first reading (319 of 496 = 64.31%, run 45846766964,
+  // 64.3 to the single decimal a first measurement is recorded to), and the price is one more arm
+  // on a Mini-Dev dispatch — 3,639 prompt tokens a question, 3,396 of them served from the prefix
+  // cache, one call.
+  'macsql-prompt',
 ];
 
 /**
@@ -2204,7 +2223,6 @@ export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
   // pays for and dev is the split that decides adoption, so "on demand" here means every split but
   // the one whose floors the product is judged against. See `DEV_ARMS` for why the adoption split
   // may not leave the shipped arm out.
-  'macsql-prompt': "MAC-SQL's BIRD prompt sent instead of ours, on our card and our evidence: the criterion is registered in `docs/benchmarks.md` before the run — at least +12 of 600 cases against `inline+evidence` with exact McNemar p < 0.05, 1.00 calls a case, and at least 387 in the three-candidate pool — and it is dispatched beside `inline+evidence-nolink` because their template has no slot for our column hint, so the mechanism reading is the pair of them and the adoption reading is `inline+evidence`. It won that reading (1,010 of 1,532, +1.96pp, p = 0.0441), so it is also the arm `SHIPPED_SQL` sends and the one `eval/baseline/bird.json`'s `shippedBySplit.dev` names",
   'macsql-bird-qp': 'the query-plan procedure inside the template that ships: one sentence pair differs from `macsql-prompt`, so it prices a procedure at 1.00 calls a case — registered before the dispatch as >= 68.0% (single source 65.93 + 2.1pp) with the plan costing at most +40% prompt tokens, and readable on dev 1,532 because the MDE there is 2.30pp; it is dispatched rather than chained because a template that carries two worked examples is a prompt a push should not pay for on every commit',
   'macsql-bird-os': 'examples written for the database by the model, once per database and cached: the mechanism this repository registered for itself when retrieved examples failed (+0.91pp against a +4.0pp bar, p = 0.2684) and then never dispatched, and CHASE-SQL\'s strongest single path at +10.27pp; registered before the dispatch as >= 68.0% against the same single source, with the block counted in prompt tokens, and dispatched because it needs 11 synthesis calls plus the split',
   'inline+evidence+samples-wide+rows': 'the value block and the row block on the prompt both were measured on: `bench:bird:compound` prices the union at +5.16pp of ceiling over `inline+evidence` for a bill 1.594x, whose tariff is +2.97pp — and then refuses it against the frontier, because `macsql-bird-os` already answers 1,020 of the same 1,532 and the compound\'s ceiling is 1,020. Closed by the frontier rather than by the price; kept because the number to beat moves when the frontier\'s corpus does',

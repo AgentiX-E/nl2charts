@@ -7,6 +7,18 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **BIRD Mini-Dev has a reading of the arm we ship: 64.31%, and a floor of 64.3 behind it.** The
+  coverage row cited `select`'s floor (56.0) with a note admitting it was an arm the product does not
+  send, and the reason it never changed was not a missing run but a missing way to ask: the only route
+  to a one-arm Mini-Dev reading was editing the chain and pushing. An `arms` input on `ci.yml` was
+  tried, pushed and withdrawn in the same round — eight of that job's steps read `--arm select` and one
+  `--arm inline+evidence`, and a missing arm is an error, so a one-arm dispatch there is red at the
+  first of them. `bird-model.yml` is the vehicle that names no arm in any step; dispatched with
+  `split: minidev`, `arms: macsql-prompt`, `aa: none` it produced run `45846766964`: **319 of 496 =
+  64.31%**, ¥1.01, one call a question, on a corpus and a fingerprint that match their pins. The arm
+  joins `DEFAULT_ARMS` with a floor of 64.3 (its own reading to one decimal), which takes the chain's
+  call budget to 16 of 16 — the next arm has to arrive with a cut. `parseArms('')` returning zero arms
+  without a word is fixed in the same round: an empty list now resolves to the default chain.
 - **The 28 statements the engine never ran, and the two rewrites that reach three of them.**
   `bench:bird:residue` measures only cases that ran and answered with different rows; on the shipped
   arm's dev artifact that leaves 104 of 522 failures outside it, and they had never been described.

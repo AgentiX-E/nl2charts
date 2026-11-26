@@ -223,6 +223,18 @@ describe('the coverage table cites one arm', () => {
     expect(resolveReading(reading, read)).toBe(65.93);
   });
 
+  it('cites the shipped arm on the split the gates run, not an arm the product does not send', () => {
+    // This row cited `select`'s floor for three rounds, and its note said so out loud — a number about
+    // the harness printed in the place a reader looks for a number about the product. The obstacle was
+    // never the corpus: it was that no vehicle could run one arm on that split. Dispatching one
+    // (`45846766964`, 319 of 496) is what let the row move, so the assertion is that it stays moved.
+    const row = BENCHMARKS.find((entry) => entry.id === 'bird-mini-dev');
+    expect(row?.reading?.file).toBe(FILES.bird);
+    expect(row?.reading?.path).toEqual(['floors', 'minidev', ARM]);
+    expect(row?.reading?.kind).toBe('floor');
+    expect(row?.reading?.note).toContain(ARM);
+  });
+
   it('names the arm in the row\'s own note, so a quoted line cannot lose it', () => {
     // The printed line is `BIRD dev (EX) = 65.93`, which by itself says nothing about which prompt
     // produced it; the note is the only place a reader of the table finds the arm.

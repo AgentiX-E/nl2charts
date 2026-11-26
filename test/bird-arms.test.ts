@@ -271,19 +271,26 @@ describe('the chain that actually runs', () => {
     // ablation reference, so the position it frees belongs to the next lever with a reading
     // rather than to the next idea.
     //
-    // Fifteen today, and the fifteenth is the only kind of arm that earns a rung without a
+    // Fifteen, and the fifteenth is the only kind of arm that earns a rung without a
     // reading of its own: `inline+icl-cot` reuses the neighbours `inline+icl` already retrieves
     // and differs from it in the text of the block it sends, so it costs one call per question
     // and no new preparation. The mechanism it carries is the one OpenSearch-SQL credits for
     // reaching 69.3% on BIRD with no training, and this repository had priced only the
-    // (question, SQL) half of that shape — so the rung buys a mechanism, not an idea. The
-    // sixteenth position stays empty until one of these arms produces a verdict.
+    // (question, SQL) half of that shape — so the rung buys a mechanism, not an idea.
+    //
+    // Sixteen, and this rung is bought by no mechanism at all. `macsql-prompt` is the arm the
+    // product ships, and the reason it is here is the one the dev chain used last round: a split
+    // that scores twelve arms the product does not send produces a green run that says nothing
+    // about what a caller gets. It is not a bet, so it does not need a delta — it needs to be
+    // measured, and the measurement it now carries (`floors.minidev`, 64.3) is the number this
+    // repository can quote about its own prompt. The cap is what makes the rung a trade rather
+    // than an addition: there is no seventeenth slot, so the next arm has to arrive with a cut.
     const nominal = DEFAULT_ARMS.reduce((total, name) => {
       const arm = ARMS.find((entry) => entry.name === name) as Arm;
       return total + (arm.vote ?? 1) + (arm.select === true ? 1 : 0);
     }, 0);
     expect(nominal).toBeLessThanOrEqual(16);
-    expect(nominal).toBe(15);
+    expect(nominal).toBe(16);
   });
 
   it('gives the demonstration arm statements and the textual arm only text', () => {

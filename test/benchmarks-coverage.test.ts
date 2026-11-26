@@ -19,7 +19,9 @@ const reader = (files: Record<string, unknown>): Reader => (file) => {
 };
 
 const TREE = {
-  'eval/baseline/bird.json': { floors: { minidev: { select: 56 }, dev: { 'select-mixed': 62.5 } } },
+  'eval/baseline/bird.json': {
+    floors: { minidev: { select: 56, 'macsql-prompt': 64.3 }, dev: { 'select-mixed': 62.5 } },
+  },
   'eval/baseline/bird-ves.json': { rves: 56.56, ex: 65.93, scored: 600, of: 1532 },
   'eval/text2vis/baseline.json': { top1: 664, render: { rendered: 1418 } },
   // WikiSQL's row cites a percentage and carries the counts beside it; the fixture holds what the
