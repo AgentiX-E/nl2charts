@@ -117,7 +117,21 @@
     "passed": 980,
     "refused": 0,
     "unanswered": 7,
-    "note": "0 refusals is not a finding about the arm. Its guard drops a candidate that fails to execute before the judge sees the case, so a refusal arrives as `no sample survived guard and execution` — 7 cases, each hiding up to three refused candidates. The census refuses to publish an empty table as a measurement (`censusProblems` fails the run), which is how the difference between 'nothing was refused' and 'nothing refused is visible here' stayed visible. Reading this arm's refusals needs the candidate-level record, which the artifact does not keep."
+    "note": "0 refusals is not a finding about the arm. Its guard drops a candidate that fails to execute before the judge sees the case, so a refusal arrives as `no sample survived guard and execution` — 7 cases, each hiding up to three refused candidates. The census refuses to publish an empty table as a measurement (`censusProblems` fails the run), which is how the difference between 'nothing was refused' and 'nothing refused is visible here' stayed visible. Reading this arm's refusals needs the candidate-level record, which this artifact predates: the runner now writes `candidateRecord: 'kept'` at the top and a `dropped` list per case, and the next dispatch of this arm is the first that can be read at that level."
   },
-  "next": "The largest mechanical class is `name-not-joined` at 17 cases (1.11pp), and it is not a rewrite: it is a retry with another table. That is the trigger the multi-agent round should fire on — the statement names a column that lives in a table it does not read, which is decidable without a model and costs no tokens to detect."
+  "next": "The largest mechanical class is `name-not-joined` at 17 cases (1.11pp), and it is not a rewrite: it is a retry with another table. That is the trigger the multi-agent round should fire on — the statement names a column that lives in a table it does not read, which is decidable without a model and costs no tokens to detect. The candidate-level record is what makes that round's *mechanism* reading possible as well: a refiner that rewrites a candidate the guard dropped is a fact about the pool, and until this round the artifact kept the count of the pool but not its members.",
+  "candidates": {
+    "recorded": false,
+    "fields": [
+      "stage",
+      "code",
+      "message",
+      "sql",
+      "source"
+    ],
+    "invariant": "the eight classes sum to the `engine` stage, and the three stages sum to `dropped`; a class may not claim an outage",
+    "why": "`candidateFailures` was a count and it was arm-level only, so the level where a voting arm's refusals happen was unreadable: one candidate refused, the case answered with the other two, and the artifact said `{ engine: 1 }` with no statement and no sentence. That is what `select-mixed-rule`'s published zero was a fact about.",
+    "readAt": "this artifact was written before the record existed, so its candidate table is a silence rather than eight zeroes, and the tool prints that sentence instead of a table",
+    "cost": "0: the record is written by a runner that was already generating the candidates; the next dispatch that reads it is one a plan had already priced"
+  }
 }

@@ -1245,6 +1245,21 @@ export const ARMS: readonly Arm[] = [
   // `promptFor` forces them for a template arm — so the only field that differs from that parent is
   // this one.
   { name: 'macsql-prompt', notes: false, evidence: 'dataset', repairs: 0, linking: false, template: 'macsql-bird' },
+  // The shipped prompt with the one turn a refiner is allowed to spend: on a statement the engine
+  // refused, send the question, the statement and the engine's own sentence back and take the
+  // rewrite.
+  //
+  // It exists because a ceiling was computed for it before it was dispatched. `bench:bird:refusals`
+  // counted 28 refusals on the shipped arm's dev artifact, two of which deterministic rewrites
+  // already fix; the market this arm can address is therefore 25 cases = **1.63pp**, and the
+  // registered criterion is >= +1.0pp with exact McNemar p < 0.05 (>= 16 of the 25). MAC-SQL's
+  // Refiner, CHESS's unit tester and OpenSearch-SQL's error-specific revision all share this
+  // trigger — the engine's error — and differ by a paragraph of prompt, so one arm decides whether
+  // the mechanism exists and the other two only decide which wording.
+  //
+  // One turn rather than three: a second repair on a statement that failed twice is a different
+  // bet (that the model can succeed where it just failed), and it cannot be answered on 25 cases.
+  { name: 'macsql-prompt+repair', notes: false, evidence: 'dataset', repairs: 1, linking: false, template: 'macsql-bird' },
   // The same template with a different procedure inside it. `macsql-bird` opens by telling the
   // model to decompose; this one tells it to plan — name the tables, then the operations, then the
   // output columns — and to write the statement the plan describes. One sentence pair moves, so the
@@ -2199,6 +2214,21 @@ export const DEV_ARMS: readonly string[] = [
  * An arm that is neither here nor in `DEFAULT_ARMS` fails the suite.
  */
 export const ON_DEMAND_ARMS: Readonly<Record<string, string>> = {
+  // The shipped prompt plus one repair turn. It is here rather than in the chain because it is a
+  // *question about a mechanism* and the chain holds the arms that answer questions about the
+  // product; it is registered with a ceiling and a criterion taken before the dispatch, so the
+  // reading either lands on the criterion or retires the mechanism:
+  //
+  //   market       25 of 1,532 cases = 1.63pp (28 refusals minus the 3 the two deterministic
+  //                rewrites already answer, minus the one DATEDIFF case no rewrite reaches)
+  //   criterion    >= +1.0pp against `macsql-prompt` with exact McNemar p < 0.05, i.e. >= 16 of 25
+  //   cost         one repair call on the refused cases only: 25 extra calls in 1,532, which is
+  //                inside the 1.5 safety factor `bench:spend` already applies
+  //
+  // A failure at 10 of 25 (+0.65pp, p = 0.20) is not a reason to write a better refiner; it is the
+  // ceiling read correctly, and the next budget belongs elsewhere. That sentence is why the arm is
+  // registered here before it runs rather than interpreted afterwards.
+  'macsql-prompt+repair': 'the shipped prompt with one repair turn on the engine sentence: the only arm that can test the 1.63pp market the refusal census measured, registered at >= +1.0pp with exact McNemar p < 0.05 (>= 16 of 25) and dispatched alone beside `macsql-prompt` in one artifact so the delta is paired',
   // Moved out of the chain in the round that priced it. Each has a verdict, and each verdict
   // was taken on the split that can express it; what none of them can do is produce a *new*
   // verdict on 498 questions, because every one of their gaps is inside its own MDE there.
@@ -2690,6 +2720,49 @@ export interface CandidateFailures {
   readonly unparsed: number;
 }
 
+/**
+ * A candidate that was generated and then lost before the judge could see it.
+ *
+ * `candidateFailures` counts these and the count was the whole record. On an arm that generates
+ * once that is enough: the lost candidate is the lost case, and the case's own `error` carries the
+ * engine's sentence. On a voting arm it is not — three candidates are drawn, one is refused, the
+ * case still answers with the other two, and the artifact says `candidateFailures: { engine: 1 }`
+ * with no statement and no message. Every reading of "what is this arm refused for" then starts
+ * from a number that cannot be turned into a sentence.
+ *
+ * That gap has a published consequence. `select-mixed-rule`'s refusal census is 0 of 1,532 on every
+ * artifact, and `bench:bird:refusals` cannot classify a zero: its `censusProblems` fails the run
+ * rather than print an empty table, which is how "nothing was refused" and "nothing refused is
+ * visible here" stayed distinct. This record is what makes the second arm readable — the statement
+ * is what a later turn would rewrite, and the message is what the class is decided by.
+ */
+export interface DroppedCandidate {
+  /** Which of the three mechanisms lost it, in the same words `candidateFailures` counts. */
+  readonly stage: keyof CandidateFailures;
+  /** The harness's own code, when the loss carried one (`NL2C_E_GUARD_REJECTED` and friends). */
+  readonly code?: string;
+  /**
+   * The engine's or the guard's own words, verbatim.
+   *
+   * Not truncated, because `refusalKindOf` reads the end of the sentence (`no such column: X` and
+   * `X` is the last token) and `missingNameOf` anchors on it: a cut message is a name that gets
+   * split at the wrong dot.
+   */
+  readonly message?: string;
+  /**
+   * The statement that was refused, when one existed.
+   *
+   * Absent rather than empty for the case where the loss happened before a statement was written —
+   * an endpoint that did not answer, a guard that refused the reply. Present, it is the statement
+   * itself and not a summary of it, because the only use of this field is to run it again: a
+   * `requalify` or a `year` rewrite is applied to these bytes, and a truncated one would execute
+   * differently from the one the engine refused.
+   */
+  readonly sql?: string;
+  /** Which of the arm's sources wrote it, on a mixed arm. */
+  readonly source?: string;
+}
+
 /** What one case cost the endpoint, in the endpoint's own unit. */
 export interface CaseTokens {
   readonly prompt: number;
@@ -3047,6 +3120,14 @@ export interface CaseRun extends CaseOutcome {
    */
   readonly pairwise?: { readonly comparisons: number; readonly unreadable: number };
   readonly candidateFailures?: CandidateFailures;
+  /**
+   * The candidates this case lost, in the words that make them classifiable.
+   *
+   * Absent means the case lost nothing; the arm-level `candidateRecord` says whether absence is a
+   * reading or a silence, because an artifact written before this field existed would otherwise be
+   * indistinguishable from an arm that lost no candidate at all.
+   */
+  readonly dropped?: readonly DroppedCandidate[];
   /**
    * Per source: how many candidates it was asked for, and how many arrived.
    *
@@ -7792,6 +7873,16 @@ export function baseReport(prepared: PreparedRun, provenance: Provenance = {}): 
     // gate needs the declaration to tell it from a report that lost a row: the run that
     // scored six arms on dev was failed for not running two it never asked for.
     armsRequested: settings.arms,
+    /**
+     * Whether this run kept the candidates it dropped, at the arm level.
+     *
+     * A case that lost nothing omits the field, so absence alone cannot be read: an artifact written
+     * before `dropped` existed is silent about its losses, and one written after is silent because
+     * there were none. The two are a reading and a missing measurement, and the only place the
+     * difference can be recorded is here — where the writing code, rather than the data, says which
+     * version produced the file.
+     */
+    candidateRecord: 'kept',
     // What was read, not what was asked for. A rate is a claim about a corpus, and the corpus is
     // not a constant: BIRD re-annotated Mini-Dev on 2026-10-28 (corrected annotations, replaced
     // instances) and this repository downloads it from a bucket URL rather than a pinned archive.
@@ -8589,6 +8680,15 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
         // whether the cross arm's missing candidate came from the second model or from one of
         // the two prompts the primary model wrote.
         const survival: Record<string, { generated: number; survived: number }> = {};
+        // The candidates that were generated and did not arrive, with their statements and the
+        // engine's sentences. `lost` counts them and this says what they were: on a voting arm the
+        // count cannot be turned into a sentence, and the refusal census one level up needs the
+        // sentence to classify anything at all.
+        const dropped: DroppedCandidate[] = [];
+        // Where the current draw came from, declared outside the `try` because the `catch` is the
+        // branch that has to report it. Reset at the top of every draw: a value left over from the
+        // previous one would attribute a failure to a source that answered.
+        let drawnSource: string | undefined;
         // Only the candidates that were asked to decompose are counted here, and they are
         // counted whether or not the statement ran: the question is what the prompt
         // produced, not whether the engine liked it.
@@ -8645,6 +8745,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // candidate is always one generation and the cost stays three calls.
             const sources = arm.mixed;
             const source = sources === undefined ? name : (sources[sample % sources.length] as string);
+            drawnSource = source;
             const drawn = (survival[source] ??= { generated: 0, survived: 0 });
             drawn.generated += 1;
             // The hint override is keyed by the *source*, not by the arm that resolves it: two
@@ -8714,6 +8815,15 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
               // about the selector, so the loss is counted where it happened.
               sampleErrors.push(undefined);
               lost.engine += 1;
+              // The statement and the sentence, together and verbatim: this is the pair the
+              // refusal census classifies, and the pair the artifact has never held for a
+              // candidate that was not the case's answer.
+              dropped.push({
+                stage: 'engine',
+                message: executed.error ?? 'the engine refused the statement and said nothing',
+                sql: askedSample.sql,
+                source,
+              });
             }
           } catch (error) {
             // A sample that fails the guard or the engine casts no vote; the other
@@ -8724,6 +8834,19 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             const kind = classifyCandidateFailure((error as { code?: string }).code);
             sampleErrors.push(kind === 'llm' ? 'llm' : undefined);
             lost[kind] += 1;
+            // A guard refusal arrives here rather than at the branch above, because the pipeline
+            // refuses the statement before the harness runs it. It has a sentence and no statement:
+            // the pipeline does not hand the refused text back on the error, and a record that
+            // filled this field with the last statement that *did* arrive would be a lie with a
+            // plausible shape. Absent is the honest shape of a fact the harness does not have.
+            const refusedCode = (error as { code?: string }).code;
+            const refusedMessage = error instanceof Error ? error.message : String(error);
+            dropped.push({
+              stage: kind,
+              ...(refusedCode === undefined ? {} : { code: refusedCode }),
+              ...(refusedMessage === '' ? {} : { message: refusedMessage }),
+              ...(drawnSource === undefined ? {} : { source: drawnSource }),
+            });
           }
         }
         // Recorded before the empty-set branch, so a case whose pool is empty is a pool the next
@@ -8745,6 +8868,9 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             errorKind: outage ? 'llm' : 'other',
             candidateRecall: false,
             candidateFailures: lost,
+            // The case where every candidate died is the one a record of the candidates is most
+            // needed for: the case cannot say what happened to the pool, because it saw no pool.
+            ...(dropped.length === 0 ? {} : { dropped }),
             // The case where every candidate died is the one a per-source record is most needed
             // for, and it is the one the success path cannot write.
             ...(Object.keys(survival).length === 0 ? {} : { candidateSurvival: survival }),
@@ -8811,11 +8937,29 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
                 // it happened rather than read afterwards as a lower ceiling.
                 sampleErrors.push(undefined);
                 lost.engine += 1;
+                // The bought opinion is a candidate like any other, and the census reads one
+                // field for all of them: a record that covered the draws and not the fourth
+                // opinion would describe a mixed arm's pool while omitting the member the arm
+                // paid an extra call for.
+                dropped.push({
+                  stage: 'engine',
+                  message: executed.error ?? 'the engine refused the statement and said nothing',
+                  sql: reply.sql,
+                  source: arm.dissent,
+                });
               }
             } catch (error) {
               const kind = classifyCandidateFailure((error as { code?: string }).code);
               sampleErrors.push(kind === 'llm' ? 'llm' : undefined);
               lost[kind] += 1;
+              const refusedCode = (error as { code?: string }).code;
+              const refusedMessage = error instanceof Error ? error.message : String(error);
+              dropped.push({
+                stage: kind,
+                ...(refusedCode === undefined ? {} : { code: refusedCode }),
+                ...(refusedMessage === '' ? {} : { message: refusedMessage }),
+                source: arm.dissent,
+              });
             }
           }
         }
@@ -9192,6 +9336,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             : { emptyDropped: choice.dropped, emptyRetried: retried, emptyRecovered: recovered }),
           ...(probeRecord === undefined ? {} : { emptyProbe: probeRecord }),
           ...(lost.llm + lost.engine + lost.unparsed === 0 ? {} : { candidateFailures: lost }),
+          // Kept on the case that answered, which is the whole point: a pool of three that lost
+          // one candidate and still answered is invisible in every reading of this artifact
+          // unless the loss carries its statement and its sentence.
+          ...(dropped.length === 0 ? {} : { dropped }),
           ...(Object.keys(survival).length === 0 ? {} : { candidateSurvival: survival }),
           ...(decomposedCandidates === 0 ? {} : { decomposition: { candidates: decomposedCandidates, steps: decomposedSteps } }),
           calls: callsMade(),
@@ -9222,6 +9370,17 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // top errors was a SQLite syntax or column error.
             errorKind: 'execution',
             calls: callsMade(),
+            // The same record a voting arm writes, for the same reader: an arm that draws once
+            // loses its case instead of its candidate, so the two levels collapse — but the
+            // census reads one field for both, and a row it could only read on half the arms is
+            // a table whose columns mean different things in different runs.
+            dropped: [
+              {
+                stage: 'engine',
+                message: predicted.error ?? 'the engine refused the statement and said nothing',
+                sql: asked.sql,
+              },
+            ],
             ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
             ...demonstrationsOf(question),
             ...shape,
@@ -10087,6 +10246,16 @@ export function caseRows(
       // returned something else, and the file could not say whether the selector refused
       // the second model's statement or took a different wrong one beside it.
       ...(run.candidates === undefined ? {} : { candidates: run.candidates }),
+      ...(run.candidateFailures === undefined ? {} : { candidateFailures: run.candidateFailures }),
+      // The candidates this case lost, with the statements and the sentences that explain them.
+      //
+      // The count above was the whole record at this level and it was arm-level only: every
+      // published half of this pair — the count and the content — was missing per case, so
+      // "1,532 cases and 3 failed candidates" could not be turned into "these three". A count
+      // cannot be classified and a statement cannot be counted; the row carries both so a
+      // reader can check one against the other, and `bench:bird:refusals` reads this field
+      // rather than reconstructing it.
+      ...(run.dropped === undefined ? {} : { dropped: run.dropped }),
       ...(run.candidateSurvival === undefined ? {} : { candidateSurvival: run.candidateSurvival }),
       ...(run.winnerSource === undefined ? {} : { winnerSource: run.winnerSource }),
       // Which slot the free rule took, on the arm where a rule decides.

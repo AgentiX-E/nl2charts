@@ -70,7 +70,7 @@ import type { BirdQuestion, BirdTable } from './data.js';
 import { createOracle } from './oracle.js';
 import type { Oracle } from './oracle.js';
 import { layoutForSplit, resolveLayout } from './run.js';
-import type { BirdLayout } from './run.js';
+import type { BirdLayout, DroppedCandidate } from './run.js';
 import { qualifiedRefs, stringLiterals, tableRefs } from './statement.js';
 import type { TableRef } from './statement.js';
 
@@ -120,6 +120,13 @@ export interface ArtifactCase {
   readonly errorKind?: string;
   readonly error?: string;
   readonly sql?: string;
+  /**
+   * The candidates this case lost, when the run kept them.
+   *
+   * Absent on an artifact written before the record existed, and the artifact-level
+   * `candidateRecord` is what tells the two apart: this file may not read a silence as a zero.
+   */
+  readonly dropped?: readonly DroppedCandidate[];
 }
 
 /**
@@ -128,14 +135,26 @@ export interface ArtifactCase {
  * `row-count` is folded into `values` rather than given a row of its own: the residue tool measures
  * both (a different number of rows is the residue's whole subject), and a taxonomy that split them
  * here would disagree with the instrument that reads them there.
+ *
+ * The `errorKind` axis is wider than the two kinds this file was written against, and finding that
+ * out cost one crash on the Mini-Dev split: `failureKindOf` knew `execution` and `other`, and a case
+ * the *guard* refused (`guard: multiple-statements`) threw "failed without a reason or an error
+ * kind" — a sentence that is true of the record and false of the run. The seven kinds the runner
+ * writes are `execution`, `guard`, `llm`, `truncated`, `shape`, `harness` and `other`; the split
+ * below is not a list of them but a rule about them, so an eighth cannot arrive as a crash.
  */
 export function failureKindOf(row: ArtifactCase): FailureKind | 'passed' {
   if (row.passed) return 'passed';
-  if (row.errorKind === 'execution') return 'refused';
-  // An arm that produced no candidate at all — the mixed selector's three samples all refused
-  // guard and execution — never reached the judge, and calling it a wrong answer would credit it
-  // with an attempt it did not make.
-  if (row.errorKind === 'other') return 'unanswered';
+  // A statement the engine refused and a statement the guard refused are one population here:
+  // something was written, nothing ran, and the refusal has a sentence and a class. The guard's own
+  // sentence (`multiple-statements`) is not the engine's, so the class comes out `other` until the
+  // statement is replayed — and the replay is exactly what this branch licenses, because the guard
+  // never let the engine speak.
+  if (row.errorKind === 'execution' || row.errorKind === 'guard') return 'refused';
+  // Everything else is "no usable statement came back": an endpoint that did not answer, an answer
+  // the cap cut, a reply the parser could not read, a harness fault. None of them has a statement
+  // to classify, and calling one of them a refusal would put an outage in the engine's column.
+  if (row.errorKind !== undefined) return 'unanswered';
   if (row.reason === 'values' || row.reason === 'row-count') return 'values';
   if (row.reason === 'column-count') return 'arity';
   throw new Error(`case ${String(row.id)} of ${row.arm} failed without a reason or an error kind`);
@@ -314,6 +333,15 @@ export interface Census {
   readonly classes: readonly RefusalTally[];
   readonly rows: readonly RefusalRow[];
   readonly drops: CensusDrops;
+  /**
+   * The candidates that never reached the judge, which is a second population.
+   *
+   * A refusal happens at two levels and only one of them used to be in this file: a case whose
+   * every candidate died is a `refused` case, and a case that lost one candidate and answered with
+   * the other two is a `passed` case with a hole in its pool. The second is where
+   * `select-mixed-rule`'s zero lived.
+   */
+  readonly candidates: DroppedCensus;
   readonly problems: readonly string[];
 }
 
@@ -347,7 +375,36 @@ export function censusProblems(census: Census): readonly string[] {
   if (census.asked === 0) {
     problems.push(`REF: this artifact holds no case for ${census.arm}, so nothing was measured`);
   } else if (census.kinds.refused === 0) {
-    problems.push('REF: this artifact holds no refused case, so the taxonomy measured nothing');
+    // The three states this branch has to keep apart, and only the artifact can:
+    //
+    //   no candidate record           the run never looked, so a zero here is a silence
+    //   kept, and it holds refusals   the refusals happened one level below the case, and they
+    //                                 are counted in `candidates` rather than in `kinds`
+    //   kept, and it holds none       a zero that was observed, which is a claim about the arm
+    //
+    // The first is what `select-mixed-rule` published for a hundred rounds, and it is still a
+    // problem: the tool exists to classify refusals and it cannot classify a silence.
+    if (!census.candidates.recorded) {
+      problems.push(
+        'REF: this artifact holds no refused case and keeps no candidate-level record, so the taxonomy measured nothing',
+      );
+    }
+  }
+  // Every engine refusal that a candidate carried has to land in a class, and the classes have to
+  // account for all of them: a table that classified two of three would be a taxonomy over a
+  // population it silently shrank. `llm` and `unparsed` are deliberately outside this identity —
+  // they are mechanisms, not refusals, and no class may claim an outage.
+  const classified = census.candidates.byClass.reduce((sum, row) => sum + row.dropped, 0);
+  if (classified !== census.candidates.byStage.engine) {
+    problems.push(
+      `REF: ${String(classified)} candidate(s) classified against ${String(census.candidates.byStage.engine)} the engine refused`,
+    );
+  }
+  if (classified + census.candidates.byStage.llm + census.candidates.byStage.unparsed !== census.candidates.dropped) {
+    problems.push(
+      `REF: ${String(census.candidates.dropped)} candidate(s) dropped against ${String(classified)} classified and ` +
+        `${String(census.candidates.byStage.llm + census.candidates.byStage.unparsed)} by another mechanism`,
+    );
   }
   // Every refusal is either classified or dropped for a reason the run printed, and the two
   // together have to be the artifact's own count. A census that dropped a refusal and did not say
@@ -399,6 +456,23 @@ export function censusLines(census: Census): readonly string[] {
   for (const row of census.rows.filter((entry) => entry.refusal === 'name-not-joined').slice(0, 3)) {
     lines.push(`  a join away, not a spelling: #${row.id} ${row.message}`);
   }
+  // The second population. A refusal below the case is the one this table could not see, and the
+  // distinction it carries is not cosmetic: a case that lost a candidate and answered anyway is a
+  // `passed` case in every other reading of this artifact.
+  if (!census.candidates.recorded) {
+    lines.push('  candidates: this artifact keeps no record of what it dropped, so a silence here is not a zero');
+    return lines;
+  }
+  lines.push('  candidates        dropped  with stmt');
+  for (const row of census.candidates.byClass) {
+    if (row.dropped === 0) continue;
+    lines.push(`  ${row.refusal.padEnd(18)}${String(row.dropped).padStart(5)}${String(row.withStatement).padStart(11)}`);
+  }
+  lines.push(
+    `  ${String(census.candidates.dropped)} candidate(s) dropped of ${String(census.asked)} case(s): ` +
+      `${String(census.candidates.byStage.engine)} the engine refused, ${String(census.candidates.byStage.llm)} never arrived, ` +
+      `${String(census.candidates.byStage.unparsed)} unreadable`,
+  );
   return lines;
 }
 
@@ -470,6 +544,145 @@ export function schemaFrom(table: BirdTable | undefined): SchemaOf {
 }
 
 /**
+ * Everything that can be decided about a refusal without running anything.
+ *
+ * Two readers now share this: the case-level census, which classifies the statement a case gave up
+ * on, and the candidate-level one, which classifies a member that was dropped while the case still
+ * answered. Neither may disagree about what a class means — a `name-not-joined` read off the
+ * winner's statement and a `name-not-joined` read off the dropped candidate's are the same finding,
+ * and a second copy of these four lines would be a second taxonomy with the first one's name.
+ *
+ * `refs` is returned rather than recomputed because the repair needs the same list the site was
+ * decided from: a `requalify` that scanned the statement twice could re-qualify against a table the
+ * classification did not see.
+ */
+export interface MessageReading {
+  readonly kind: RefusalKind;
+  readonly refusal: RefusalClass;
+  readonly missing?: { readonly qualifier?: string; readonly column: string };
+  readonly refs: readonly TableRef[];
+}
+
+export function classifyMessage(message: string, sql: string | undefined, schema: SchemaOf): MessageReading {
+  const kind = refusalKindOf(message);
+  const refs = sql === undefined ? [] : tableRefs(sql);
+  const missing = missingNameOf(message, sql);
+  let refusal: RefusalClass;
+  if (kind === 'name') {
+    // A name with no `no such column: X` tail is a sentence this taxonomy cannot site, and `other`
+    // says that rather than guessing a home for it.
+    if (missing === undefined) refusal = 'other';
+    else {
+      const site = nameSiteOf(missing.column, refs.map((ref) => ref.table), schema);
+      refusal = site === 'read' ? 'name-misqualified' : site === 'not-joined' ? 'name-not-joined' : 'name-nowhere';
+    }
+  } else {
+    refusal = kind;
+  }
+  return { kind, refusal, ...(missing === undefined ? {} : { missing }), refs };
+}
+
+/**
+ * One dropped candidate, classified.
+ *
+ * The statement is what a later turn would rewrite and the class is what it would do, so both are
+ * kept: a table of classes with no statements says how many and not which, and a list of statements
+ * with no classes says which and not what to do.
+ */
+export interface DroppedRow {
+  readonly id: string;
+  readonly refusal: RefusalClass;
+  /** The engine's or the guard's own words, when the loss carried any. */
+  readonly message?: string;
+  /** The statement that was refused, when one was written before the refusal. */
+  readonly sql?: string;
+  readonly source?: string;
+}
+
+/** One class of dropped candidate: how many, and how many of those carry a rewritable statement. */
+export interface DroppedTally {
+  readonly refusal: RefusalClass;
+  readonly dropped: number;
+  readonly withStatement: number;
+}
+
+/**
+ * What an artifact kept about the candidates that never reached the judge.
+ *
+ * `recorded` is the field the rest of this file reads before it reads any number, because an
+ * artifact without the record and an artifact with an empty one are the same shape and different
+ * facts: the first is a run that never looked, the second is a run that looked and found nothing.
+ * Publishing the second as the first is how `select-mixed-rule`'s zero survived a hundred rounds.
+ */
+export interface DroppedCensus {
+  readonly recorded: boolean;
+  readonly dropped: number;
+  /** By mechanism, in the same three words `candidateFailures` counts. */
+  readonly byStage: Readonly<Record<'llm' | 'engine' | 'unparsed', number>>;
+  /**
+   * By class, over the engine refusals only.
+   *
+   * An endpoint that did not answer is not a refusal and no class may claim it: the repair is a key
+   * or a deadline, and there is no statement to rewrite. Counting it under `other` would put an
+   * outage in the same column as a guard that refused a write, which are two different next steps.
+   */
+  readonly byClass: readonly DroppedTally[];
+  readonly rows: readonly DroppedRow[];
+}
+
+export function tallyDropped(rows: readonly DroppedRow[]): readonly DroppedTally[] {
+  return REFUSAL_CLASSES.map((refusal) => {
+    const mine = rows.filter((row) => row.refusal === refusal);
+    return {
+      refusal,
+      dropped: mine.length,
+      withStatement: mine.filter((row) => row.sql !== undefined).length,
+    };
+  });
+}
+
+/**
+ * Read the kept candidates of one arm.
+ *
+ * `schemaOf` is asked per case rather than once, because the site of a missing name is a property of
+ * the database the statement was run against and a split holds eleven of them.
+ */
+export function droppedCensus(
+  body: { readonly candidateRecord?: string; readonly cases: readonly ArtifactCase[] },
+  arm: string,
+  schemaOf: (row: ArtifactCase) => SchemaOf,
+): DroppedCensus {
+  const byStage = { llm: 0, engine: 0, unparsed: 0 };
+  const rows: DroppedRow[] = [];
+  let dropped = 0;
+  let recorded = body.candidateRecord === 'kept';
+  for (const row of body.cases) {
+    if (row.arm !== arm) continue;
+    // Any case that carries the field is evidence the run kept them, even on an artifact whose
+    // marker was written by a runner that had not yet learned to write it: the field cannot exist
+    // otherwise, and refusing to read it would discard the only record there is.
+    if (row.dropped !== undefined) recorded = true;
+    for (const entry of row.dropped ?? []) {
+      dropped += 1;
+      byStage[entry.stage] += 1;
+      // Only an engine refusal has a class. `llm` and `unparsed` are counted above and classified
+      // here as nothing, which is the difference between "the engine said no" and "nothing came".
+      if (entry.stage !== 'engine') continue;
+      const message = entry.message ?? '';
+      const reading = classifyMessage(message, entry.sql, schemaOf(row));
+      rows.push({
+        id: String(row.id),
+        refusal: reading.refusal,
+        ...(entry.message === undefined ? {} : { message }),
+        ...(entry.sql === undefined ? {} : { sql: entry.sql }),
+        ...(entry.source === undefined ? {} : { source: entry.source }),
+      });
+    }
+  }
+  return { recorded, dropped, byStage, byClass: tallyDropped(rows), rows };
+}
+
+/**
  * Classify one refusal and run the rule its class has, against the corpus's own declarations.
  *
  * The repaired statement is executed only when a rule produced one. `exact` is the official judge's
@@ -480,20 +693,10 @@ export async function classifyRefusal(
   entry: { readonly id: string; readonly db: string; readonly message: string; readonly sql: string; readonly gold: string },
   deps: { readonly oracle: Oracle; readonly schema: SchemaOf },
 ): Promise<RefusalRow> {
-  const kind = refusalKindOf(entry.message);
-  const refs = tableRefs(entry.sql);
-  const read = refs.map((ref) => ref.table);
-  const missing = missingNameOf(entry.message, entry.sql);
-  let refusal: RefusalClass;
-  if (kind === 'name') {
-    if (missing === undefined) refusal = 'other';
-    else {
-      const site = nameSiteOf(missing.column, read, deps.schema);
-      refusal = site === 'read' ? 'name-misqualified' : site === 'not-joined' ? 'name-not-joined' : 'name-nowhere';
-    }
-  } else {
-    refusal = kind;
-  }
+  // The class, the site and the table list all come from the one reading the candidate-level
+  // census also uses. Recomputing any of them here would let the two levels disagree about what a
+  // class means, and the repair below edits the same token list the site was decided from.
+  const { kind, refusal, missing, refs } = classifyMessage(entry.message, entry.sql, deps.schema);
   const base = { id: entry.id, db: entry.db, message: entry.message, kind, refusal };
   const rule = REFUSAL_RULES[refusal];
   let repaired: string | undefined;
@@ -519,7 +722,11 @@ export async function runCensus(
   settings: RefusalSettings,
   deps: { readonly oracle?: Oracle; readonly questions?: readonly BirdQuestion[]; readonly tables?: ReadonlyMap<string, BirdTable> } = {},
 ): Promise<Census> {
-  const body = JSON.parse(readFileSync(settings.artifact, 'utf8')) as { readonly split?: string; readonly cases: readonly ArtifactCase[] };
+  const body = JSON.parse(readFileSync(settings.artifact, 'utf8')) as {
+    readonly split?: string;
+    readonly candidateRecord?: string;
+    readonly cases: readonly ArtifactCase[];
+  };
   const layout = layoutForSplit(body.split, settings.layout, settings.root);
   const questions = deps.questions ?? loadQuestions(layout.questionsFile);
   const tables = deps.tables ?? loadTables(layout.tablesFile);
@@ -579,6 +786,11 @@ export async function runCensus(
     classes: tallyRefusals(rows),
     rows,
     drops,
+    // The schema is asked for by case, because the site of a missing name is a property of the
+    // database the statement ran against and a split holds eleven of them. A name absent from the
+    // question list is sited against nothing, which makes it `name-nowhere` — the honest answer for
+    // a case this artifact cannot resolve, and the same answer the case-level path gives.
+    candidates: droppedCensus(body, settings.arm, (row) => schemaFrom(tables.get(byId.get(String(row.id))?.db_id ?? ''))),
     problems: [],
   };
   return { ...census, problems: censusProblems(census) };

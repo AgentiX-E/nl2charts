@@ -355,6 +355,8 @@ async function run(options: Scenario): Promise<ScenarioResult> {
 
 /** Every question answered correctly. */
 const correct = (question: string): string | undefined => GOLD[question];
+/** The text of the one question a scenario refuses first, as the endpoint will see it. */
+const FIRST_QUESTION = Object.keys(GOLD)[0] as string;
 /** Every question answered with a statement that runs and is wrong. */
 const wrong = (): string => 'select 1';
 /** Every question answered with a statement that returns no rows at all. */
@@ -923,6 +925,74 @@ describe('a sampling arm', () => {
     expect(cases.filter((row) => row.candidates?.length === 2)).toHaveLength(1);
   });
 
+  /**
+   * What was inside the candidates that never reached the judge.
+   *
+   * `candidateFailures` is a count, and a count cannot be classified. On a voting arm one candidate
+   * is refused, the case answers with the other two, and the artifact says `{ engine: 1 }` — no
+   * statement and no sentence. The refusal census one level up then reads the arm as 0 of 1,532 and
+   * *fails the run* rather than print an empty table, which is the right behaviour and the reason
+   * this record exists: `select-mixed-rule`'s published zero was a fact about the artifact, not
+   * about the arm.
+   */
+  describe('the candidates a case dropped, kept rather than only counted', () => {
+    type Case = {
+      id: string;
+      passed: boolean;
+      errorKind?: string;
+      candidateFailures?: { llm: number; engine: number; unparsed: number };
+      dropped?: { stage: string; code?: string; message?: string; sql?: string; source?: string }[];
+    };
+
+    it("keeps the statement and the engine's own sentence on a case that still answered", async () => {
+      const result = await run({ plan: { whenValues: broken() }, env: { BIRD_ARMS: 'select-mixed' } });
+      expect(result.code).toBe(0);
+      const pen = (result.report.cases as Case[]).find((row) => row.id === '7');
+      // Two of three candidates arrived, so the case answered and the score did not move. That is
+      // exactly the shape the count could not describe and the census could not see.
+      expect(pen?.passed).toBe(true);
+      expect(pen?.candidateFailures).toEqual({ llm: 0, engine: 1, unparsed: 0 });
+      // The statement is the one the engine refused, byte for byte, because the only use of this
+      // field is to run it again: a rewrite is applied to these bytes and a shortened copy would
+      // execute differently from the one the refusal is about.
+      expect(pen?.dropped).toEqual([expect.objectContaining({ stage: 'engine', sql: broken(), source: 'values' })]);
+      expect(pen?.dropped?.[0]?.message).toMatch(/no such table: itemz/u);
+    });
+
+    it('keeps a guard refusal, which has a sentence and no statement', async () => {
+      const result = await run({ plan: { whenValues: 'delete from items' }, env: { BIRD_ARMS: 'select-mixed' } });
+      const pen = (result.report.cases as Case[]).find((row) => row.id === '7');
+      expect(pen?.dropped).toEqual([expect.objectContaining({ stage: 'engine', source: 'values' })]);
+      expect(pen?.dropped?.[0]?.code).toBe('NL2C_E_GUARD_REJECTED');
+      // The pipeline refuses the write before the harness runs it and does not hand the text back,
+      // so the record says what it knows. Filling this with the previous draw's statement would
+      // produce a record that looks complete and is about a different statement.
+      expect(pen?.dropped?.[0]).not.toHaveProperty('sql');
+    });
+
+    it('writes the same record on an arm that draws once, where the drop is the whole case', async () => {
+      // One candidate is not a set, so this arm reports the loss at the case level (`errorKind:
+      // execution`) — but the census reads one field on every arm, and a row it could only read on
+      // half of them is a table whose columns mean different things in different runs.
+      const result = await run({ plan: { first: () => broken() }, env: { BIRD_ARMS: 'names' } });
+      const first = (result.report.cases as Case[])[0];
+      expect(first?.errorKind).toBe('execution');
+      expect(first?.dropped).toEqual([expect.objectContaining({ stage: 'engine', sql: broken() })]);
+      expect(first?.dropped?.[0]?.message).toMatch(/no such table: itemz/u);
+      // No `candidateFailures` here, and that is right: on this arm `passed` already says what
+      // happened to the only candidate there was.
+      expect(first?.candidateFailures).toBeUndefined();
+    });
+
+    it('says at the top of the artifact that it kept what it dropped', async () => {
+      const result = await run({ plan: {}, env: { BIRD_ARMS: 'names' } });
+      expect(result.report.candidateRecord).toBe('kept');
+      // A case that lost nothing carries no field, and the marker is what makes that absence
+      // readable: with it, absent means zero; without it, absent means the run never looked.
+      expect((result.report.cases as Case[]).every((row) => row.dropped === undefined)).toBe(true);
+    });
+  });
+
   it('writes no candidate record for an arm that generates once', async () => {
     const result = await run({ plan: {}, env: { BIRD_ARMS: 'names' } });
     const cases = result.report.cases as { candidates?: unknown }[];
@@ -1265,6 +1335,69 @@ describe('a repair arm', () => {
     expect(arm?.errors.execution).toBe(0);
     // Two calls per case: the statement that failed and the one that replaced it.
     expect(arm?.calls.mean).toBe(2);
+  });
+
+  it('spends the repair turn on the shipped prompt itself, one turn and no more', async () => {
+    // The arm exists to test a ceiling that was computed before it was dispatched: the refusal
+    // census measured 28 refusals on `macsql-prompt`'s dev artifact and 25 of them are reachable,
+    // so the market is 1.63pp and the criterion is >= 16 of those 25. None of that can be tested on
+    // an arm that does not exist, which is what this case is about — the arm's *mechanism* has to
+    // fire before its number means anything.
+    const result = await run({ plan: { first: () => broken() }, env: { BIRD_ARMS: 'macsql-prompt+repair' } });
+    expect(result.code).toBe(0);
+    const arm = (
+      result.report.arms as {
+        arm: string;
+        passed: number;
+        repair: { total: number; repaired: number; fixedByRepair: number; meanAttempts: number };
+        calls: { mean: number };
+      }[]
+    )[0];
+    expect(arm?.arm).toBe('macsql-prompt+repair');
+    expect(arm?.repair.repaired).toBe(QUESTIONS.length);
+    expect(arm?.repair.fixedByRepair).toBe(QUESTIONS.length);
+    // One turn: `repairs: 1`. A second turn on a statement that failed twice is a different bet —
+    // that the model succeeds where it just failed — and it cannot be answered on 25 cases.
+    expect(arm?.repair.meanAttempts).toBe(2);
+    expect(arm?.calls.mean).toBe(2);
+  });
+
+  it('pairs the two arms a dispatch sends, so the delta is taken inside one artifact', async () => {
+    // The registered criterion is a *paired* one (`macsql-prompt+repair` against `macsql-prompt`),
+    // and a pair split across two dispatches pays twice and can disagree about the corpus. This
+    // asserts the vehicle rather than the number: both rows present, the parent with no repair
+    // funnel on a question it answered first time, the child with the same zero.
+    const result = await run({
+      // Keyed on `GOLD`'s own first key rather than on `QUESTIONS[0].question`: the endpoint is
+      // asked with the text it was given, and a comparison against the fixture's copy would pass
+      // only while the two spellings agree.
+      plan: { first: (question) => (question === FIRST_QUESTION ? broken() : correct(question)) },
+      env: { BIRD_ARMS: 'macsql-prompt,macsql-prompt+repair' },
+    });
+    expect(result.code).toBe(0);
+    const arms = result.report.arms as {
+      arm: string;
+      passed: number;
+      repair?: { total: number; firstPass: number; repaired: number; fixedByRepair: number; byClass: { failureClass: string }[] };
+      calls: { mean: number };
+    }[];
+    expect(arms.map((row) => row.arm)).toEqual(['macsql-prompt', 'macsql-prompt+repair']);
+    // One question was refused. `total` is the population that entered the funnel and `repaired` is
+    // the turn that actually ran — the first is every case and the second is one, and reading the
+    // first as the second is how a funnel gets quoted as a market.
+    expect(arms[0]?.repair).toBeUndefined();
+    expect(arms[1]?.repair?.total).toBe(QUESTIONS.length);
+    expect(arms[1]?.repair?.firstPass).toBe(QUESTIONS.length - 1);
+    expect(arms[1]?.repair?.repaired).toBe(1);
+    expect(arms[1]?.repair?.fixedByRepair).toBe(1);
+    // The class the engine's own sentence landed in. `binding` is the diagnostic family a missing
+    // name belongs to, which is the largest class the refusal census found (17 of 28) — so this is
+    // also the check that the arm reaches the population the ceiling was computed over.
+    expect(arms[1]?.repair?.byClass).toEqual([{ failureClass: 'binding', cases: 1, fixed: 1, remaining: 0 }]);
+    // ...and the score moves by the one case the turn recovered.
+    expect(arms[0]?.passed).toBe(QUESTIONS.length - 1);
+    expect(arms[1]?.passed).toBe(QUESTIONS.length);
+    expect(arms[1]?.calls.mean).toBeGreaterThan(arms[0]?.calls.mean ?? 0);
   });
 });
 

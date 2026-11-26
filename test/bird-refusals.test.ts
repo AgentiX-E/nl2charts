@@ -25,7 +25,9 @@ import {
   REFUSAL_RULES,
   censusLines,
   censusProblems,
+  classifyMessage,
   classifyRefusal,
+  droppedCensus,
   defaultRefusalArm,
   failureKindOf,
   isEntry,
@@ -42,7 +44,7 @@ import {
   writeRefusalArtifact,
   yearToStrftime,
 } from '../eval/bird/refusals.js';
-import type { ArtifactCase, Census, RefusalRow, SchemaOf } from '../eval/bird/refusals.js';
+import type { ArtifactCase, Census, DroppedCensus, RefusalRow, SchemaOf } from '../eval/bird/refusals.js';
 import { createOracle } from '../eval/bird/oracle.js';
 import { tableRefs } from '../eval/bird/statement.js';
 import { MINI_DB, writeMiniBirdDataset } from './helpers/bird-dataset.js';
@@ -63,7 +65,8 @@ interface PublishedBaseline {
   readonly repair: { readonly tried: number; readonly ran: number; readonly right: number; readonly deltaPp: number };
   readonly reading: { readonly asWritten: number; readonly asWrittenPct: number; readonly correct: number; readonly repairedPct: number };
   readonly invariant: { readonly passing: number; readonly changedByTheDateRule: number };
-  readonly secondArm: { readonly refused: number; readonly unanswered: number };
+  readonly secondArm: { readonly refused: number; readonly unanswered: number; readonly note: string };
+  readonly candidates: { readonly recorded: boolean; readonly invariant: string };
 }
 
 const BASELINE = JSON.parse(readFileSync(new URL('../eval/baseline/bird-refusals.json', import.meta.url), 'utf8')) as PublishedBaseline;
@@ -94,6 +97,20 @@ const schema = (tables: Readonly<Record<string, readonly string[]>>): SchemaOf =
   columnsOf: (name) => tables[name] ?? [],
 });
 
+/**
+ * A candidate census with nothing in it, recorded or not.
+ *
+ * The default is `recorded: true` with no loss, because that is the state most of these cases are
+ * about: a number about cases, with the candidate level accounted for and empty.
+ */
+const noCandidates = (recorded = true): DroppedCensus => ({
+  recorded,
+  dropped: 0,
+  byStage: { llm: 0, engine: 0, unparsed: 0 },
+  byClass: [],
+  rows: [],
+});
+
 describe('which population a failure belongs to', () => {
   it('reads a pass as a pass and the two judged reasons as the populations residue does and does not read', () => {
     expect(failureKindOf(row({ passed: true }))).toBe('passed');
@@ -109,6 +126,19 @@ describe('which population a failure belongs to', () => {
     // A mixed selector whose three samples all refused guard and execution never reached the judge.
     // Crediting it with an attempt would put a refusal in a population that has none.
     expect(failureKindOf(row({ reason: undefined, errorKind: 'other' }))).toBe('unanswered');
+  });
+
+  it('files a guard refusal with the engine refusals, and every other kind as no usable answer', () => {
+    // The runner writes seven error kinds and this function knew two of them for a round. A case the
+    // guard refused (`guard: multiple-statements`) crashed the census with "failed without a reason
+    // or an error kind" — true of the record, false of the run — and it took a second corpus to
+    // find, because the dev split has no guard refusal in it.
+    expect(failureKindOf(row({ errorKind: 'guard' }))).toBe('refused');
+    // The guard never let the engine speak, so the statement is still there to replay, which is what
+    // the `refused` branch does. Calling it `unanswered` would hide a statement that exists.
+    for (const kind of ['llm', 'truncated', 'shape', 'harness', 'other']) {
+      expect(failureKindOf(row({ errorKind: kind })), kind).toBe('unanswered');
+    }
   });
 
   it('refuses a failed case the artifact neither judged nor named', () => {
@@ -279,6 +309,7 @@ describe('the report', () => {
       classes: tallyRefusals(rows),
       rows,
       drops: { goldFailed: 0, unretained: 0, unknownQuestion: 0, otherArm: 0 },
+      candidates: noCandidates(),
       problems: [],
       ...overrides,
     };
@@ -302,6 +333,121 @@ describe('the report', () => {
   });
 });
 
+/**
+ * What was in the candidates a case dropped.
+ *
+ * The count is `candidateFailures`, and a count cannot be classified: a voting arm refuses one
+ * candidate, answers with the other two, and the artifact says `{ engine: 1 }`. The census one level
+ * up then reads the arm as 0 refusals — which is why `select-mixed-rule` published a zero for a
+ * hundred rounds, and why the tool fails rather than print an empty table.
+ *
+ * Two facts have to stay apart here, and only the artifact can keep them apart: a run that dropped
+ * nothing and a run that never looked. `candidateRecord: 'kept'` is the marker the runner writes for
+ * the second, and `recorded` is how every reading of a zero is qualified by it.
+ */
+describe('the candidates an artifact kept, and the four ways to read its silence', () => {
+  const shop = schema({ orders: ['id', 'qty'], items: ['id', 'name'] });
+  const anything = (): SchemaOf => shop;
+  const kept = (dropped: readonly Record<string, string>[], overrides: Partial<ArtifactCase> = {}): ArtifactCase => ({
+    arm: ARM,
+    id: 1,
+    passed: true,
+    dropped: dropped as never,
+    ...overrides,
+  });
+
+  it('decides a class from one sentence and one statement, executing nothing', () => {
+    // The three name sites, which is the whole taxonomy of `no such column`: the column's home
+    // relative to the tables the statement already reads decides which repair exists.
+    // The statement only has to locate the qualifier; the engine's sentence is what says the name
+    // is wrong, and `qty` lives in `orders`, which this statement already reads.
+    expect(classifyMessage('OperationalError: no such column: o.qty', 'select o.qty from orders o', shop).refusal).toBe(
+      'name-misqualified',
+    );
+    expect(classifyMessage('OperationalError: no such column: items.name', 'select id from orders', shop).refusal).toBe(
+      'name-not-joined',
+    );
+    expect(classifyMessage('OperationalError: no such column: price', 'select id from orders', shop).refusal).toBe('name-nowhere');
+    // A function is not a name, and `YEAR` is separated from its family before either is counted.
+    expect(classifyMessage('OperationalError: no such function: YEAR', 'select 1', shop).refusal).toBe('date-function');
+    expect(classifyMessage('OperationalError: no such function: DATEDIFF', 'select 1', shop).refusal).toBe('other-function');
+  });
+
+  it('reads an artifact written before the record as unmeasured, not as a zero that was observed', () => {
+    const censusOfDropped = droppedCensus({ cases: [row()] }, ARM, anything);
+    expect(censusOfDropped.recorded).toBe(false);
+    expect(censusOfDropped.dropped).toBe(0);
+    // No class may read a count off a silence: an empty table here is the absence of the field,
+    // and a reader who took it for a measurement would be reading the artifact's age.
+    expect(censusOfDropped.byClass.every((entry) => entry.dropped === 0)).toBe(true);
+  });
+
+  it('reads a kept record with nothing in it as the only zero worth publishing', () => {
+    const censusOfDropped = droppedCensus({ candidateRecord: 'kept', cases: [row()] }, ARM, anything);
+    expect(censusOfDropped.recorded).toBe(true);
+    expect(censusOfDropped.dropped).toBe(0);
+  });
+
+  it('counts and classifies what a case dropped, and keeps the statement apart from the sentence', () => {
+    const censusOfDropped = droppedCensus(
+      {
+        candidateRecord: 'kept',
+        cases: [
+          kept([
+            // The statement is what a later turn would rewrite; the sentence is what decides its
+            // class. A record with only one of the two cannot be turned into either.
+            { stage: 'engine', message: 'OperationalError: no such column: items.name', sql: 'select id from orders', source: 'values' },
+            { stage: 'engine', message: 'OperationalError: no such function: YEAR', sql: 'select YEAR(d) from orders', source: 'values' },
+            // A guard refusal has a sentence and no statement: the pipeline refuses the reply
+            // before the harness runs it and does not hand the text back.
+            { stage: 'engine', code: 'NL2C_E_GUARD_REJECTED', message: 'statement rejected: write', source: 'values' },
+            // An endpoint that did not answer is not a refusal, and no class may claim it: the
+            // repair is a key or a deadline, and there is no statement to rewrite.
+            { stage: 'llm', message: 'the endpoint did not answer' },
+          ]),
+        ],
+      },
+      ARM,
+      anything,
+    );
+    expect(censusOfDropped.recorded).toBe(true);
+    expect(censusOfDropped.dropped).toBe(4);
+    // The three mechanisms are counted apart, because the repairs are: a key, an extraction, and a
+    // statement that must not run.
+    expect(censusOfDropped.byStage).toEqual({ llm: 1, engine: 3, unparsed: 0 });
+    const byClass = Object.fromEntries(censusOfDropped.byClass.map((entry) => [entry.refusal, entry]));
+    expect(byClass['name-not-joined']).toEqual({ refusal: 'name-not-joined', dropped: 1, withStatement: 1 });
+    expect(byClass['date-function']).toEqual({ refusal: 'date-function', dropped: 1, withStatement: 1 });
+    // `other` is the class for a sentence no rule reads — a guard that refused a write, here. It is
+    // not a bucket for outages: the `llm` candidate above is counted by stage and by no class.
+    expect(byClass.other).toEqual({ refusal: 'other', dropped: 1, withStatement: 0 });
+    expect(censusOfDropped.byClass.reduce((sum, entry) => sum + entry.dropped, 0)).toBe(censusOfDropped.byStage.engine);
+  });
+
+  it('sites a name from the statement the candidate carried, not from the case that answered', () => {
+    // The candidate names a table the *candidate* reads, which on a mixed arm can be a different
+    // set from the statement the case was scored on. Reading the site off the winner would move a
+    // `name-misqualified` into `name-not-joined` on exactly the cases the arm exists for.
+    const censusOfDropped = droppedCensus(
+      {
+        candidateRecord: 'kept',
+        cases: [
+          kept([{ stage: 'engine', message: 'no such column: o.name', sql: 'select o.name from items o', source: 'values' }]),
+        ],
+      },
+      ARM,
+      anything,
+    );
+    expect(censusOfDropped.byClass.find((entry) => entry.refusal === 'name-misqualified')?.dropped).toBe(1);
+  });
+
+  it('ignores the candidates of another arm, which is the whole artifact and not this reading', () => {
+    const censusOfDropped = droppedCensus({ candidateRecord: 'kept', cases: [kept([{ stage: 'engine', message: 'no such column: price' }], { arm: 'elsewhere' })] }, ARM, anything);
+    expect(censusOfDropped.dropped).toBe(0);
+    expect(censusOfDropped.recorded).toBe(true);
+  });
+});
+
 describe('the problems a census can raise', () => {
   const base = (overrides: Partial<Census> = {}): Census => ({
     split: 'dev',
@@ -312,15 +458,66 @@ describe('the problems a census can raise', () => {
     classes: tallyRefusals([]),
     rows: [],
     drops: { goldFailed: 0, unretained: 0, unknownQuestion: 0, otherArm: 0 },
+    candidates: noCandidates(),
     problems: [],
     ...overrides,
   });
 
-  it('says so when the artifact holds no refusal, rather than reporting a clean zero', () => {
+  it('says so when the artifact holds no refusal and no candidate record, rather than reporting a clean zero', () => {
     // The arm whose guard drops a refused candidate before the judge produces exactly this shape:
     // 0 refusals and 7 "no sample survived" cases. A tool that printed an empty table and exited 0
-    // would have called that a measurement.
-    expect(censusProblems(base())).toEqual(['REF: this artifact holds no refused case, so the taxonomy measured nothing']);
+    // would have called that a measurement — and the reason it cannot is that the artifact holds
+    // no record of the level where the refusals happened.
+    expect(censusProblems(base({ candidates: noCandidates(false) }))).toEqual([
+      'REF: this artifact holds no refused case and keeps no candidate-level record, so the taxonomy measured nothing',
+    ]);
+  });
+
+  it('accepts a zero from an artifact that kept what it dropped, because that zero was observed', () => {
+    // The same numbers with the record present. Nothing changes in the case table and the run is
+    // allowed to publish: "no refusal" and "no refusal visible here" are the two states the marker
+    // exists to separate, and only one of them is a measurement.
+    expect(censusProblems(base({ candidates: noCandidates(true) }))).toEqual([]);
+    // ...and a case-level zero beside a candidate-level refusal is also silence-free: the refusal
+    // happened, one level down, and the class table says what it was.
+    const recorded: DroppedCensus = {
+      recorded: true,
+      dropped: 2,
+      byStage: { llm: 0, engine: 2, unparsed: 0 },
+      byClass: [{ refusal: 'name-not-joined', dropped: 2, withStatement: 2 }],
+      rows: [],
+    };
+    expect(censusProblems(base({ candidates: recorded }))).toEqual([]);
+  });
+
+  it('fails when the candidate classes do not add up to the candidates the artifact says it dropped', () => {
+    // The identity the two levels have to satisfy together: every engine refusal lands in a class,
+    // and the classes plus the two other mechanisms are the total. A table that classified two of
+    // three would be a taxonomy over a population it silently shrank.
+    const short: DroppedCensus = {
+      recorded: true,
+      dropped: 3,
+      byStage: { llm: 0, engine: 3, unparsed: 0 },
+      byClass: [{ refusal: 'name-not-joined', dropped: 2, withStatement: 2 }],
+      rows: [],
+    };
+    // Both identities fail at once here and both are reported: three refusals with two classified
+    // is a shrunken class table, and two classified plus no other mechanism is not the three the
+    // artifact says it dropped. A reader needs both sentences to know which side lost the third.
+    expect(censusProblems(base({ candidates: short }))).toEqual([
+      'REF: 2 candidate(s) classified against 3 the engine refused',
+      'REF: 3 candidate(s) dropped against 2 classified and 0 by another mechanism',
+    ]);
+    const miscounted: DroppedCensus = {
+      recorded: true,
+      dropped: 4,
+      byStage: { llm: 1, engine: 2, unparsed: 0 },
+      byClass: [{ refusal: 'name-not-joined', dropped: 2, withStatement: 2 }],
+      rows: [],
+    };
+    expect(censusProblems(base({ candidates: miscounted }))).toEqual([
+      'REF: 4 candidate(s) dropped against 2 classified and 1 by another mechanism',
+    ]);
   });
 
   it('fails when the classes do not add up to the refusals, or the failures to the artifact', () => {
@@ -465,12 +662,17 @@ describe('an artifact against a real database', () => {
    * message, which can only be produced by running the statement against the database this fixture
    * is about to write.
    */
-  const fixture = (cases: readonly ArtifactCase[] | ((dir: string) => readonly ArtifactCase[])): Fixture => {
+  const fixture = (
+    cases: readonly ArtifactCase[] | ((dir: string) => readonly ArtifactCase[]),
+    candidateRecord?: string,
+  ): Fixture => {
     const dir = mkdtempSync(join(tmpdir(), 'refusals-'));
     const data = writeMiniBirdDataset(dir);
     const artifact = join(dir, 'artifact.json');
     const rows = typeof cases === 'function' ? cases(dir) : cases;
-    writeFileSync(artifact, JSON.stringify({ split: 'minidev', cases: rows }));
+    // The marker is written at the top of the artifact, which is where the runner puts it: a case
+    // cannot say whether the run looked, because a case that lost nothing has nothing to say.
+    writeFileSync(artifact, JSON.stringify({ split: 'minidev', ...(candidateRecord === undefined ? {} : { candidateRecord }), cases: rows }));
     return { dir, artifact, settings: resolveRefusalSettings(['--artifact', artifact, '--arm', ARM], dir, env(data)) };
   };
 
@@ -539,11 +741,42 @@ describe('an artifact against a real database', () => {
   });
 
   it('reports an arm with no refusal rather than an empty table, which is the shape a guard produces', async () => {
+    // This fixture is the shape a guard produces *and* the shape a pre-record artifact produces:
+    // a case the arm could not answer, no refused statement, and no candidate-level record. The
+    // message has to say both, because the first alone would send a reader looking at the arm.
     const { settings } = fixture([{ arm: ARM, id: 1, passed: false, errorKind: 'other' }]);
     const census = await runCensus(settings);
     expect(census.kinds).toEqual({ values: 0, arity: 0, refused: 0, unanswered: 1 });
-    expect(census.problems).toEqual(['REF: this artifact holds no refused case, so the taxonomy measured nothing']);
+    expect(census.candidates.recorded).toBe(false);
+    expect(census.problems).toEqual([
+      'REF: this artifact holds no refused case and keeps no candidate-level record, so the taxonomy measured nothing',
+    ]);
     expect(census.asked).toBe(1);
+  });
+
+  it('publishes the zero an artifact with a candidate record earns, and grades the ones below it', async () => {
+    // The same arm, written by a runner that kept its candidates, and the record holds the refusal
+    // the case level could not see: one candidate the engine refused while the case answered with
+    // another. That is the state `select-mixed-rule` could not reach for a hundred rounds.
+    // A column no table in this fixture has, so the class is `name-nowhere`: no rewrite and no
+    // join can reach a name that does not exist. `itemz.id` would have been `name-misqualified`,
+    // because `id` is a real column of a table the statement reads.
+    const sql = 'select count(*) from items where itemz.zzz = 1';
+    const { settings } = fixture(
+      (dir) => [{ arm: ARM, id: 1, passed: true, dropped: [{ stage: 'engine', message: messageOf(dir, sql), sql, source: 'values' }] }],
+      'kept',
+    );
+    const census = await runCensus(settings);
+    expect(census.candidates.recorded).toBe(true);
+    expect(census.candidates.dropped).toBe(1);
+    expect(census.candidates.byStage).toEqual({ llm: 0, engine: 1, unparsed: 0 });
+    // The class is decided from the corpus's declarations and executes nothing.
+    expect(census.candidates.byClass.find((entry) => entry.refusal === 'name-nowhere')?.dropped).toBe(1);
+    // A zero at the case level beside a one at the candidate level is the whole point, and it is
+    // not a problem: the refusals were seen, they were just one level down.
+    expect(census.kinds.refused).toBe(0);
+    expect(census.problems).toEqual([]);
+    expect(censusLines(census).join('\n')).toContain('1 candidate(s) dropped of 1 case(s)');
   });
 
   it('writes the artifact where the path says, and the entry point prints the same numbers', async () => {
@@ -723,5 +956,16 @@ describe('the dev reading this repository publishes', () => {
     // an empty table, and this row is what a reader has instead.
     expect(BASELINE.secondArm.refused).toBe(0);
     expect(BASELINE.secondArm.unanswered).toBe(7);
+  });
+
+  it('says whether the candidate record existed when these numbers were taken', () => {
+    // The eight classes above are a table over *cases*. A candidate table with eight zeroes in it
+    // would be the same shape and a different fact, so the file states which one this is rather
+    // than leaving a reader to infer it from a version number.
+    expect(BASELINE.candidates.recorded).toBe(false);
+    expect(BASELINE.candidates.invariant).toContain('eight classes');
+    // The sentence a reader hits when the second arm's table is empty has to name the field that
+    // would fill it: "0 refusals" alone reads as a finding about the arm.
+    expect(BASELINE.secondArm.note).toContain('candidateRecord');
   });
 });
