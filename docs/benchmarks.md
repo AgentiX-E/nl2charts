@@ -18635,10 +18635,29 @@ orientation the golds use most.
 
 The counts are recorded in `metrics.json` under `dtypes`, and `test/nvbench2-dtypes.test.ts` checks the
 rule's four sentences against them rather than against this paragraph — a corpus that changed would
-fail CI instead of quietly making the rule false. The arm that measures the rule is the chat tier on
-dev at ¥3, and the reasoning tier only receives it if the chat reading separates: the last three prompt
-changes measured here moved the chat reading by −0.86 (`spread`) and +0.08 (`mirrors`), the reasoning
-reading by +0.34 (`mirrors`), and none of the three separated from zero.
+fail CI instead of quietly making the rule false.
+
+**The rule was then measured, and it did not help.** Chat tier, dev, 750 questions, ¥3.08:
+
+| arm | F1@3 | paired 95% | produced | matched | `first.field` | `first.channels` |
+| --- | ---: | --- | ---: | ---: | ---: | ---: |
+| `count,ranks,corpus,corpus2,steps` | 28.16 | — | 2,083 | 602 | 800 | 414 |
+| **+ `dtype`** | **27.48** | **−0.68 [−2.05, +0.76]** | 2,089 | 587 | 780 | 450 |
+
+Inside the noise, pointing down, and the buckets say why: twenty misses moved out of `first.field`
+and into `first.channels`, and fifteen matches were lost. The rule did not place columns better; it
+made the reply part from the gold somewhere else. So the invariants are true and stating them is not
+the lever — which is a result about the *bucket*, not about the rule. `misplaced` is not a model that
+does not know `color` takes a category; it is a model whose chosen column is right for a different
+gold of the same question, and the gold it answers is not the one it is scored against.
+
+Three prompt branches have now closed on this corpus in three rounds — `spread` (−0.86), the mirror
+flag (+0.08 chat, +0.34 reasoning), and `dtype` (−0.68) — none of them separated from zero. The rules
+that did survive (`count`, `corpus`, `corpus2`, `steps`, and `ranks` for the chat tier) all changed
+what the reply *enumerates*; the three that failed all tried to improve how it *arranges* what it
+already enumerated. That is a narrower and more useful statement than "prompt engineering plateaus",
+and it points the next round at the enumeration itself — which on this corpus is the width `k` and
+the cost of a wider ask, not another sentence.
 
 ### What the gold sets are built from, counted rather than assumed
 

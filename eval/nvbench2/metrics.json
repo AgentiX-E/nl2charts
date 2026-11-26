@@ -450,6 +450,52 @@
         "promptTokens": 914501,
         "completionTokens": 148785,
         "yuan": 3.02
+      },
+      "count+ranks+corpus+corpus2+steps+dtype": {
+        "run": 45742440016,
+        "rules": [
+          "count",
+          "ranks",
+          "corpus",
+          "corpus2",
+          "steps",
+          "dtype"
+        ],
+        "f1": {
+          "1": 0.2109,
+          "3": 0.2748,
+          "5": 0.2748
+        },
+        "hit": {
+          "1": 0.4213,
+          "3": 0.4907,
+          "5": 0.4907
+        },
+        "predictions": 2089,
+        "matched": 587,
+        "first": {
+          "mark": 177,
+          "channels": 450,
+          "field": 780,
+          "aggregate": 20,
+          "properties": 15,
+          "transform": 60,
+          "rest": 0
+        },
+        "countFieldless": 9,
+        "promptTokens": 958751,
+        "completionTokens": 144847,
+        "yuan": 3.08,
+        "pair": {
+          "base": "count+ranks+corpus+corpus2+steps",
+          "delta": -0.006752,
+          "low": -0.0205,
+          "high": 0.0076,
+          "separated": false,
+          "questions": 750,
+          "resamples": 2000,
+          "because": "the ninth rule and the third one measured against this base. It states what the golds do rather than what a sentence means — color is a category in 2,583 of 2,583 encodings, x carries no aggregate in 0 of 3,530 — and it reads -0.68pp inside the noise. The mechanism is visible in the buckets rather than in the mean: 20 misses moved from `first.field` (800 to 780) into `first.channels` (414 to 450) and 15 matches were lost, so the rule changed where the reply parts from the gold without changing whether it agrees. Knowledge of the invariant is not what the misplaced bucket lacks."
+        }
       }
     },
     "selected": {
