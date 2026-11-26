@@ -21993,3 +21993,39 @@ gold statements the engine can run, dev's are the ones a leaderboard scores, and
 factor of 1.8 (2.78pp against 1.58pp). The floor guards against a regression larger than the split can
 resolve, which is what every floor in `eval/baseline/bird.json` does — and 64.3 is the first of them
 that is a threshold under the thing being sold.
+
+### What a refinement turn could buy on BIRD, priced before it is dispatched
+
+The next step the plan names is a multi-agent round — MAC-SQL's Refiner, CHESS's unit tester, or
+OpenSearch-SQL's error-specific revision, ¥45–60 over three days. All three share one trigger: **the
+statement is sent back to the model with the error the engine returned**. So the size of the market is
+not "the failures", it is "the failures that carry an error", and the census two sections up already
+counted them.
+
+| population on dev (1,532 questions) | cases | what a refinement turn sees | can it act? |
+| --- | ---: | --- | --- |
+| `values` | 418 | nothing — the statement executed and returned rows | **no**: no error, and the gold is not in the prompt |
+| `arity` | 76 | nothing — it executed | **no**: the reply's width is not in the error; the width tool had to execute every subset of the select list to price that, at an oracle's ceiling |
+| refused, no rule reaches it | 25 | the engine's own sentence | **yes in principle** — 1.63pp is the whole ceiling |
+| of those: plausible for a refiner | 24 | `name-not-joined` 17, `date-function` 2, `name-misqualified` 2, `step-budget` 2, `statement-count` 1 | 1.57pp |
+| of those: not plausible | 1 | `DATEDIFF`, whose question's own gold answers with a day-of-month difference | 0 |
+
+Two of the 28 are already fixed deterministically by the round before this one, which is why the ceiling
+is 25 and not 28. The arithmetic that a dispatch has to beat, written down before it is paid for:
+
+| quantity | value |
+| --- | --- |
+| ceiling | **1.63pp** (25 of 1,532), **1.57pp** if the refiner cannot fix `DATEDIFF` |
+| registered criterion | ≥ **+1.0pp** with exact McNemar p < 0.05 on dev — i.e. ≥ 16 of the 25 cases |
+| cost | ¥45–60 for three days, 2 calls a case at the refine step |
+| price per point | **¥28–37** a point, against ¥0 for the two rewrites already in the tree and ¥0.20pp/¥0 for round 199's |
+
+This is the most expensive point on the table and it is the only one left on BIRD, which is why it is
+registered here rather than argued for: a reader can check afterwards whether 16 of 25 happened, and a
+refiner that lands at 10 of 25 (+0.65pp, p = 0.20) has not failed — it has read the ceiling correctly
+and the next budget should go elsewhere.
+
+**What the comparison buys.** VisCodeBench is the only leaderboard row with no number, and closing it
+costs ¥20–30 of a fetcher and a fixed corpus — a *new row* against *1.6 points on an existing one*.
+Both are worth doing; only one of them can be paid for this week, and the argument for which is a
+sentence about what the table is missing rather than about what the model can do.
