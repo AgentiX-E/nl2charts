@@ -21,6 +21,7 @@ import {
   assertDissentRule,
   assertEvidence,
   assertFieldBlockFired,
+  assertIntentFired,
   assertMaskingFired,
   assertMaskingRule,
   assertPairwiseFired,
@@ -1838,6 +1839,36 @@ describe('the conditional fourth opinion', () => {
     );
     expect(() => assertDissentRule({ name: 'child', dissent: 'no-such-arm', vote: 3, mixed: ['a', 'b', 'c'] })).toThrow(/which is not an arm/);
     expect(() => assertDissentRule({ name: 'child', vote: 3 })).not.toThrow();
+    // A dissent with no `vote` declared is a pool of one, and the sentence has to say so from the
+    // default rather than from a number the arm never wrote: `vote ?? 1` is the whole reason an arm
+    // that samples nothing can still reach this refusal.
+    expect(() => assertDissentRule({ name: 'child', dissent: 'values' })).toThrow(/draws 1 candidate/);
+  });
+});
+
+describe('the intent source that was asked and never read', () => {
+  const asked = (read: 'ok' | 'not-json'): CaseRun => ({
+    id: '1',
+    passed: false,
+    predicted: 'select 1',
+    reason: 'values',
+    strict: false,
+    attempts: 1,
+    calls: 1,
+    intent: { read },
+  });
+
+  it('refuses an arm whose every rendered reply was refused, and stays quiet above the floor', () => {
+    // Two zeros, two sentences: no record at all is a wiring break, records that are all refusals
+    // mean the rule is wrong for the model in front of it. This is the second one, and it is a
+    // defect rather than a finding because the vocabulary was never exercised — an accuracy
+    // published here would be its parent's with a longer prompt and an extra call.
+    expect(() => assertIntentFired('grammar', [asked('not-json'), asked('not-json')], 2)).toThrow(
+      /none of them became a statement/,
+    );
+    expect(() => assertIntentFired('grammar', [asked('ok'), asked('not-json')], 2)).not.toThrow();
+    // Below the instrument floor the share is an anecdote, and a refusal at n=1 is a reading.
+    expect(() => assertIntentFired('grammar', [asked('not-json')], 2)).not.toThrow();
   });
 });
 

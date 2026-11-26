@@ -105,6 +105,23 @@ cannot be argued with.
   `docs/benchmarks.md` records the spread instead of silently substituting a later sample.
 
 ### Fixed
+- **`--allow-regression` recorded a drop it could not authorise, and the coverage it was invoked for
+  turned out to be reachable.** The eval coverage ratchet refuses a file below its recorded level
+  unless the drop is accepted with a reason; the acceptance appended the drop to `regressions` and
+  then kept `max(before, after)` in `files`. `compare` reads `files` and never the regression list,
+  so the reason sat beside a build that failed on the same line at every push — the flag was a no-op
+  with good prose, which is how `run.ts`'s 95.87 got "recorded" and CI stayed red. `mergeLedger` now
+  takes the acceptance and moves an accepted dimension to the measured value, leaving every dimension
+  that did *not* drop at the maximum; the self-test asserts both halves, including that the run after
+  an accepted drop fails again at 79 (23 checks to 28). Unblocking the accounting then made the real
+  question askable — did the drop have to be accepted at all — and the answer was no: the three
+  `assertReportComplete` refusals for `pairwise`, `samples` and `demonstrations` had never had their
+  throw executed, guards nobody had watched refuse, and `assertIntentFired`'s refusal plus
+  `assertDissentRule`'s undeclared-`vote` sentence were unread for the same reason. Four tests now
+  drive those refusals *and* the row that satisfies each, because a guard that refuses everything
+  covers the same line and would fail the run it was written to protect. `run.ts` branches went
+  95.87 → **96.22** (2,169 of 2,254), above the ledger's 96.13, so nothing is recorded and no
+  threshold moved.
 - **Two documents each said which arm ships, and they named different arms.** The coverage table
   cited `select-mixed` for BIRD dev — its floor 62.5 beside its 62.34 reading — while the row under
   it (`R-VES`, 59.81) was measured on `macsql-prompt` at 65.93, which is the arm `SHIPPED_SQL` sends

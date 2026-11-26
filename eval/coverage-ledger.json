@@ -419,10 +419,10 @@
       "branches": 99.18
     },
     "eval/bird/run.ts": {
-      "lines": 99.48,
-      "statements": 99.48,
+      "lines": 99.62,
+      "statements": 99.62,
       "functions": 100,
-      "branches": 96.13
+      "branches": 96.22
     },
     "eval/bird/samples.ts": {
       "lines": 100,
@@ -862,12 +862,5 @@
       "functions": 100,
       "branches": 96.9
     }
-  },
-  "regressions": [
-    {
-      "at": "2026-11-26",
-      "reason": "eval/bird/run.ts branches 96.13 -> 95.87: the two new conditional spreads that write the candidate record, plus three defensive fallbacks no fixture reaches (executed.error, lookup.cause.errorKind, lookup.cause.error are each undefined only on a code path the suite cannot construct). Absolute 95.87% over 10.6k lines, above the 95% standard; the round that next touches the pool path should add the fixture rather than record this again.",
-      "drops": []
-    }
-  ]
+  }
 }

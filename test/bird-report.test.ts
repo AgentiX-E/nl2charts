@@ -368,3 +368,75 @@ describe('report completeness', () => {
     expect(() => assertReportComplete({})).not.toThrow();
   });
 });
+
+/**
+ * The three refusals in `assertReportComplete` that had never been run.
+ *
+ * Coverage put them here, and that is the right reason to write them: a guard whose throw has
+ * never executed is a guard nobody has watched refuse. Each pair below asserts the refusal *and*
+ * the row that satisfies it, because a guard that refuses everything covers the same line and
+ * would fail the run it was written to protect.
+ */
+describe('the funnels a row may not omit, and the rows that carry them', () => {
+  it('refuses a knockout arm whose pairwise comparison never reached the row', () => {
+    // The bill is `k - 1` a case and the failure is silent: a knockout that compared nothing
+    // reports a mean cost and an accuracy that reads like a comparison's result.
+    expect(() => assertReportComplete({ arms: [{ arm: 'select-pair', total: 1532, candidateRecall: 0.7, spend: { asked: 1532, priced: 1532 }, format: FORMAT }] })).toThrow(
+      /decides by knockout and its row carries no pairwise funnel/,
+    );
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'select-pair',
+            total: 1532,
+            candidateRecall: 0.7,
+            spend: { asked: 1532, priced: 1532 },
+            pairwise: { asked: 1532, comparisons: 1200, unreadable: 40 },
+            format: FORMAT,
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it('refuses an arm that carries stored values and no block funnel', () => {
+    // The block is the arm's only cost. Without the count, "the values did not help" and "the
+    // values arrived on a tenth of the cases" are the same number.
+    expect(() => assertReportComplete({ arms: [{ arm: 'inline+evidence+samples', total: 1532, format: FORMAT }] })).toThrow(
+      /carries stored values and its row carries no block funnel/,
+    );
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'inline+evidence+samples',
+            total: 1532,
+            sampleBlock: { cases: 1400, withValues: 1400, columns: 3, empty: 0 },
+            format: FORMAT,
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it('refuses a worked-examples arm whose demonstration funnel was dropped', () => {
+    // A delta on this arm has to be placed on the cases that actually read an example; the row
+    // without the funnel reports one number for two different experiments.
+    expect(() => assertReportComplete({ arms: [{ arm: 'inline+icl', total: 1532, format: FORMAT }] })).toThrow(
+      /carries worked examples and its row carries no demonstration funnel/,
+    );
+    expect(() =>
+      assertReportComplete({
+        arms: [
+          {
+            arm: 'inline+icl',
+            total: 1532,
+            demonstrations: { cases: 1532, blocks: 3, examples: 3, rewritten: 0 },
+            format: FORMAT,
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+});

@@ -104,8 +104,17 @@ export function unmeasuredRecord(entry) {
  * record one, and the reason is written into the ledger so the next reader can weigh it.
  * The one exception is a record with no measurement behind it: it is replaced by the first
  * one that has.
+ *
+ * `accepted` is that flag arriving here, and it has to change the merged number rather than
+ * only annotate it. The first version kept `max(before, after)` and appended the drop to
+ * `regressions`, which read like acceptance and behaved like nothing: `compare` reads `files`
+ * and never the regression list, so the next run failed on the same file, with the same
+ * sentence, forever — the recorded reason could not authorise the number it explained. A
+ * regression that has been accepted *is* the new level; anything else makes
+ * `--allow-regression` a no-op with good prose. The ratchet is still a ratchet for everything
+ * that was not named: only the dimensions in `drops` move, and only when a reason is given.
  */
-export function mergeLedger(previous, next) {
+export function mergeLedger(previous, next, accepted = false) {
   const files = {};
   const drops = [];
   const names = new Set([...Object.keys(previous.files ?? {}), ...Object.keys(next.files)]);
@@ -126,10 +135,11 @@ export function mergeLedger(previous, next) {
       // The same tolerance the comparison uses. It was strict here, so a hundredth of a point
       // of jitter — the difference between 98.97% and 98.96% of sixty-odd lines — refused to
       // record a run at all, while `compare` would have called the same move noise.
-      if (after[dimension] < before[dimension] - TOLERANCE_PP) {
+      const fell = after[dimension] < before[dimension] - TOLERANCE_PP;
+      if (fell) {
         drops.push({ file: name, dimension, before: before[dimension], after: after[dimension] });
       }
-      merged[dimension] = Math.max(before[dimension], after[dimension]);
+      merged[dimension] = fell && accepted ? after[dimension] : Math.max(before[dimension], after[dimension]);
     }
     files[name] = merged;
   }
@@ -331,6 +341,23 @@ function selfTest() {
   const jitter = mergeLedger(ledger, buildLedger(summary({ 'a.ts': 89.9, 'b.ts': 50 }), { now: '2026-02-02' }));
   fail(jitter.drops.length === 0, 'a drop inside the tolerance was reported as a regression by the merge');
 
+  // An accepted regression is the new level, or the flag records a number it cannot authorise:
+  // `compare` reads the files and never the regression list, so keeping the old maximum left a
+  // recorded reason beside a build that failed on the same line at every push.
+  const accepted = mergeLedger(ledger, buildLedger(summary({ 'a.ts': 80, 'b.ts': 60 }), { now: '2026-02-03' }), true);
+  fail(accepted.ledger.files['eval/a.ts']?.lines === 80, 'an accepted regression did not lower the recorded level');
+  fail(accepted.ledger.files['eval/b.ts']?.lines === 60, 'an accepted regression discarded a raise made in the same run');
+  fail(accepted.drops.length === DIMENSIONS.length, 'an accepted regression stopped naming what it absorbed');
+  fail(
+    compare(accepted.ledger, summary({ 'a.ts': 80, 'b.ts': 60 })).length === 0,
+    'the run that accepted a regression still fails the comparison it was written to pass',
+  );
+  // What it does not do: accept the *next* drop without a second reason.
+  fail(
+    compare(accepted.ledger, summary({ 'a.ts': 79, 'b.ts': 60 })).length === DIMENSIONS.length,
+    'an accepted regression licensed every later drop on the same file',
+  );
+
   // Standing: the target is per file and all four dimensions.
   const standingResult = standing(summary({ 'a.ts': 96, 'b.ts': 94 }));
   fail(standingResult.done.join(',') === 'eval/a.ts', 'the standing list does not separate files that meet the target');
@@ -378,9 +405,9 @@ function main(argv) {
   const previous = existsSync(LEDGER) ? JSON.parse(readFileSync(LEDGER, 'utf8')) : { files: {} };
 
   if (argv.includes('--update')) {
-    const { ledger, drops } = mergeLedger(previous, buildLedger(summary));
     const allowIndex = argv.indexOf('--allow-regression');
     const reason = allowIndex === -1 ? undefined : argv[allowIndex + 1];
+    const { ledger, drops } = mergeLedger(previous, buildLedger(summary), reason !== undefined);
     if (drops.length > 0 && reason === undefined) {
       for (const drop of drops) console.error(`REFUSED: ${drop.file} ${drop.dimension} ${drop.before}% -> ${drop.after}% needs --allow-regression <reason>`);
       process.exit(1);
