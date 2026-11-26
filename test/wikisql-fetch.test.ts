@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ARCHIVE, countLines, extract, inspect, main, planOf, sha256Of, sourceUrl } from '../eval/wikisql/fetch.mjs';
+import { ARCHIVE, ORIGIN, countLines, extract, fetchFromApi, inspect, main, planOf, sha256Of, sourceUrl } from '../eval/wikisql/fetch.mjs';
 
 // The fetcher's job is to refuse a corpus that is not the corpus. These tests build the archive and
 // the cache with real files — a real bzip2 tar for `extract`, real JSONL for `inspect` — because a
@@ -153,5 +153,72 @@ describe('main', () => {
   it('refuses a split name it does not know', async () => {
     await expect(main(['--split', 'validation', '--offline'])).rejects.toThrow(/unknown WikiSQL split/);
     await expect(main(['--offline', '--split'])).rejects.toThrow(/--split needs a name/);
+  });
+});
+
+describe('the second transport, because one mirror is a dependency and not a transport', () => {
+  /** A response object, because the fetcher reads `.ok`, `.status` and `.json()` and nothing else. */
+  const response = (status: number, body: unknown): Response =>
+    ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
+
+  /** A fake GitHub that answers the tree, then one blob. */
+  const sources = (blob: unknown, entry: { path: string; sha: string } | undefined = { path: ARCHIVE.name, sha: 'abc123' }): typeof fetch => {
+    const routes: Record<string, unknown> = {
+      [`https://api.github.com/repos/${ORIGIN.repo}/git/trees/${ORIGIN.ref}`]: { tree: entry === undefined ? [] : [entry] },
+      'https://api.github.com/repos/salesforce/WikiSQL/git/blobs/abc123': blob,
+    };
+    return (async (input: string) => {
+      const body = routes[input];
+      return body === undefined ? response(404, { message: 'not found' }) : response(200, body);
+    }) as unknown as typeof fetch;
+  };
+
+  it('writes the bytes the blob endpoint holds, base64 and all', async () => {
+    const dir = workspace();
+    const target = join(dir, ARCHIVE.name);
+    const payload = Buffer.from('a tar.bz2 that is only a string');
+    await fetchFromApi(target, sources({ encoding: 'base64', content: `${payload.toString('base64')}\n` }));
+    expect(readFileSync(target)).toEqual(payload);
+  });
+
+  it('says which file the repository does not have, rather than writing an empty archive', async () => {
+    const dir = workspace();
+    await expect(fetchFromApi(join(dir, 'x'), sources({}, { path: 'other.tar.bz2', sha: 'abc123' }))).rejects.toThrow(
+      `no ${ARCHIVE.name}`,
+    );
+  });
+
+  it('refuses an encoding it cannot decode', async () => {
+    const dir = workspace();
+    await expect(fetchFromApi(join(dir, 'x'), sources({ encoding: 'none', content: '' }))).rejects.toThrow('rather than base64');
+  });
+
+  it('names the status of a refusal instead of parsing an error page as a blob', async () => {
+    const dir = workspace();
+    const missing: typeof fetch = (async () => response(503, { message: 'unavailable' })) as unknown as typeof fetch;
+    await expect(fetchFromApi(join(dir, 'x'), missing)).rejects.toThrow('answered 503');
+  });
+
+  it('sends the token when the environment has one, and none when it does not', async () => {
+    const dir = workspace();
+    const seen: (string | undefined)[] = [];
+    const recording = (blob: unknown): typeof fetch =>
+      (async (input: string, init?: RequestInit) => {
+        seen.push((init?.headers as Record<string, string> | undefined)?.authorization);
+        return (sources(blob) as unknown as (a: string, b?: RequestInit) => Promise<Response>)(input, init);
+      }) as unknown as typeof fetch;
+    const blob = { encoding: 'base64', content: Buffer.from('x').toString('base64') };
+    const saved = process.env.GITHUB_TOKEN;
+    try {
+      process.env.GITHUB_TOKEN = 'a-token-that-never-leaves-the-test';
+      await fetchFromApi(join(dir, 'a'), recording(blob));
+      delete process.env.GITHUB_TOKEN;
+      await fetchFromApi(join(dir, 'b'), recording(blob));
+    } finally {
+      if (saved === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = saved;
+    }
+    expect(seen[0]).toBe('Bearer a-token-that-never-leaves-the-test');
+    expect(seen[2]).toBeUndefined();
   });
 });

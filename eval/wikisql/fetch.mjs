@@ -14,6 +14,13 @@
  * looks exactly like a corrupt file, and the earlier conclusion in this repository — "truncated
  * transfer" — was this one line of diagnosis away from being wrong twice.
  *
+ * **And then the fast mirror stopped serving it.** Run `45766271364` fetched jsDelivr's URL and
+ * received **49 bytes**, which the size check refused: jsDelivr's GitHub CDN caps a file at 20 MB and
+ * now answers a refusal instead of the archive. A single fast mirror is therefore not a transport, it
+ * is a dependency on one vendor's size policy — so the archive has two sources and the *digest* is
+ * what makes them interchangeable. The second goes through `api.github.com`'s git-blob endpoint,
+ * which serves the same bytes base64-encoded and has no size policy of its own below 100 MB.
+ *
  *   node eval/wikisql/fetch.mjs                 # dev, the 8,421-question split
  *   node eval/wikisql/fetch.mjs --split test    # 15,878 questions, no public labels
  *   node eval/wikisql/fetch.mjs --offline       # fail if the cache is cold
@@ -57,9 +64,55 @@ export const FILES = {
   'dev.db': 'c3685e41f2de9d17b3c643b285e1aec13eeeeb3dd04189085636c1d637d0978f',
 };
 
-/** Where a split's three files come from, and where they land. */
+/** The fast mirror, which is tried first because it is 46 seconds when it answers at all. */
 export function sourceUrl() {
   return `${MIRROR}/${ARCHIVE.name}`;
+}
+
+/** Where the archive lives in the repository the corpus is published from. */
+export const ORIGIN = {
+  repo: 'salesforce/WikiSQL',
+  ref: 'master',
+};
+
+/**
+ * The second source, and why it is not a fallback in the hand-waving sense.
+ *
+ * `GET /repos/{repo}/git/trees/{ref}` names the blob, `GET /repos/{repo}/git/blobs/{sha}` returns its
+ * bytes base64-encoded in one JSON body, and the result is verified against the same pinned size and
+ * sha256 as the mirror — so the two are one source with two transports rather than two corpora. A
+ * token is used when the environment has one (the workflow passes `github.token`), because
+ * unauthenticated requests are capped at sixty an hour and a cache miss on a busy morning would
+ * spend them on somebody else's jobs.
+ */
+export async function fetchFromApi(target, fetchImpl = fetch) {
+  const headers = { accept: 'application/vnd.github+json' };
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  if (token !== undefined && token !== '') headers.authorization = `Bearer ${token}`;
+  const tree = await jsonOf(
+    `https://api.github.com/repos/${ORIGIN.repo}/git/trees/${ORIGIN.ref}`,
+    headers,
+    fetchImpl,
+  );
+  const entry = (tree.tree ?? []).find((node) => node.path === ARCHIVE.name);
+  if (entry === undefined) throw new Error(`the repository has no ${ARCHIVE.name} at ${ORIGIN.ref}`);
+  console.log(`fetching ${String(ARCHIVE.bytes)} bytes through the git-blob endpoint (${String(entry.sha).slice(0, 12)})`);
+  const blob = await jsonOf(
+    `https://api.github.com/repos/${ORIGIN.repo}/git/blobs/${String(entry.sha)}`,
+    headers,
+    fetchImpl,
+  );
+  if (blob.encoding !== 'base64' || typeof blob.content !== 'string') {
+    throw new Error(`the blob endpoint answered ${String(blob.encoding)} rather than base64`);
+  }
+  writeFileSync(target, Buffer.from(blob.content.replaceAll('\n', ''), 'base64'));
+}
+
+/** One JSON body, with a refusal that names the status rather than parsing an error page. */
+async function jsonOf(url, headers, fetchImpl) {
+  const response = await fetchImpl(url, { headers });
+  if (!response.ok) throw new Error(`${url} answered ${String(response.status)}`);
+  return response.json();
 }
 
 export function planOf(split) {
@@ -134,6 +187,13 @@ export function inspect(split, cache, shape = SPLITS[split]) {
   return { problems, counts: { questions: asked, tables: declared } };
 }
 
+/**
+ * Get the archive, from the first source that can serve it.
+ *
+ * The order is by speed and the acceptance test is the digest: a source that answers with 49 bytes,
+ * a 33 MB HTML paywall page, or a plausible-looking archive of a different release all fail the same
+ * check. That is what makes "two sources" a redundancy rather than a second corpus.
+ */
 async function download(target) {
   if (existsSync(target) && statSync(target).size === ARCHIVE.bytes) {
     const digest = await sha256Of(target);
@@ -147,7 +207,7 @@ async function download(target) {
   console.log(`fetching ${String(ARCHIVE.bytes)} bytes from ${sourceUrl()}`);
   // `--retry` alone is not resume. `-C -` asks for the remainder, and a mirror that truncates the
   // stream is answered with another range request rather than a second full transfer.
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       execFileSync('curl', ['-sL', '-C', '-', '--max-time', '600', '-o', target, sourceUrl()], {
         stdio: 'inherit',
@@ -157,6 +217,12 @@ async function download(target) {
     }
     const size = existsSync(target) ? statSync(target).size : 0;
     if (size === ARCHIVE.bytes) break;
+  }
+  // The mirror is allowed to fail; the corpus is not. A partial file from the first transport is
+  // discarded rather than resumed from the second, because the two do not share an offset.
+  if (!existsSync(target) || statSync(target).size !== ARCHIVE.bytes) {
+    rmSync(target, { force: true });
+    await fetchFromApi(target);
   }
   const size = existsSync(target) ? statSync(target).size : 0;
   if (size !== ARCHIVE.bytes) throw new Error(`archive is ${String(size)} bytes, expected ${String(ARCHIVE.bytes)}`);

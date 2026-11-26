@@ -75,6 +75,9 @@ jobs:
       LLM_BASE_URL: https://api.deepseek.com/v1
       LLM_MODEL: ${{ inputs.model }}
       WIKISQL_SPLIT: ${{ inputs.split }}
+      # The corpus's second transport goes through `api.github.com`, whose unauthenticated rate limit
+      # is sixty requests an hour — a cache miss on a busy morning would spend it on other jobs.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
