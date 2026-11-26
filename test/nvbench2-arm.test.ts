@@ -7,7 +7,7 @@ import type { LlmProvider, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
   answerOf, buildSpecPrompt, chartOf, DEFAULT_RULES, main, mapLimit, parseArgs, parseSpecs, pendingOf,
   DEFAULT_REPLICA, mirrorsOf, mirrorsOfFlag, productPrompt, providerFromEnv, retriesOf, replicaOf, runArm, rulesOf, splitDigest, withMirrors,
-  summaryLine, timeoutMsOf, PROMPT_VERSION, REASONING_RULES, RULES, SPEC_MARKS, type StoredAnswer,
+  summaryLine, timeoutMsOf, PROMPT_VERSION, MAX_FAILED_SHARE, REASONING_RULES, RULES, SPEC_MARKS, type StoredAnswer,
 } from '../eval/nvbench2/arm.js';
 import { cacheKey, openStore } from '../eval/text2vis/content-store.js';
 import { compare } from '../eval/nvbench2/compare.js';
@@ -913,6 +913,19 @@ describe('the command', () => {
     writeFileSync(join(dir, 'metadata.json'), JSON.stringify({ types: { 'a.csv': TYPES } }));
   }
 
+  /** A split of N questions over one table, so a share of failures has a denominator. */
+  function many(dir: string, count: number): void {
+    const rows = Array.from({ length: count }, () => ({
+      csv_file: 'a.csv',
+      nl_query: 'how much per name',
+      gold_answer: JSON.stringify([GOLD]),
+      table_schema: JSON.stringify({ table_columns: ['name', 'amount'], column_examples: { name: ['a'], amount: [1] } }),
+      steps: [],
+    }));
+    writeFileSync(join(dir, 'dev.json'), JSON.stringify(rows));
+    writeFileSync(join(dir, 'metadata.json'), JSON.stringify({ types: { 'a.csv': TYPES } }));
+  }
+
   it('refuses to replay a dispatch whose answers it does not have, and calls nothing', async () => {
     // The failure this prevents is silent and expensive: a hand-typed `--max-tokens` that differs from
     // the run that paid misses every key, the quote is recomputed from the published price, the ceiling
@@ -934,6 +947,63 @@ describe('the command', () => {
     const second = fake(JSON.stringify([GOLD]));
     await main(['--cache', dir, '--budget', 'none', '--replay'], {}, { provider: second });
     expect(second.seen).toHaveLength(0);
+  });
+
+  it('refuses a reading that lost more than a percent of its questions, and names the share', async () => {
+    // 119 of 751 questions died to a 60-second deadline on the reasoning tier and the job went green
+    // with 31.28 next to it — a floor whose distance to the truth is unknown, published as a
+    // measurement. A failure scores zero, so it never shortens the denominator; it pads it.
+    const dir = scratch();
+    many(dir, 40);
+    const provider = fake(JSON.stringify([GOLD]));
+    const real = provider.complete;
+    let calls = 0;
+    const flaky: LlmProvider = {
+      ...provider,
+      complete: async (request) => {
+        calls += 1;
+        // 2 of 40 is 5%, five times the threshold.
+        if (calls <= 2) throw new Error('timeout after 60000ms');
+        return real(request);
+      },
+    };
+    const artifact = join(dir, 'flaky.json');
+    const code = await main(['--cache', dir, '--budget', 'none', '--artifact', artifact], {}, { provider: flaky });
+    expect(code).toBe(3);
+    const written = JSON.parse(readFileSync(artifact, 'utf8')) as { failed: number; asked: number };
+    expect(written.failed).toBe(2);
+    expect(written.asked).toBe(40);
+  });
+
+  it('reads a split that lost under a percent, with the loss counted as a zero', async () => {
+    // The threshold is a share, not a policy against any failure: one dead question in a hundred is
+    // inside the instrument, and refusing it would make a whole split unreadable for a transient.
+    const dir = scratch();
+    many(dir, 100);
+    const provider = fake(JSON.stringify([GOLD]));
+    const real = provider.complete;
+    let calls = 0;
+    const once: LlmProvider = {
+      ...provider,
+      complete: async (request) => {
+        calls += 1;
+        if (calls === 3) throw new Error('reset by peer');
+        return real(request);
+      },
+    };
+    const artifact = join(dir, 'once.json');
+    const code = await main(['--cache', dir, '--budget', 'none', '--artifact', artifact], {}, { provider: once });
+    expect(code).toBe(0);
+    const written = JSON.parse(readFileSync(artifact, 'utf8')) as { failed: number; asked: number; reading: { questions: number } };
+    expect(written.failed).toBe(1);
+    expect(written.reading.questions).toBe(100);
+  });
+
+  it('keeps the threshold inside what the instrument can resolve', () => {
+    // A share worth more than the 1.25pp the A/A pair resolves would make the guard weaker than the
+    // noise it exists to stay under: at 1% of a split, the worst case is 1pp of mean.
+    expect(MAX_FAILED_SHARE).toBeGreaterThan(0);
+    expect(MAX_FAILED_SHARE).toBeLessThan(0.0125);
   });
 
   it('refuses to publish a reading when the endpoint answered nothing, and leaves the artifact behind', async () => {

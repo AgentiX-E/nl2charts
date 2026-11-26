@@ -62,6 +62,18 @@ import { perQuestionOf, readingOf, type Case, type Chart, type FieldTypes, type 
  */
 export const PROMPT_VERSION = 1;
 
+/**
+ * How much of a split may go unanswered before the reading is a floor instead of a measurement.
+ *
+ * A failed call scores zero, so failures do not shorten the denominator — they pad it with zeros, and
+ * the direction of that error is fixed: the arm that failed more reads lower, by an amount nobody can
+ * bound. One percent is the largest share whose worst case is still inside the instrument: on 751
+ * questions it is seven questions, and a mean can move by at most seven questions' worth (1pp), under
+ * the 1.25pp the A/A pair resolves. Above it, the run exits 3 and names the share rather than
+ * publishing a green job, because a green job is what puts a contaminated number in a document.
+ */
+export const MAX_FAILED_SHARE = 0.01;
+
 /** The widths every reading is reported at, because the leaderboard reports these two. */
 const SCORED_KS = [1, 3, 5] as const;
 
@@ -1257,6 +1269,20 @@ export async function main(
   if (report.asked > 0 && report.failed === report.asked) {
     process.stderr.write(`nvbench2 arm: all ${String(report.asked)} questions failed to answer — no call to ${report.model} returned a reply, so this reading is an average over unanswered questions rather than a measurement of the arm. The artifact was written so the failed dispatch can be inspected; re-dispatch when the endpoint answers, and the answers already bought replay from the store.\n`);
     return 2;
+  }
+  // A sixth of the split failing is not transport noise, it is a different question set wearing the
+  // same name: the failures score zero, so the mean is a floor whose distance to the truth nobody
+  // knows. The threshold is one percent because a lost question costs at most its own contribution —
+  // 1% of the mean is 1pp, still under the 1.25pp this instrument resolves on 751 questions — while
+  // the run that motivated this guard lost 119 of 751 (15.8% of the split, and a floor 15 points
+  // below the arm) to 60-second deadlines it never reported.
+  // Compared as integers rather than as a share: `failed / asked > 0.01` puts the boundary at the
+  // mercy of the last bit of a double, so 2 of 200 would be inside on one machine and outside on
+  // another. `failed * 100 > asked` is the same test in exact arithmetic.
+  const failedShare = report.asked === 0 ? 0 : report.failed / report.asked;
+  if (report.failed * 100 > report.asked) {
+    process.stderr.write(`nvbench2 arm: ${String(report.failed)} of ${String(report.asked)} questions failed to answer (${(100 * failedShare).toFixed(1)}%), above the ${(100 * MAX_FAILED_SHARE).toFixed(0)}% a reading of this split tolerates — every failure scores zero, so ${(100 * (report.reading.f1[report.k] ?? 0)).toFixed(2)} is a floor rather than a measurement of ${report.model}. The artifact was written and the answers that did arrive are in the store, so a re-dispatch with a longer per-call deadline buys only the missing ${String(report.failed)}.\n`);
+    return 3;
   }
   return 0;
 }
