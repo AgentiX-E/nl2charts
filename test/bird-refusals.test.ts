@@ -441,6 +441,29 @@ describe('the candidates an artifact kept, and the four ways to read its silence
     expect(censusOfDropped.byClass.find((entry) => entry.refusal === 'name-misqualified')?.dropped).toBe(1);
   });
 
+  it('classifies a sentence it cannot site as `other` rather than guessing a home for it', () => {
+    // `no such column` with no name after it. The taxonomy has no place for it and `other` says so:
+    // a class invented for it would be a class no repair is attached to and no reader can act on.
+    const censusOfDropped = droppedCensus(
+      { candidateRecord: 'kept', cases: [kept([{ stage: 'engine', message: 'no such column' }])] },
+      ARM,
+      anything,
+    );
+    expect(censusOfDropped.byClass.find((entry) => entry.refusal === 'other')?.dropped).toBe(1);
+  });
+
+  it('counts a candidate that carried nothing but its stage, and gives it no class', () => {
+    // An endpoint that did not answer: no statement, no sentence, no source. The stage is the whole
+    // record, and the class table must stay empty — a class here would be an outage wearing a
+    // refusal's name, and the two have different repairs.
+    const censusOfDropped = droppedCensus({ candidateRecord: 'kept', cases: [kept([{ stage: 'llm' }])] }, ARM, anything);
+    expect(censusOfDropped.dropped).toBe(1);
+    expect(censusOfDropped.byStage).toEqual({ llm: 1, engine: 0, unparsed: 0 });
+    expect(censusOfDropped.byClass.every((entry) => entry.dropped === 0)).toBe(true);
+    // ...and the row it does keep has none of the optional fields, rather than empty ones.
+    expect(censusOfDropped.rows).toEqual([]);
+  });
+
   it('ignores the candidates of another arm, which is the whole artifact and not this reading', () => {
     const censusOfDropped = droppedCensus({ candidateRecord: 'kept', cases: [kept([{ stage: 'engine', message: 'no such column: price' }], { arm: 'elsewhere' })] }, ARM, anything);
     expect(censusOfDropped.dropped).toBe(0);
@@ -752,6 +775,20 @@ describe('an artifact against a real database', () => {
       'REF: this artifact holds no refused case and keeps no candidate-level record, so the taxonomy measured nothing',
     ]);
     expect(census.asked).toBe(1);
+  });
+
+  it('sites a name against nothing when the artifact names a case the split does not hold', async () => {
+    // A dropped candidate on a case id the question list does not hold. The census cannot resolve a
+    // database, so the schema is empty and every name is `name-nowhere` — the honest answer for a
+    // record it cannot check, and the same answer the case-level path gives for an unknown question.
+    // Guessing a home from an empty schema would be the tool inventing the corpus.
+    const { settings } = fixture(
+      [{ arm: ARM, id: 999, passed: true, dropped: [{ stage: 'engine', message: 'no such column: price' }] }],
+      'kept',
+    );
+    const census = await runCensus(settings);
+    expect(census.candidates.dropped).toBe(1);
+    expect(census.candidates.byClass.find((entry) => entry.refusal === 'name-nowhere')?.dropped).toBe(1);
   });
 
   it('publishes the zero an artifact with a candidate record earns, and grades the ones below it', async () => {

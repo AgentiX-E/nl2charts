@@ -7,6 +7,28 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A case that answered with a hole in its pool: the candidates a run dropped, kept.** The refusal
+  census read a case's `error` and nothing else, so a voting arm's refusals were invisible — one
+  candidate refused, the other two vote, the case answers, and the artifact said
+  `candidateFailures: { engine: 1 }` with no statement and no sentence. `select-mixed-rule`'s published
+  **0 of 1,532** was a fact about that artifact. Each case may now carry `dropped`: `stage`, `code`,
+  the engine's `message` verbatim, the `sql` verbatim (the only use of the field is to run it again)
+  and `source`, written by both candidate loops and by the arm that generates once. A top-level
+  `candidateRecord: 'kept'` separates "dropped nothing" from "never looked", which is the distinction
+  the census refuses to lose: no record is still a failed run, a record with nothing in it is a zero
+  worth publishing. `bench:bird:refusals` classifies both levels through one `classifyMessage`, and
+  asserts that the eight classes sum to the `engine` stage — a class may not claim an outage. Two bugs
+  found by running it: `failureKindOf` knew two of the seven `errorKind`s and crashed on `guard` (a
+  Mini-Dev-only case; a guard refusal is now `refused`, the statement exists and can be replayed), and
+  `candidateFailures` was never projected into `caseRows`, so the arm-level count had no rows under it.
+- **`macsql-prompt+repair`: the arm for the ceiling round 199 computed and did not spend.** The
+  shipped prompt with one repair turn on the engine's own sentence — the arm that can test the
+  **25 cases = 1.63pp** market the census measured, against a criterion registered before the
+  dispatch (≥ +1.0pp, exact McNemar p < 0.05, ≥ 16 of 25). `bench:spend` prices the pair at ¥5.64 for
+  1,532 questions × 2 arms on a measured basis. It lives in `ON_DEMAND_ARMS` rather than the chain
+  because it is one reading about a mechanism, not a lever the product would send; the arm-level
+  `repair` funnel reports `total`, `firstPass`, `repaired`, `fixedByRepair` and `byClass`, and quoting
+  `total` as the market is how a funnel gets read as an opportunity.
 - **BIRD Mini-Dev has a reading of the arm we ship: 64.31%, and a floor of 64.3 behind it.** The
   coverage row cited `select`'s floor (56.0) with a note admitting it was an arm the product does not
   send, and the reason it never changed was not a missing run but a missing way to ask: the only route

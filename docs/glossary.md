@@ -190,6 +190,16 @@ reach three statements — **+0.20pp**, against +2.13pp for the same exercise on
 Spider, because BIRD's judge executes and Spider's parses. **The worth of a
 dialect repair is the judge's sensitivity to spelling.**
 
+**Dropped candidate** — A candidate a case generated and lost before the judge saw it, kept
+on the case as `dropped` with its `stage` (`llm` / `engine` / `unparsed`), the harness
+`code`, the engine's `message` verbatim, the `sql` verbatim and the `source` that wrote it.
+The statement is what a later turn would rewrite and the sentence is what the class is
+decided by, so neither may be summarised. Distinct from **Refused statement**, which is a
+whole case the engine would not run: a dropped candidate is a hole in a pool that still
+answered, and on a voting arm it is the *only* place a refusal can appear.
+`candidateRecord: 'kept'` at the top of the artifact is what separates "no candidate was
+dropped" from "this artifact never looked".
+
 **Replay provider** — A first-class LLM provider that returns recorded responses
 by matching the prompt. Used in CI so the real pipeline runs deterministically.
 

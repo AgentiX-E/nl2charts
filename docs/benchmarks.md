@@ -22101,3 +22101,73 @@ All three are separable, and only two of them can be *paid* this week without bu
 The refinement dispatch and the candidate record do not share a queue: the record is a local process and
 the dispatch takes the single `bird-eval-DEEPSEEK_API_KEY` slot, so "in parallel" means the record is
 written while the arm runs, which is what the plan already orders.
+
+### A case that answered, with a hole in its pool
+
+The refusal census two sections up reads a case's `error` — the engine's sentence about the statement
+that became the answer, or the one that killed the case. Both are **case-level**, and a voting arm
+produces refusals one level below that. `select-mixed` draws three candidates; if the engine refuses
+one, the other two still vote, the case still answers, and `reason` says `match`. The refusal happened,
+and no field of the artifact carried it.
+
+That is not a rounding detail. `select-mixed-rule`'s published refusal count is **0 of 1,532**, and the
+census refuses to print an empty table as a measurement — its `censusProblems` fails the run instead.
+The zero was true of the artifact and false of the arm, and a hundred rounds of documentation said
+"0 refusals" without anyone able to check it.
+
+**What the runner keeps now.** Each case may carry `dropped`: a list of the candidates that were
+generated and did not arrive, each with `stage` (`llm` / `engine` / `unparsed`), the harness `code`, the
+engine's or the guard's `message` **verbatim**, the `sql` that was refused **verbatim**, and the
+`source` that wrote it. The statement is not truncated because the only use of the field is to run it
+again: a `requalify` or a `year` rewrite is applied to those bytes. And a top-level
+`candidateRecord: 'kept'` says the run kept them, because absence alone cannot say it:
+
+| the artifact says | what a zero in the candidate table means |
+| --- | --- |
+| no `candidateRecord`, no `dropped` anywhere | **nothing was measured** — this file predates the record |
+| `candidateRecord: 'kept'`, no `dropped` on a case | that case dropped no candidate |
+| `candidateRecord: 'kept'`, `dropped: [...]` | these are the candidates, with their classes |
+
+**The identity, not two counts.** The eight classes must sum to the `engine` stage, and the three stages
+must sum to `dropped`. `llm` and `unparsed` are mechanisms outside the class table on purpose: a class
+may not claim an outage, because an endpoint that did not answer has no statement to rewrite and the
+repair is a key rather than a prompt. Both identities are asserted by the tool, so a table that
+classified two of three fails the run.
+
+**Two defects this instrument found by being run, and not by being read:**
+
+1. `failureKindOf` knew `execution` and `other`. The Mini-Dev artifact of `macsql-prompt` holds a
+   **seventh** kind — `guard`, from `guard: multiple-statements (only one statement per call is
+   allowed)` — and the census crashed on it with *"failed without a reason or an error kind"*, which is
+   true of the record and false of the run. The dev split has no guard refusal, so a second corpus was
+   what found it. A guard refusal is now `refused` (the statement exists and can be replayed); every
+   other kind is `unanswered`.
+2. `candidateFailures` was never projected into `caseRows`. The arm level summed a count whose rows did
+   not carry it, so "1,532 cases and 3 refused candidates" could not be turned into "these three".
+   Count and content are written on the same row now, and the reader can check one against the other.
+
+### The arm that spends one turn on the engine's sentence
+
+Section *What a refinement turn could buy on BIRD* priced the market at **25 cases = 1.63pp** and
+registered the criterion without spending it: ≥ +1.0pp with exact McNemar p < 0.05, i.e. ≥ 16 of 25.
+`macsql-prompt+repair` is that arm — the shipped prompt with `repairs: 1`, and the only difference
+from the shipped arm is the turn.
+
+It is in `ON_DEMAND_ARMS`, not the chain, and the reason is the shape of the question rather than its
+size: a dispatch of the pair (`macsql-prompt,macsql-prompt+repair`) answers "does the mechanism exist",
+which is one reading, and a chain that carried it would pay for that reading on every commit.
+
+```bash
+gh workflow run bird-model.yml -f model=deepseek-chat -f base_url=https://api.deepseek.com/v1 \
+  -f secret_name=DEEPSEEK_API_KEY -f split=dev -f aa=none -f concurrency=8 \
+  -f arms=macsql-prompt,macsql-prompt+repair
+```
+
+`bench:spend` prices it at **¥5.64** for 1,532 questions × 2 arms against a measured basis, not a guess.
+The repair turn itself is nearly free — it fires on the refused cases only, 28 of 1,532.
+
+**What the funnel distinguishes.** The arm-level `repair` record carries `total` (every case that
+entered the funnel), `firstPass` (the ones that needed no turn), `repaired` (turns that actually ran),
+`fixedByRepair` (turns that turned a failure into a match) and `byClass` (the engine's own diagnostic
+family, `binding` / `syntax` / …). Quoting `total` as the market is how a funnel gets read as an
+opportunity: on the fixture that answers every refusal, `total` is 7 and `repaired` is 1.
