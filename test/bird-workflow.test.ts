@@ -335,3 +335,56 @@ describe('a workflow step reads an arm the chain actually runs', () => {
     expect(found.length).toBeGreaterThan(0);
   });
 });
+
+describe('a one-arm dispatch is something a caller can ask for', () => {
+  /**
+   * The chain and the control were literals, and that made one question unaskable.
+   *
+   * `bird-eval` in `ci.yml` ran `DEFAULT_ARMS` because `BIRD_ARMS` was never set, and it ran
+   * `inline+evidence` twice because `BIRD_AA` was written here as a word. Both are right for a
+   * routine push — a chain is the only thing that can say which arm moved, and the A/A pair is
+   * the only thing that gives a 1pp delta a scale — and together they made the narrowest useful
+   * run impossible: *what does the arm we ship score on this split*. The only way to run one arm
+   * was to edit `DEFAULT_ARMS` and push, which measures the edit as well as the arm, and the
+   * Mini-Dev split had no floor for `macsql-prompt` for exactly that reason.
+   *
+   * The fix is not "add a flag": it is that the values come from the dispatch and that a blank
+   * one resolves towards the chain. The second half lives in `parseArms` and is tested in
+   * `test/bird-arms.test.ts`; this file asserts the first half, because a workflow that declares
+   * an input and then ignores it reads exactly like one that works.
+   */
+  const text = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
+
+  function envLines(name: string): string[] {
+    return text.split('\n').filter((line) => new RegExp(`^\\s+${name}:`).test(line));
+  }
+
+  it('declares the two inputs, with a blank arm list as the default', () => {
+    const declared = text.slice(text.indexOf('workflow_dispatch:'), text.indexOf('permissions:'));
+    expect(declared).toContain('      arms:');
+    expect(declared).toContain('      aa:');
+    // Blank is "the chain", and the third line of the fix is that a blank cannot mean zero arms.
+    expect(declared).toContain("default: ''");
+    // `none` is the word a one-arm run passes, so the description has to name it.
+    expect(declared).toContain('`none`');
+  });
+
+  it('takes both from the dispatch rather than holding them as literals', () => {
+    for (const name of ['BIRD_ARMS', 'BIRD_AA']) {
+      const lines = envLines(name);
+      expect(lines.length, `${name} is set exactly once`).toBe(1);
+      expect(lines[0], `${name} reads the dispatch`).toContain('inputs.');
+    }
+    // The literal that made the control unavoidable. It is quoted here so the test fails on the
+    // exact bytes that were there, not on a paraphrase of them.
+    expect(text).not.toContain('BIRD_AA: inline+evidence');
+  });
+
+  it('keeps the control on a dispatch that does not ask about it', () => {
+    // `|| 'inline+evidence'`: a dispatch that leaves `aa` blank still gets the A/A pair, because
+    // the routine run needs it and `none` is how a caller says otherwise. Without the fallback a
+    // blank input would silently drop the control from every ordinary dispatch, which is a
+    // measurement quietly becoming a different measurement.
+    expect(envLines('BIRD_AA')[0]).toContain("|| 'inline+evidence'");
+  });
+});

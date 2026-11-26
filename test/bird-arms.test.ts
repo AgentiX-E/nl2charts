@@ -831,6 +831,19 @@ describe('A/A pairs', () => {
     expect(parseArms('names, vote', 'names', DEFAULT_ARMS)).toEqual(['names', 'vote', 'names#2']);
   });
 
+  it('reads a blank arm list as the default chain, because a dispatch cannot send an absent one', () => {
+    // The same defect as the `aa` sentinel above, one field over. `ci.yml` gained an `arms`
+    // input so a single arm can be dispatched — a floor for the arm that ships costs one arm
+    // instead of thirteen — and an input whose caller leaves it blank reaches the runner as
+    // the empty string, not as `undefined`. `undefined` already means "the default chain";
+    // `''` meant "no arms at all", which is a run that spends nothing and measures nothing
+    // while reporting a completed artifact. A blank cannot mean zero arms, because zero arms
+    // is not something a measurement asks for.
+    expect(parseArms('', undefined, DEFAULT_ARMS)).toEqual([...DEFAULT_ARMS]);
+    expect(parseArms('   ', 'none', DEFAULT_ARMS)).toEqual([...DEFAULT_ARMS]);
+    expect(parseArms('names,', 'none', DEFAULT_ARMS)).toEqual(['names']);
+  });
+
   it('resolves a duplicated name to the arm it duplicates', () => {
     // The A/A pair has to run the *same* configuration, or the delta it reports is
     // the difference between two arms rather than the harness's noise.

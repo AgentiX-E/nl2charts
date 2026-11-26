@@ -5689,7 +5689,14 @@ export function assertUniqueArmLabels(labels: readonly string[]): void {  const 
 }
 
 export function parseArms(requested: string | undefined, aa: string | undefined, defaults: readonly string[]): string[] {
-  const names = (requested ?? defaults.join(',')).split(',').map((name) => name.trim()).filter(Boolean);
+  // A blank list is the default chain, not zero arms. `undefined` already meant the default;
+  // `''` reached here as a *request* for nothing, and `parseArms` read it as an empty array —
+  // a run that spends nothing, measures nothing and still writes a completed artifact. The
+  // value now arrives from a dispatch: `ci.yml` gained an `arms` input so one arm can be run
+  // on its own, and a caller who leaves it blank sends the empty string rather than nothing.
+  // Zero arms is not a measurement anyone asks for, so the blank resolves towards the chain.
+  const asked = requested?.trim() ?? '';
+  const names = (asked === '' ? defaults.join(',') : asked).split(',').map((name) => name.trim()).filter(Boolean);
   const trimmed = aa?.trim() ?? '';
   // `none` is the word for "no control", and it exists because an empty value cannot mean that
   // from a dispatch: a workflow input with a non-empty default receives its default when the

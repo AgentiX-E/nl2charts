@@ -6,6 +6,27 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    # Two inputs, and both are about the bill rather than about the code.
+    #
+    # The Mini-Dev job runs the whole chain — thirteen arms over 496 questions — because that
+    # is what a routine push should measure: a whole chain is the only thing that can say
+    # which arm moved. But one question the repository asks repeatedly is narrower: *what
+    # does the arm we ship score on this split*. Answering it needed a dispatch that runs
+    # one arm, and before this input existed the only way to get one was to edit `DEFAULT_ARMS`
+    # and push, which measures the edit as well as the arm.
+    #
+    # `arms` blank means the default chain, and that is enforced in `parseArms` rather than in
+    # this expression: a dispatch that leaves a field empty sends `''`, and a rule that lives
+    # in a YAML is the defect this repository has now recorded twice (rounds 202 and 203).
+    inputs:
+      arms:
+        description: Comma-separated arms (blank = the default chain; each costs a full split)
+        required: false
+        default: ''
+      aa:
+        description: Arm to run twice as an A/A control (`none` = no control, which is what a one-arm run wants)
+        required: false
+        default: 'inline+evidence'
 
 # Cancellation is per job, not per run.
 #
@@ -389,7 +410,13 @@ jobs:
       BIRD_CONCURRENCY: '8'
       # The same arm twice, so the harness measures its own noise at the sample size
       # it publishes. Without it, a 1pp delta between two arms has no scale.
-      BIRD_AA: inline+evidence
+      #
+      # Both of these used to be literals, which made the chain a fact about the workflow
+      # rather than about the run: `BIRD_ARMS` came from `DEFAULT_ARMS` and the control from
+      # one word here. A one-arm dispatch — the floor for the arm that ships, which this split
+      # had no way to take — is exactly the run those literals forbade.
+      BIRD_ARMS: ${{ inputs.arms }}
+      BIRD_AA: ${{ inputs.aa || 'inline+evidence' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
