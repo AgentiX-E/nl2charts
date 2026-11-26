@@ -1278,10 +1278,12 @@ export async function main(
   // below the arm) to 60-second deadlines it never reported.
   // Compared as integers rather than as a share: `failed / asked > 0.01` puts the boundary at the
   // mercy of the last bit of a double, so 2 of 200 would be inside on one machine and outside on
-  // another. `failed * 100 > asked` is the same test in exact arithmetic.
-  const failedShare = report.asked === 0 ? 0 : report.failed / report.asked;
+  // another. `failed * 100 > asked` is the same test in exact arithmetic. The share is computed
+  // inside the branch because that is the only place it is used, and a denominator that cannot be
+  // zero outside it cannot divide by zero inside it either.
   if (report.failed * 100 > report.asked) {
-    process.stderr.write(`nvbench2 arm: ${String(report.failed)} of ${String(report.asked)} questions failed to answer (${(100 * failedShare).toFixed(1)}%), above the ${(100 * MAX_FAILED_SHARE).toFixed(0)}% a reading of this split tolerates — every failure scores zero, so ${(100 * (report.reading.f1[report.k] ?? 0)).toFixed(2)} is a floor rather than a measurement of ${report.model}. The artifact was written and the answers that did arrive are in the store, so a re-dispatch with a longer per-call deadline buys only the missing ${String(report.failed)}.\n`);
+    const share = (100 * report.failed) / report.asked;
+    process.stderr.write(`nvbench2 arm: ${String(report.failed)} of ${String(report.asked)} questions failed to answer (${share.toFixed(1)}%), above the ${(100 * MAX_FAILED_SHARE).toFixed(0)}% a reading of this split tolerates — every failure scores zero, so the line above is a floor rather than a measurement of ${report.model}. The artifact was written and the answers that did arrive are in the store, so a re-dispatch with a longer per-call deadline buys only the missing ${String(report.failed)}.\n`);
     return 3;
   }
   return 0;
