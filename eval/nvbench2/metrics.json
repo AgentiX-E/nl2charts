@@ -1647,5 +1647,76 @@
       "selfRepeat": "The chat tier names one column on two channels 26 times; the reasoning tier never does. `corpus2` already states the prohibition in words, so a second sentence would be a rule aimed at 1.2% of one tier's predictions.",
       "dropouts": "12 of 750 reasoning rows are truncated at the 900-token budget and are scored as zero: a bound of +1.60pp. Buying them back is a full re-dispatch at a larger budget (the budget is in the cache key) at ¥19.72, or 12 targeted calls at ≈¥0.32 whose interval on 12 rows cannot separate from zero. The bound is recorded and the rows are not bought."
     }
+  },
+  "dtypes": {
+    "because": "what kind of column each channel accepts, counted over every gold encoding of both splits (eval/nvbench2/dtypes.ts, offline and free to rebuild). It is recorded because the `dtype` rule states the invariants and a rule may only assert what the corpus shows: color is a category in all 2,583 encodings that name one, size is quantitative and aggregated in all 156, theta is quantitative in all 521, and x carries an aggregate in none of 3,530. The two splits agree on all four, which is why they are stated as invariants rather than as tendencies.",
+    "dev": {
+      "encodings": 4567,
+      "unknown": 0,
+      "channels": {
+        "color": {
+          "category": 1277
+        },
+        "size": {
+          "quantitative": 71
+        },
+        "theta": {
+          "quantitative": 243
+        },
+        "x": {
+          "category": 1420,
+          "quantitative": 414
+        },
+        "y": {
+          "category": 379,
+          "quantitative": 763
+        }
+      },
+      "aggregated": {
+        "size": 71,
+        "theta": 182,
+        "y": 160
+      },
+      "raw": {
+        "color": 1277,
+        "theta": 61,
+        "x": 1834,
+        "y": 982
+      }
+    },
+    "test": {
+      "encodings": 4509,
+      "unknown": 0,
+      "channels": {
+        "color": {
+          "category": 1306
+        },
+        "size": {
+          "quantitative": 85
+        },
+        "theta": {
+          "quantitative": 278
+        },
+        "x": {
+          "category": 1375,
+          "quantitative": 321
+        },
+        "y": {
+          "category": 350,
+          "quantitative": 794
+        }
+      },
+      "aggregated": {
+        "size": 85,
+        "theta": 211,
+        "y": 108
+      },
+      "raw": {
+        "color": 1306,
+        "theta": 67,
+        "x": 1696,
+        "y": 1036
+      }
+    }
   }
 }

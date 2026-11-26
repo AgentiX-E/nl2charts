@@ -122,6 +122,7 @@
     "bench:wikisql:digest": "tsx eval/wikisql/run.ts --digest",
     "bench:spider:check": "tsx eval/spider/check.ts",
     "bench:nvbench2:fetch": "node eval/nvbench2/fetch.mjs",
+    "bench:nvbench2:dtypes": "tsx eval/nvbench2/dtypes.ts",
     "bench:nvbench2:metadata": "python3 eval/nvbench2/metadata.py eval/.cache/nvbench2/database_csv --out eval/.cache/nvbench2/metadata.json",
     "bench:nvbench2:check": "tsx eval/nvbench2/check.ts",
     "bench:nvbench2:shape": "tsx eval/nvbench2/goldshape.ts",

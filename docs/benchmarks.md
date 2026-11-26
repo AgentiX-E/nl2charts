@@ -18602,6 +18602,44 @@ round bought is the decomposition — 23.4% of the largest face is a convention 
 the reference does not share, and no amount of prompt engineering about *which* column is meant can
 address it.
 
+### The channel a column lands on is a question about its kind, not about the question's words
+
+`misplaced` is the second-largest bucket of the field-first face — 151 of 465 — and it is not a choice
+error. The reply names a column a gold names; it puts it where no gold puts it. Three rounds of rules
+have been about *which* column a sentence means (`values`, `ranks`, `corpus`, `corpus2`, `steps`), and
+a fourth about how the array spends its width (`spread`, measured, inside the noise, retired). None of
+them can reach a column that was chosen correctly and then placed wrongly.
+
+So the placement was counted, over every gold encoding of both splits, before any rule was written
+(`pnpm bench:nvbench2:dtypes`, offline, ¥0):
+
+| channel | encodings | share of the channel that is a category | share quantitative | aggregate named |
+| --- | ---: | ---: | ---: | ---: |
+| `color` | 2,583 | **100%** | 0% | 0% |
+| `size` | 156 | 0% | **100%** | **100%** |
+| `theta` | 521 | 0% | **100%** | 75.4% |
+| `x` | 3,530 | 79.2% | 20.8% | **0%** |
+| `y` | 2,286 | 31.9% | 68.1% | 11.7% |
+
+Four of those are absolute, not tendencies, and both splits agree on all four: `dev` reads color
+1,277/1,277 and `test` 1,306/1,306; `size` is 71/71 and 85/85; `theta` is 243/243 and 278/278; `x`
+carries an aggregate in 0 of 1,834 and 0 of 1,696. A corpus that quantised a color, or aggregated an
+axis, would show it here — it does not do either, once, in 9,076 encodings.
+
+That is a rule the prompt did not have. `color` takes a category *and nothing else*, so a measure on
+`color` is not a near miss to be traded against another near miss; it is a category error, and the
+`dtype` rule states it in those terms, together with `theta`/`size` taking the measure and `x` taking
+none of the aggregates. `y` is deliberately left permissive: it is a category in a third of its uses
+because a horizontal bar is a bar, and a rule that called it "the measure channel" would forbid the
+orientation the golds use most.
+
+The counts are recorded in `metrics.json` under `dtypes`, and `test/nvbench2-dtypes.test.ts` checks the
+rule's four sentences against them rather than against this paragraph — a corpus that changed would
+fail CI instead of quietly making the rule false. The arm that measures the rule is the chat tier on
+dev at ¥3, and the reasoning tier only receives it if the chat reading separates: the last three prompt
+changes measured here moved the chat reading by −0.86 (`spread`) and +0.08 (`mirrors`), the reasoning
+reading by +0.34 (`mirrors`), and none of the three separated from zero.
+
 ### What the gold sets are built from, counted rather than assumed
 
 The dev split's 750 questions carry 2,321 gold charts between them, a median of 3 per question. The

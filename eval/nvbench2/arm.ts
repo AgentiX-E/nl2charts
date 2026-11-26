@@ -122,8 +122,16 @@ export const SPEC_AGGREGATES = ['count', 'sum', 'mean', 'min', 'max'] as const;
  *   the question leaves free, which columns could carry it, and which measure, mark and filter it
  *   does name. Asked as a preamble, it makes the enumeration explicit instead of implicit, and step
  *   two is exactly the set the golds are.
+ * - `dtype` — the one thing the other rules never say: which *kind* of column a channel accepts. The
+ *   test split's second-largest field-first bucket is `misplaced` (151 of 465): the reply names a
+ *   column a gold names, on a channel no gold puts it on. That is an assignment error, so a rule
+ *   about which column to choose cannot reach it. The golds answer it absolutely, over 9,076 field
+ *   encodings across both splits (`eval/nvbench2/dtypes.ts`): `color` is a categorical column in
+ *   **2,583 of 2,583**, `size` is quantitative and aggregated in 156 of 156, `theta` is quantitative
+ *   in 521 of 521, and `x` carries an aggregate in **0 of 3,530**. A measure on `color` is not a
+ *   disagreement with the golds; it is a category error, and it is now stated as one.
  */
-export const RULES = ['count', 'ranks', 'variants', 'values', 'corpus', 'corpus2', 'steps', 'spread'] as const;
+export const RULES = ['count', 'ranks', 'variants', 'values', 'corpus', 'corpus2', 'steps', 'spread', 'dtype'] as const;
 export type Rule = (typeof RULES)[number];
 
 /**
@@ -217,6 +225,16 @@ const RULE_TEXT: Readonly<Record<Rule, readonly string[]>> = {
     'that column an entry of its own on the free channel instead of repeating a column you already',
     'used. Only when every column is already taken may two entries share one, and then they differ in',
     'the mark or in the filter.',
+  ],
+  dtype: [
+    'A channel accepts one kind of column, and the kinds are not interchangeable. A column you count,',
+    'sum, average, or take the min or max of is a measure: it takes y, or theta in an arc chart, or',
+    'size when a third measure is encoded, and it never takes x and never takes color. A column whose',
+    'values name things rather than measure them is a category: it takes x or color, and color takes a',
+    'category and nothing else, so a measure on color is wrong before it is compared. A timestamp, or a',
+    'column with as many distinct values as rows, is a dimension and takes x. When the question names a',
+    'measure and the table also holds a categorical column the question does not use, the measure takes',
+    'y and that column takes color, rather than the measure taking color.',
   ],
   steps: [
     'Decide before you answer. Start a line "STEPS:" and then three numbered lines, each one short and',
