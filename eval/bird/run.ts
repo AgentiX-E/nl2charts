@@ -5690,11 +5690,12 @@ export function assertUniqueArmLabels(labels: readonly string[]): void {  const 
 
 export function parseArms(requested: string | undefined, aa: string | undefined, defaults: readonly string[]): string[] {
   // A blank list is the default chain, not zero arms. `undefined` already meant the default;
-  // `''` reached here as a *request* for nothing, and `parseArms` read it as an empty array —
-  // a run that spends nothing, measures nothing and still writes a completed artifact. The
-  // value now arrives from a dispatch: `ci.yml` gained an `arms` input so one arm can be run
-  // on its own, and a caller who leaves it blank sends the empty string rather than nothing.
-  // Zero arms is not a measurement anyone asks for, so the blank resolves towards the chain.
+  // `''` was read as a *request* for nothing, and the function returned an empty array without
+  // saying anything — a run that asks for no arms. Zero arms is not a measurement anyone makes
+  // on purpose: it spends nothing, scores nothing, and there is no arm in the artifact for any
+  // later tool to read. An empty value resolves towards measuring, the same way `tools/ci-scope.mjs`
+  // resolves an unreadable change list, because the failure that costs money is visible in the
+  // bill and the failure that costs a reading is not.
   const asked = requested?.trim() ?? '';
   const names = (asked === '' ? defaults.join(',') : asked).split(',').map((name) => name.trim()).filter(Boolean);
   const trimmed = aa?.trim() ?? '';

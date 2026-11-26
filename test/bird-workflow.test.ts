@@ -336,55 +336,52 @@ describe('a workflow step reads an arm the chain actually runs', () => {
   });
 });
 
-describe('a one-arm dispatch is something a caller can ask for', () => {
+describe('the vehicle for a one-arm run is the one that names no arm', () => {
   /**
-   * The chain and the control were literals, and that made one question unaskable.
+   * Why a narrow run does not go through `ci.yml`, and where it does go.
    *
-   * `bird-eval` in `ci.yml` ran `DEFAULT_ARMS` because `BIRD_ARMS` was never set, and it ran
-   * `inline+evidence` twice because `BIRD_AA` was written here as a word. Both are right for a
-   * routine push — a chain is the only thing that can say which arm moved, and the A/A pair is
-   * the only thing that gives a 1pp delta a scale — and together they made the narrowest useful
-   * run impossible: *what does the arm we ship score on this split*. The only way to run one arm
-   * was to edit `DEFAULT_ARMS` and push, which measures the edit as well as the arm, and the
-   * Mini-Dev split had no floor for `macsql-prompt` for exactly that reason.
+   * The Mini-Dev split had no floor for the arm that ships, and the reason was mechanical: the
+   * only way to run one arm was to edit `DEFAULT_ARMS` and push, which measures the edit as well
+   * as the arm. The obvious fix — an `arms` input on `ci.yml` — was written, pushed (4d58c5a7)
+   * and then withdrawn, because `bird-eval` is not a harness that runs arms; it is a chain audit.
+   * Eight of its steps read `--arm select` and one reads `--arm inline+evidence`, and a missing
+   * arm is an error rather than a note (`eval/bird/cache.ts`: "there is no arm called X"). A
+   * dispatch carrying one arm would therefore be red at the first of them, which is the same
+   * "a step that demands an arm no run produces is red forever" this workflow has already paid
+   * for once.
    *
-   * The fix is not "add a flag": it is that the values come from the dispatch and that a blank
-   * one resolves towards the chain. The second half lives in `parseArms` and is tested in
-   * `test/bird-arms.test.ts`; this file asserts the first half, because a workflow that declares
-   * an input and then ignores it reads exactly like one that works.
+   * `bird-model.yml` is the vehicle: it takes `arms`, `aa` and `split` as inputs, and — this is
+   * the property the test asserts — it names no arm anywhere in its steps, so every arm it
+   * audits is the arm its own artifact carries. The floor for the shipped arm was taken by
+   * dispatching it with `model: deepseek-chat`, `split: minidev`, `arms: macsql-prompt`.
    */
-  const text = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
+  const model = readFileSync(resolve(process.cwd(), '.github/workflows/bird-model.yml'), 'utf8');
+  const ci = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8');
 
-  function envLines(name: string): string[] {
-    return text.split('\n').filter((line) => new RegExp(`^\\s+${name}:`).test(line));
+  function envValue(text: string, name: string): string {
+    const line = text.split('\n').find((row) => new RegExp(`^\\s+${name}:`).test(row));
+    expect(line, `${name} is set`).toBeDefined();
+    return line as string;
   }
 
-  it('declares the two inputs, with a blank arm list as the default', () => {
-    const declared = text.slice(text.indexOf('workflow_dispatch:'), text.indexOf('permissions:'));
-    expect(declared).toContain('      arms:');
-    expect(declared).toContain('      aa:');
-    // Blank is "the chain", and the third line of the fix is that a blank cannot mean zero arms.
-    expect(declared).toContain("default: ''");
-    // `none` is the word a one-arm run passes, so the description has to name it.
-    expect(declared).toContain('`none`');
-  });
-
-  it('takes both from the dispatch rather than holding them as literals', () => {
-    for (const name of ['BIRD_ARMS', 'BIRD_AA']) {
-      const lines = envLines(name);
-      expect(lines.length, `${name} is set exactly once`).toBe(1);
-      expect(lines[0], `${name} reads the dispatch`).toContain('inputs.');
+  it('takes the arm list, the control and the split from the dispatch', () => {
+    for (const name of ['BIRD_ARMS', 'BIRD_AA', 'BIRD_SPLIT']) {
+      expect(envValue(model, name), name).toContain('inputs.');
     }
-    // The literal that made the control unavoidable. It is quoted here so the test fails on the
-    // exact bytes that were there, not on a paraphrase of them.
-    expect(text).not.toContain('BIRD_AA: inline+evidence');
+    // A one-arm run wants no A/A pair — it is a second full arm — and `none` is how it says so.
+    expect(model).toContain('none` = no control');
   });
 
-  it('keeps the control on a dispatch that does not ask about it', () => {
-    // `|| 'inline+evidence'`: a dispatch that leaves `aa` blank still gets the A/A pair, because
-    // the routine run needs it and `none` is how a caller says otherwise. Without the fallback a
-    // blank input would silently drop the control from every ordinary dispatch, which is a
-    // measurement quietly becoming a different measurement.
-    expect(envLines('BIRD_AA')[0]).toContain("|| 'inline+evidence'");
+  it('names no arm in any of its steps, so a narrowed run cannot be red about one', () => {
+    const named = [...model.matchAll(/--arm\s+(\S+)/g)].map((match) => match[1]);
+    expect(named).toEqual([]);
+  });
+
+  it('leaves ci.yml as the chain audit, which is why the input was withdrawn', () => {
+    // Not a wish: the count is the reason the `arms` input does not belong here. If a later round
+    // makes these steps tolerate an absent arm, this test and the decision it records both change.
+    const readers = [...ci.matchAll(/--arm\s+(select|inline\+evidence)\b/g)];
+    expect(readers.length).toBeGreaterThanOrEqual(8);
+    expect(ci).not.toContain('BIRD_ARMS:');
   });
 });

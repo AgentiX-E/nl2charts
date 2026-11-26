@@ -831,14 +831,14 @@ describe('A/A pairs', () => {
     expect(parseArms('names, vote', 'names', DEFAULT_ARMS)).toEqual(['names', 'vote', 'names#2']);
   });
 
-  it('reads a blank arm list as the default chain, because a dispatch cannot send an absent one', () => {
-    // The same defect as the `aa` sentinel above, one field over. `ci.yml` gained an `arms`
-    // input so a single arm can be dispatched — a floor for the arm that ships costs one arm
-    // instead of thirteen — and an input whose caller leaves it blank reaches the runner as
-    // the empty string, not as `undefined`. `undefined` already means "the default chain";
-    // `''` meant "no arms at all", which is a run that spends nothing and measures nothing
-    // while reporting a completed artifact. A blank cannot mean zero arms, because zero arms
-    // is not something a measurement asks for.
+  it('reads a blank arm list as the default chain, because zero arms is not a measurement', () => {
+    // `undefined` already meant "the default chain"; `''` was read as a *request* for nothing and
+    // returned an empty array. A run with an empty arm list spends nothing, scores nothing, and
+    // leaves no arm in the artifact for any later tool to read — and nothing said so.
+    //
+    // This was found while adding an `arms` input to `ci.yml`, and the input was withdrawn (that
+    // job is a chain audit whose steps demand `select` and `inline+evidence`); the reading rule
+    // stays, because the hole it closes does not belong to the input that found it.
     expect(parseArms('', undefined, DEFAULT_ARMS)).toEqual([...DEFAULT_ARMS]);
     expect(parseArms('   ', 'none', DEFAULT_ARMS)).toEqual([...DEFAULT_ARMS]);
     expect(parseArms('names,', 'none', DEFAULT_ARMS)).toEqual(['names']);
