@@ -1,0 +1,19 @@
+{
+  "instrument": "eval/wikisql/ask.ts",
+  "promptVersion": "wikisql-ask@2",
+  "corpus": "WikiSQL dev: 8,421 questions over 2,630 tables in one SQLite file, fetched through two transports and pinned by size and sha256 in eval/wikisql/fetch.mjs",
+  "model": "deepseek-chat",
+  "split": "dev",
+  "asked": 8421,
+  "scored": 8421,
+  "exact": 7183,
+  "exactPct": 85.3,
+  "bag": 7183,
+  "predErrors": 14,
+  "unreadable": 0,
+  "calls": 8421,
+  "yuan": 8.66,
+  "run": 45772639103,
+  "note": "One call a question, one statement back, the judge's own ordered comparison. `exact` and `bag` are the same count, which is the useful half of the row: no statement was right in content and wrong in row order, so the leaderboard's ordered comparison costs nothing on this split. The 14 statements that did not execute stay in the denominator as `predErrors`. The row is a parent, not an arm: one prompt, one call, no candidate set, no repair loop, no vote. Comparability is the caveat that travels with it: dev split, chat-tier model, no training, while every published WikiSQL figure above 90% is a fine-tuned system on test, so the number stands beside the model and the split rather than between them.",
+  "because": "the first reading this corpus has ever had, after four rounds in which the judge existed and nothing was ever handed to it"
+}

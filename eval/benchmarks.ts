@@ -86,27 +86,30 @@ export const BENCHMARKS: readonly Benchmark[] = [
   {
     id: 'wikisql',
     domain: 'text2sql',
-    name: 'WikiSQL (test)',
+    name: 'WikiSQL dev (EX)',
     source: 'https://github.com/salesforce/WikiSQL',
-    corpus: '80,654 question/table pairs over 24,241 tables, single-table, one condition per query',
+    corpus: '8,421 dev questions over 2,630 tables of one SQLite file: single-table, one condition per query',
     metrics: ['EX'],
-    status: 'instrumented',
+    status: 'measured',
+    reading: {
+      file: 'eval/baseline/wikisql.json',
+      path: ['exactPct'],
+      kind: 'run',
+      unit: 'percent',
+      note: 'one call a question, no candidate set and no repair loop; `exact` and `bag` are the same '
+        + 'count (7,183), so the leaderboard\'s ordered comparison costs nothing here; 14 statements '
+        + 'did not execute and stay in the denominator',
+    },
     gap:
-      'The corpus and the judge are both in place and no arm has been dispatched over them. '
-      + '`data.tar.bz2` is 26 MB in one blob and a GitHub blob download dies at about 7 MB, which is '
-      + 'what this row said for two rounds; jsdelivr serves the same blob in 46 s, and '
-      + '`eval/wikisql/fetch.mjs` pins it by size and sha256, tests the bz2 stream and asserts the row '
-      + 'and table counts before writing anything. `eval/wikisql/exec.ts` is the judge: a port of the '
-      + 'reference `lib/query.py` and `lib/dbengine.py`, ordered because the reference compares '
-      + '`fetchall()` tuples, with string condition values lower-cased on both sides. `eval/wikisql/'
-      + 'run.ts` executes every gold twice on dev — 8,421 questions, 0 errors, 0 empty — so the '
-      + 'denominator is one a score can be divided by. The judge is worth what its agreement is '
-      + 'worth, so the port and the reference both answered all 8,421 questions and the two digests '
-      + 'are the same file, `eval/wikisql/reference-digest.json`. What is missing is a number, and a '
-      + 'number needs a predictions file: one statement per question from an arm, which is a prompt '
-      + 'decision rather than a corpus one. It is not first in the queue because the score would '
-      + 'describe a capability this product does not sell — every question is single-table and '
-      + 'single-condition, so the schema card, the join graph and the linker are idle.',
+      'The number is dev, a chat-tier model and no training. Every published WikiSQL figure above 90% '
+      + 'is a fine-tuned system on test (SeaD+EG 93.0), so this row is comparable to a zero-shot '
+      + 'baseline and not to the leaderboard\'s top: the honest statement is "85.30% single-call on '
+      + 'dev", with the model and the split attached, and the leaderboard comparison written against '
+      + 'the systems that trained nothing. Two rendering defects were found before this reading and '
+      + 'are recorded in `docs/benchmarks.md`: the corpus\'s databases name their columns `col0…` '
+      + 'while its JSON names them `Pick…`, and store their text folded while the JSON keeps the '
+      + 'page\'s case. Sending the JSON\'s names and case scored 0 of 40 on a pilot; sending the '
+      + 'engine\'s scored 35 of 40, and the full split followed from there.',
   },
   {
     id: 'spider-dev',

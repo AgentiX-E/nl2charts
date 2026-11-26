@@ -22,6 +22,10 @@ const TREE = {
   'eval/baseline/bird.json': { floors: { minidev: { select: 56 }, dev: { 'select-mixed': 62.5 } } },
   'eval/baseline/bird-ves.json': { rves: 56.56, ex: 65.93, scored: 600, of: 1532 },
   'eval/text2vis/baseline.json': { top1: 664, render: { rendered: 1418 } },
+  // WikiSQL's row cites a percentage and carries the counts beside it; the fixture holds what the
+  // manifest reads, and the file itself is checked against its own counts in
+  // `test/wikisql-baseline.test.ts` rather than here.
+  'eval/baseline/wikisql.json': { exact: 7183, exactPct: 85.3, scored: 8421 },
   // Held as the manifest reads it: a percent under `arms.selected.published`, because every row of
   // this table is a percent and the arm's raw fraction stays in `arms.readings`.
   'eval/nvbench2/metrics.json': { arms: { selected: { published: { 'f1@3': 32.23 } } } },
@@ -212,7 +216,7 @@ describe('the gate', () => {
     expect(exit).toBe(0);
     expect(lines.some((line) => line.includes('text2sql bird-dev: measured, EX = 65.93'))).toBe(true);
     expect(lines.some((line) => line.includes('text2viz text2vis: measured, top-1 = 664'))).toBe(true);
-    expect(lines.at(-1)).toContain('6 of 9 leaderboards carry a number');
+    expect(lines.at(-1)).toContain('7 of 9 leaderboards carry a number');
   });
 
   it('names the failing row and exits non-zero', async () => {
@@ -307,6 +311,6 @@ describe('the defaults the workflow relies on', () => {
     expect(lines).toEqual([]);
     const code = await entryCoverage(fileURLToPath(moduleUrl), moduleUrl, (line) => lines.push(line), []);
     expect(code).toBe(0);
-    expect(lines.at(-1)).toContain('6 of 9 leaderboards carry a number');
+    expect(lines.at(-1)).toContain('7 of 9 leaderboards carry a number');
   });
 });

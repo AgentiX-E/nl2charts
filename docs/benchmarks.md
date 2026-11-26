@@ -18039,7 +18039,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 
 | leaderboard | corpus | metrics | status | number |
 |---|---|---|---|---|
-| WikiSQL (test) | 80,654 question/table pairs, single-table | EX | **instrumented** | — |
+| WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% |
 | Spider 1.0 dev | 1,034 questions, 20 databases | EM, EX | **absent** | — |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) |
@@ -21596,10 +21596,11 @@ the model.
 ### What the prompt says, and the one sentence it exists for
 
 The table is rendered, not named: five rows of the table the question is about, above the question,
-with the column list in **ordinal** form (`0: Pick (real)`), because a WikiSQL statement names a
-column by position and a model shown names-only has to invent the mapping. The types are the corpus's
-own strings rather than this repository's vocabulary, for the same reason: the corpus's numbers were
-produced with the corpus's words.
+with the column list carrying **both** of the corpus's names for a column — `col1 (text) — "Player"`,
+because the database calls it `col1` and the corpus's `tables.jsonl` calls it `Player`, and a statement
+has to say the first while the question says the second. The types are the corpus's own strings rather
+than this repository's vocabulary, for the same reason: the corpus's numbers were produced with the
+corpus's words.
 
 The sentence the prompt exists for is the last one before the instruction:
 
@@ -21641,3 +21642,40 @@ same prompt with the five rows removed.
 The order is fixed: a pilot at `--limit 40` establishes the reader for ¥0.16, and the full split
 follows only if the unreadable share is under the ceiling. A full 8,421-question run at the bound
 projects ¥34.6, which is why the pilot comes first and not in parallel.
+
+### The first reading: 85.30% on dev, and the four dispatches it took to get one
+
+| dispatch | what it was | reading | why not a number |
+|---|---|---:|---|
+| `45766271364` | pilot, 40 cases | — | the fast mirror answered 49 bytes; the corpus had one transport |
+| `45768163440` | pilot, 40 cases | — | refused: 14 of 40 replies unreadable, and nothing said why |
+| `45769332702` | pilot, 40 cases | — | refused: same, now with `because value.replaceAll is not a function` |
+| `45770439909` | pilot, 40 cases | **0.00%** (0/40) | 19 statements named a column that does not exist, 21 executed and matched nothing |
+| `45772055481` | pilot, 40 cases | **87.50%** (35/40) | — |
+| `45772639103` | **the whole split** | **85.30%** (7,183/8,421) | — |
+
+The pilot's 87.50 and the split's 85.30 are the same prompt; the difference is 40 cases against 8,421
+and is not a reading about the prompt.
+
+**What the two rendering defects cost, and what they would have published.** The prompt's first version
+sent `Position` where the engine wants `col3` and `'Duke'` where the engine stores `'duke'`. Every
+statement was structurally right and wrong in every name. Published, that run would have said "this
+model cannot do WikiSQL" — a claim about the model produced by a claim about the renderer. The replay
+was ¥0: the artifact's predictions against the local corpus, one query a case.
+
+**The reading, with its coordinates.** `deepseek-chat`, one call a question, `wikisql-ask@2`, dev's
+8,421 questions, ¥8.66. `exact` and `bag` are both 7,183, so the leaderboard's ordered comparison of
+`fetchall()` tuples costs nothing on this split: no statement was right in content and wrong in row
+order. Fourteen statements did not execute and stay in the denominator.
+
+**What it is not.** It is not a leaderboard position. Every published WikiSQL EX above 90% is a
+fine-tuned system on test — SeaD+EG reads 93.0 — and this repository does not train. The comparable
+class is the zero-shot prompting baseline, and the honest comparison to make next is against systems
+that also train nothing, on the same split, with their model attached. Until that table exists, the
+sentence this row supports is: *85.30% single-call on WikiSQL dev, chat tier, no training*.
+
+**What it buys, beyond one number.** The corpus stops being a row that says `instrumented`. It has a
+parent every later arm is a delta against, a prompt version, a cost per case (¥0.00103), and a
+denominator that came from the judge rather than from an assumption. The first arm to try against it is
+the cheapest available: the same prompt with the five sample rows removed, which prices the value
+channel on a corpus built out of values.

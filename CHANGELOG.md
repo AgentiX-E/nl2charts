@@ -6,6 +6,16 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **WikiSQL has a reading: 85.30% EX on dev, one call a question, ¥8.66.** `eval/wikisql/ask.ts`
+  renders the table the corpus actually ships — both column names (`col1 (text) — "Player"`, because
+  the database says the first and the question says the second), the sample rows folded the way the
+  database stores them, and one instruction that makes a value question answerable. The judge, the
+  fetcher and the executed-twice gold validation were already here; what was missing was something to
+  judge. `git/blobs` joins the mirror as a second transport, pinned to the same size and sha256, after
+  jsDelivr's 20 MB cap answered 49 bytes. `pnpm bench:wikisql:ask`, `wikisql-ask.yml`, and a pilot
+  (`--limit 40`) that costs ¥0.04 before a split that costs ¥8.66.
+
 ### Fixed
 - **Two documents each said which arm ships, and they named different arms.** The coverage table
   cited `select-mixed` for BIRD dev — its floor 62.5 beside its 62.34 reading — while the row under
