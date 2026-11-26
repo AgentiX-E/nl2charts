@@ -6,6 +6,29 @@ cannot be argued with.
 
 ## Unreleased
 
+### Fixed
+- **Two documents each said which arm ships, and they named different arms.** The coverage table
+  cited `select-mixed` for BIRD dev — its floor 62.5 beside its 62.34 reading — while the row under
+  it (`R-VES`, 59.81) was measured on `macsql-prompt` at 65.93, which is the arm `SHIPPED_SQL` sends
+  and the arm `shipment.json` records as the winner of `44991167518`. Both numbers were true and
+  neither line said they were about different arms, so a reader comparing this project with the
+  leaderboard had to choose which of two "shipped" numbers to quote. Three changes, because the
+  field that was missing is the one all three read: `eval/baseline/bird.json` gains
+  `shippedBySplit`, which answers "which arm does the product send" — a question `armsBySplit` never
+  answered, since `select-cross` is in that list and nobody ships it; `eval/benchmarks.ts`'s
+  `bird-dev` row cites the shipped arm's `ex` as a `run` (65.93, 1,010 of 1,532) instead of a floor
+  on an arm the product does not send, and the gaps it quotes move with it (12.56pp to AskData's
+  78.49, 7.27pp to SQLConductor's 73.2); and `macsql-prompt` joins `armsBySplit.dev`, `DEV_ARMS` and
+  `bird-dev.yml`'s default with a floor of 65.9, so the split that decides adoption finally scores
+  the arm that ships — for three rounds a green dev run was a statement about the harness and
+  nothing about the product. `eval/bird/ship.ts` gained `shippedProblems`, which refuses when the
+  recipe, the declaration, the reading and the ledger's winning row stop naming one arm, on a split
+  that runs it, with a floor under it, over one denominator, from one run; `pnpm gate:shipment` runs
+  it, `--bird`/`--ves` exist beside `--ledger` so every refusal is produced by a flag rather than by
+  editing the shipped tree, and `test/bird-shipped.test.ts` breaks each record on purpose. The cost
+  of the extra arm is one more of six on a routine dev dispatch; the doc's leaderboard table also
+  gained the shipped row and lost a bullet that read "3.17pp to RSL-SQL and 4.34pp to MSL-SQL",
+  which was one test number against a dev one and one number that was arithmetic on nothing.
 ### Added
 - **The gate that refuses a dispatch before it spends, written after the one that cost ¥124.**
   `45090651019` ran `deepseek-v4-pro` over 1,532 questions: ¥110.08 on the artifact and ¥124 on the

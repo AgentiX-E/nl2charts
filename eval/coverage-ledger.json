@@ -2,7 +2,7 @@
   "note": "Per-file eval coverage. Enforced by tools/check-eval-coverage.mjs: a number may rise freely and may only fall with an explicit, reviewed edit. `target` is the standard every file must reach before eval/ joins the main gate.",
   "target": 95,
   "tolerancePp": 0.2,
-  "measuredAt": "2026-11-25",
+  "measuredAt": "2026-11-26",
   "totals": {
     "lines": 99.63,
     "statements": 99.63,
@@ -437,10 +437,10 @@
       "branches": 100
     },
     "eval/bird/ship.ts": {
-      "lines": 98.27,
-      "statements": 98.27,
+      "lines": 99.12,
+      "statements": 99.12,
       "functions": 100,
-      "branches": 97.14
+      "branches": 98.63
     },
     "eval/bird/spend.ts": {
       "lines": 99.56,
@@ -509,10 +509,10 @@
       "branches": 97.95
     },
     "eval/bird/ves.ts": {
-      "lines": 99.2,
-      "statements": 99.2,
+      "lines": 100,
+      "statements": 100,
       "functions": 100,
-      "branches": 97.87
+      "branches": 98.11
     },
     "eval/bird/width.ts": {
       "lines": 99.33,
@@ -623,16 +623,16 @@
       "branches": 100
     },
     "eval/nvbench2/census.ts": {
-      "lines": 97.24,
-      "statements": 97.24,
+      "lines": 97.38,
+      "statements": 97.38,
       "functions": 100,
-      "branches": 97.29
+      "branches": 97.46
     },
     "eval/nvbench2/check.ts": {
       "lines": 99.19,
       "statements": 99.19,
       "functions": 100,
-      "branches": 97.76
+      "branches": 97.77
     },
     "eval/nvbench2/compare.ts": {
       "lines": 100,
@@ -680,7 +680,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.4
+      "branches": 98.41
     },
     "eval/preflight.ts": {
       "lines": 98.69,

@@ -152,7 +152,11 @@ export const BENCHMARKS: readonly Benchmark[] = [
       path: ['floors', 'minidev', 'select'],
       kind: 'floor',
       unit: 'percent',
-      note: 'the floor a rerun may not fall below; `select-mixed` is not run on this split',
+      note: 'the floor a rerun may not fall below, taken on `select` — an arm the product does not '
+        + 'send. The per-commit split keeps its floors on the chain rather than on the shipped arm '
+        + 'because no Mini-Dev reading of that arm exists yet; the shipped arm is guarded on dev, '
+        + 'where its floor is 65.9. Naming the arm is the point: a floor without one is a number '
+        + 'about the harness that reads as a number about the product',
     },
     gap: '',
   },
@@ -165,13 +169,20 @@ export const BENCHMARKS: readonly Benchmark[] = [
     metrics: ['EX'],
     status: 'measured',
     reading: {
-      file: 'eval/baseline/bird.json',
-      path: ['floors', 'dev', 'select-mixed'],
-      kind: 'floor',
+      file: 'eval/baseline/bird-ves.json',
+      path: ['ex'],
+      kind: 'run',
       unit: 'percent',
-      note: 'the floor; the published reading on this split is 62.34% in run 41296610389 — 16.15pp '
-        + 'behind the field top (AskData 78.49, training-free, GPT-4o, 8+ calls) and 10.86pp behind '
-        + 'the top trained system (SQLConductor 73.2), which are two different claims',
+      note: 'the arm that ships, on the denominator the leaderboard reports: `macsql-prompt`, 1,010 '
+        + 'of 1,532 in run 44991167518 — 12.56pp behind the field top (AskData 78.49, training-free, '
+        + 'GPT-4o, 8+ calls) and 7.27pp behind the top trained system (SQLConductor 73.2), which are '
+        + 'two different claims. This row cited `select-mixed`\'s floor (62.5) and its 62.34 reading '
+        + 'until this round, which was a true number about a true arm and the wrong arm: a leaderboard '
+        + 'row is what a caller gets, `select-mixed` is the best of the selection family and does not '
+        + 'ship, and the R-VES row beside this one has always been the shipped arm — the two rows '
+        + 'disagreed about which arm this project sends, and nothing failed. `bird.json`\'s '
+        + '`shippedBySplit` is that question as a field now, tied by tests to `SHIPPED_SQL`, to the '
+        + 'ledger and to the reading here',
     },
     gap: '',
   },
@@ -412,8 +423,11 @@ export function checkCoverage(rows: readonly Benchmark[], read: Reader): string[
  *
  * A log line is what a reader quotes into a document, and the number on it means three different
  * things: a `run` is an observation, a `floor` is the minimum a rerun may land on, a `census`/`count`
- * is a tally. `bird-dev` cites the floor (62.5), while the published reading on that split is 62.34;
- * printing either without the word that says which is which is how the two get confused.
+ * is a tally. `bird-mini-dev` cites the floor (56) while a run of the same split reads 56.6, and
+ * printing either without the word that says which is which is how the two get confused. `bird-dev`
+ * used to be the other example — a floor of 62.5 beside a reading of 62.34 — and it is a run now,
+ * because the row that answers "what does this project score on this leaderboard" may not be a
+ * threshold on an arm the product does not send.
  */
 function qualifier(reading: Reading): string {
   if (reading.kind === 'floor') return ' (floor)';

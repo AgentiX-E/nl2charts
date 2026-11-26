@@ -610,11 +610,12 @@ four-call arm, and those two disagree on 9.4% of the split, three times the disc
 `select` → `select-mixed` pair (5.5%) and four times the `inline+evidence` pair (3.1%). Resolving
 1.17pp at that rate needs more questions, not a different split.
 
-Where that leaves the published number: **62.34% on BIRD dev**, which is this repository's highest
-reading and the coordinate the leaderboard table compares. The earlier dev figure quoted for the
-same arm — 63.0% — is 0.66pp above this run, inside the harness's own A/A movement; the difference
-between two runs of one arm is not a reading, which is the reason the five arms were finally put in
-one run.
+Where that leaves the number for this family: **62.34% on BIRD dev**, the highest reading among the
+arms this run measured and the ceiling of the *selection* family — not this repository's highest
+reading, which is the shipped arm's 65.93% on run `44991167518`, and not the coordinate the
+leaderboard table compares. The earlier dev figure quoted for the same arm — 63.0% — is 0.66pp above
+this run, inside the harness's own A/A movement; the difference between two runs of one arm is not a
+reading, which is the reason the five arms were finally put in one run.
 
 ### The two information sources, on one card for the first time
 
@@ -3583,6 +3584,7 @@ of them with ours.
 | OpenSearch-SQL | 69.3% | 72.28% | GPT-4o | multi-agent, no fine-tune | the split |
 | MSL-SQL | 66.82% | 64.00% | DeepSeek-V2.5 | partial | the split, and a sibling model |
 | RSL-SQL | 63.56% | 65.51% | DeepSeek-v2 | no | the split, and a sibling model |
+| **this harness, `macsql-prompt`** (the arm that ships) | **65.93%** | — | deepseek-chat | no | — |
 | **this harness, `select-mixed`** | **62.34%** | — | deepseek-chat | no | — |
 | **this harness, `metadata+evidence`** | 61.16% | — | deepseek-chat | no | — |
 | **this harness, `inline+evidence`** | 61.10% | — | deepseek-chat | no | — |
@@ -3596,36 +3598,46 @@ leaderboard's own two columns as of its 2026-10-29 snapshot, because a table who
 split and whose rows carry another is the coordinate error this section exists to refuse. Two
 consequences are worth stating: the gap to XiYan is **7.41pp** on dev (73.34), not 9.7pp to its test
 number; and MSL-SQL, previously read as the narrowest comparison below us, is **0.89pp above** us.
-Both gaps are against the **shipped** arm's 65.93% (`macsql-prompt`, 1,532 questions), not against the
-62.34 in the table above: that row is the best of the *selection* family, and the two families are
-different harnesses. A gap quoted without saying which arm it is against is the same defect as a
-split number under a `dev` heading.
+Both gaps are against the **shipped** arm's 65.93% (`macsql-prompt`, 1,532 questions, run
+`44991167518`) — the row this table now carries, and the one `eval/benchmarks.ts` cites. The five
+rows under it are the *selection* family from run `41296610389`: different arms of the same harness,
+kept because they are the arms the dev chain dispatches and because `select-mixed` is the best of
+them. A gap quoted without saying which arm it is against is the same defect as a split number under
+a `dev` heading, and for three rounds this table had that defect in the other direction: it listed
+62.34 as the top of "this harness" while every gap in the prose was measured against 65.93.
 The best fully training-free systems on this snapshot are DecoSearch at 70.53 dev and OpenSearch-SQL
 at 69.3, i.e. 4.60pp and 3.37pp above this harness. Rows without a dev column (`—`) are systems whose dev score the
 snapshot does not carry; they are kept for their test number and are not compared to ours.
 
-Read the last column first. It is empty for every row but ours, and that is the finding. Our five
-rows now come from one run (the section above), which is what makes them comparable to each other:
-the same arm on two runs has moved 0.66pp (`select-mixed`, 63.0 → 62.34) and 0.91pp (`select`,
-61.88 → 60.97) across this project's history, so a cross-run difference under a point is not a
-reading and every number in this table would otherwise be a cross-run difference. Three
-differences used to be reported from this table — 11.3pp, 2.1–3.6pp, 5.5pp — and not one of them is
-a claim about the pipeline. The honest version of each is narrower:
+Read the last column first. It is empty for every row but ours, and that is the finding. Our six
+rows come from two runs — `44991167518` for the shipped arm, `41296610389` for the five
+selection-family rows — and what separates the two blocks is the arm, not the run: within each block
+the numbers are comparable to each other, and across the two the difference is a prompt this project
+chose between, priced in `shipment.json` at +1.96pp (p = 0.0441) with the paired counts rather than
+by subtracting two percentages. The same arm on two runs has moved 0.66pp (`select-mixed`, 63.0 →
+62.34) and 0.91pp (`select`, 61.88 → 60.97) across this project's history, so a cross-run difference
+under a point is not a reading and every number in this table would otherwise be a cross-run
+difference. Three differences used to be reported from this table — 11.3pp, 2.1–3.6pp, 5.5pp — and
+not one of them is a claim about the pipeline. The honest version of each is narrower:
 
-- **16.15pp to the field's top** (62.34 → 78.49) is a gap to a system that trained nothing, and it is
+- **12.56pp to the field's top** (65.93 → 78.49) is a gap to a system that trained nothing, and it is
   the number this table exists to show. AskData profiles every column, summarises the profile in two
   lengths, links schema by task alignment, draws three candidates and votes on result sets, over eight
-  or more calls with GPT-4o. The 10.86pp to SQLConductor (73.2) measures something else: a Qwen3-8B
-  policy with SFT and GRPO, i.e. what a trained backbone buys. Only the first comparison is about
-  method, and the table used to begin at 73.2 because AskData's row lived only in the 600-question
-  section below — a row 5.3pp above the next one cannot be dropped from a sorted table without
-  changing what "top" means. Three of the four rows under AskData run backbones this harness cannot
-  call, and three of them were trained on the task.
-- **3.17pp to RSL-SQL and 4.34pp to MSL-SQL** (65.51, 64.00) are the narrowest comparisons here, not
-  the closest in kind: RSL-SQL trained nothing, but `deepseek-chat` today is not the `DeepSeek-v2` it
-  was built on, its candidate set comes from its own prompts, and both numbers were produced by
-  harnesses that execute and judge differently from this one. Narrow is what makes the row a lead
-  worth chasing; it does not make it a measurement.
+  or more calls with GPT-4o. The 7.27pp to SQLConductor (73.2) measures something else: a Qwen3-8B
+  policy with SFT and GRPO, i.e. what a trained backbone buys — and it is not the same split, which
+  the table states by leaving its dev column empty. Only the first comparison is about method, and
+  the table used to begin at 73.2 because AskData's row lived only in the 600-question section below —
+  a row 5.3pp above the next one cannot be dropped from a sorted table without changing what "top"
+  means. Three of the four rows under AskData run backbones this harness cannot call, and three of
+  them were trained on the task.
+- **0.89pp to MSL-SQL, in its favour, and 2.37pp to RSL-SQL, in ours** (66.82 and 63.56 on dev) are
+  the narrowest comparisons here, not the closest in kind: RSL-SQL trained nothing, but
+  `deepseek-chat` today is not the `DeepSeek-v2` it was built on, its candidate set comes from its own
+  prompts, and both numbers were produced by harnesses that execute and judge differently from this
+  one. Narrow is what makes the row a lead worth chasing; it does not make it a measurement. The two
+  used to be quoted as "3.17pp to RSL-SQL and 4.34pp to MSL-SQL" against 62.34 — the second of those
+  was not arithmetic on any two numbers in this table, and the first was a test number against a dev
+  one.
 - **5.5pp to a strong model's zero-shot baseline** measures the opposite of method: how much
   accuracy a bigger model buys, which is precisely the axis this project does not optimize for.
 
@@ -18030,7 +18042,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 | WikiSQL (test) | 80,654 question/table pairs, single-table | EX | **instrumented** | — |
 | Spider 1.0 dev | 1,034 questions, 20 databases | EM, EX | **absent** | — |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
-| BIRD dev | 1,532 scored questions | EX | measured | 62.5 (floor) |
+| BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) |
 | BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) |
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures |
@@ -18722,16 +18734,46 @@ The row is `measured` now, cited at `arms.selected.published.f1@3`, and `pnpm be
 22.39 beside the other eight.
 
 Two things about the `number` column, both learned by watching it be misquoted. A printed line now
-carries the kind of number it printed — `= 62.5 (floor)`, `= 664 (count)`, `= 59.81` — because a
-floor is the minimum a rerun may land on and a count is not a percentage. A third form, `= 56.63
-(600 of 1532)`, is what a subset reading prints; the table has none this round, and the two rounds it
-printed are the subject of the next section. And `BIRD dev` cites the floor (62.5), not the run: the
-published reading on that split is **62.34%** in run `41296610389`, and the floor sits 0.16pp *above*
-it because the floor was set from an earlier 63.0% reading of the same arm. The gate compares a rerun
-against `floor − tolerance`, where the tolerance is no longer one constant: 4pp was measured at
-n=239, and at 1,532 questions the same σ-multiple is **1.58pp**, so the 0.16pp is still inside the
-band and the number in this table is still the floor. What changed is that a dev run can no longer
-lose 3.9pp and pass.
+carries the kind of number it printed — `EX = 56 (floor)`, `top-1 = 664 (count)`, `R-VES = 59.81` —
+because a floor is the minimum a rerun may land on and a count is not a percentage. A third form,
+`= 56.63 (600 of 1532)`, is what a subset reading prints; the table has none this round, and the two
+rounds it printed are the subject of the next section. And `BIRD dev` stops citing a floor. It cited
+`select-mixed`'s (62.5) beside that arm's 62.34 while the row underneath it — R-VES, 59.81 — was
+measured on `macsql-prompt` at 65.93, which is the arm `SHIPPED_SQL` sends and the arm
+`shipment.json` records as the winner of `44991167518`. Both numbers were true and the table did not
+say they were about different arms, so a reader comparing this project with a leaderboard had to pick
+which of two "shipped" numbers to quote, and a table row is what a caller gets. The row is
+`= 65.93` now, a `run` on the denominator the leaderboard reports, and the floor did not disappear:
+`macsql-prompt` joined `armsBySplit.dev` with a floor of 65.9 in the same round, so the printed
+number and the guarded number are one arm. What that costs is one more arm on a routine dev
+dispatch, six instead of five.
+
+**One arm, four records, and the check that they still agree.** `armsBySplit` answers "which arms
+does a dispatch of this split run", which is a budget decision; it was read for three rounds as if
+it also answered "which arm does the product send", which it does not — `select-cross` is in that
+list and nobody ships it. So `eval/baseline/bird.json` gained `shippedBySplit`, and
+`eval/bird/ship.ts` gained `shippedProblems`: the recipe (`SHIPPED_SQL.arm`), the baseline's
+declaration, the R-VES reading and the ledger's winning row must name one arm, on a split that runs
+it, with a floor under it, over one denominator, from one run. Each of those is a sentence a document
+would otherwise have to keep true by hand, and the one that started this was the second and the
+third disagreeing in silence:
+
+| record | what it says | what breaks without it |
+| --- | --- | --- |
+| `SHIPPED_SQL.arm` | the prompt `packages/ai` sends | the product is an experiment nobody applied |
+| `shippedBySplit.dev` | the arm this repository claims to ship | two documents, two answers, both quotable |
+| `bird-ves.json` | the reading the claim rests on | a claim with no measurement under it |
+| `shipment.json` | the row that put the arm there | a prompt nobody priced |
+
+`pnpm gate:shipment` runs the check, `test/bird-shipped.test.ts` breaks each record on purpose and
+reads the refusal — twelve ways, because a check whose failure path has never been read is not a
+check — and `--bird` / `--ves` exist beside `--ledger` for the same reason `--ledger` exists: the
+tree this repository ships is not tampered with to test a gate.
+
+The tolerance is the other half of the same lesson, and it has not changed: the gate compares a
+rerun against `floor − tolerance`, and the tolerance is no longer one constant. 4pp was measured at
+n=239, and at 1,532 questions the same σ-multiple is **1.58pp**, so a dev run can no longer lose
+3.9pp and pass.
 
 **Why `R-VES` is measured, and what fixing that took.** The metric is implemented and tested
 (`eval/bird/ves.ts`): the reward table, the `tau = time(gold) / time(predicted)` ratio, the

@@ -32,9 +32,11 @@ on:
         # `eval/baseline/bird.json`'s `armsBySplit.dev` must equal this list plus the arms that
         # need a second model. `select-mixed` is here because it is the ceiling this workflow
         # exists to reproduce (63.0% on 1,532 questions); `select` because this is the split
-        # whose MDE (2.30pp) can decide the four-call tier; `select-cross` is not, because it
+        # whose MDE (2.30pp) can decide the four-call tier; `macsql-prompt` because it is the arm
+        # the product ships — a chain that scores five arms nobody sends makes a green run a
+        # statement about the harness and not about the product; `select-cross` is not, because it
         # needs a second model that a routine dispatch does not configure.
-        default: 'names,inline+evidence,metadata+evidence,select,select-mixed'
+        default: 'names,inline+evidence,metadata+evidence,select,select-mixed,macsql-prompt'
       aa:
         # This split decides adoption, and until now it had no control of its own: Mini-Dev runs
         # carry `BIRD_AA` and this one could not, so the noise of the numbers a leaderboard is

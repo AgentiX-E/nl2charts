@@ -42,6 +42,7 @@ import type {
   ShipmentPolicy,
   ShipmentRecord,
   ShipmentResult,
+  SqlRecipe,
   SqlRecipeName,
 } from '@agentix-e/nl2charts-ai';
 import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
@@ -101,6 +102,172 @@ export function checkShipment(
     );
   }
   return { result, problems };
+}
+
+/**
+ * The four records that answer "which arm does this repository ship", and whether they agree.
+ *
+ * `checkShipment` answers a question about the ledger and the recipe: does the chain the ledger
+ * folds end on the prompt `packages/ai` sends. That question was answered correctly for three
+ * rounds while a reader holding two files — `eval/baseline/bird.json`'s `armsBySplit.dev` and
+ * `eval/baseline/bird-ves.json`'s `arm` — could find two records that each looked like the answer
+ * and disagreed: one named `select-mixed`, whose 62.34% was the best of the selection family, the
+ * other `macsql-prompt`, which is the arm that ships at 65.93%. Neither file was wrong. What was
+ * missing was a field whose whole content is "this is the arm the product sends", and a check that
+ * refuses when the four things that imply it drift apart.
+ *
+ * The four are: the recipe (`SHIPPED_SQL.arm`), the baseline's declaration (`shippedBySplit`), the
+ * reading the project publishes for that arm (`bird-ves.json`), and the ledger row that put it
+ * there (`shipment.json`). A disagreement between any two is a document that will be quoted
+ * wrongly, and the last one is the expensive kind: an arm admitted to the chain with no floor is an
+ * arm whose regression fails nothing.
+ *
+ * Each rule below is one way that drift has a printed consequence, and `test/bird-shipped.test.ts`
+ * produces each one from a tampered tree — a check whose failure path has never been read is not a
+ * check.
+ */
+export interface ShippedCoordinates {
+  /** Files to read, relative to `root`; the defaults are the ones this repository ships. */
+  readonly bird?: string;
+  readonly ves?: string;
+  readonly ledger?: string;
+}
+
+const BIRD_BASELINE = 'eval/baseline/bird.json';
+const VES_BASELINE = 'eval/baseline/bird-ves.json';
+
+interface BirdBaseline {
+  readonly shippedBySplit?: Record<string, string>;
+  readonly armsBySplit?: Record<string, string[]>;
+  readonly floors?: Record<string, Record<string, number>>;
+}
+
+interface VesBaseline {
+  readonly split?: string;
+  readonly arm?: string;
+  readonly ex?: number;
+  readonly scored?: number;
+  readonly artifact?: { readonly workflowRun?: number };
+}
+
+/** Percent, to the two decimals a published reading is written to. */
+function percentOf(correct: number, total: number): number {
+  return Math.round((correct / total) * 10000) / 100;
+}
+
+/**
+ * Every way the four records can disagree, in the words a reader can act on.
+ *
+ * Returns an array rather than throwing so that `main` can print all of them: a tree that has lost
+ * the baseline declaration *and* the floor is one edit away from being two, and the second one is
+ * easier to fix while the first is still on screen.
+ */
+export function shippedProblems(
+  root: string,
+  files: ShippedCoordinates = {},
+  recipe: SqlRecipe = SHIPPED_SQL,
+  known?: readonly ShipmentRecord[],
+): readonly string[] {
+  const paths = {
+    bird: resolve(root, files.bird ?? BIRD_BASELINE),
+    ves: resolve(root, files.ves ?? VES_BASELINE),
+    ledger: resolve(root, files.ledger ?? LEDGER_PATH),
+  };
+  let bird: BirdBaseline;
+  let ves: VesBaseline;
+  let records: readonly ShipmentRecord[];
+  try {
+    bird = JSON.parse(readFileSync(paths.bird, 'utf8')) as BirdBaseline;
+    ves = JSON.parse(readFileSync(paths.ves, 'utf8')) as VesBaseline;
+    records = known ?? readLedger(paths.ledger);
+  } catch (error) {
+    return [`shipped: ${(error as Error).message}`];
+  }
+
+  const problems: string[] = [];
+  const declared = bird.shippedBySplit;
+  if (declared === undefined || Object.keys(declared).length === 0) {
+    problems.push(
+      `shipped: ${BIRD_BASELINE} has no \`shippedBySplit\`, so nothing on disk says which arm the ` +
+        `product sends and every reader has to infer it from a field that means something else`,
+    );
+    return problems;
+  }
+  // The last decision is the one the chain ends on, which is what `checkShipment` folds; an earlier
+  // row is a step the product has already taken.
+  const last = records.at(-1);
+  const winner = last?.challenger;
+
+  for (const [split, arm] of Object.entries(declared)) {
+    if (arm !== recipe.arm) {
+      problems.push(
+        `shipped: the baseline says \`${arm}\` ships on \`${split}\` and \`${recipe.name}\` ships ` +
+          `\`${recipe.arm}\`; one of the two is a document about an arm the product does not send`,
+      );
+    }
+    const chain = bird.armsBySplit?.[split];
+    if (chain === undefined) {
+      problems.push(`shipped: \`${split}\` declares a shipped arm and \`armsBySplit\` does not name the split`);
+    } else if (!chain.includes(arm)) {
+      problems.push(
+        `shipped: \`${arm}\` is not in \`armsBySplit.${split}\`, so no dispatch ever scores the arm ` +
+          `that ships and a green run is a statement about the harness alone`,
+      );
+    }
+    const floor = bird.floors?.[split]?.[arm];
+    if (floor === undefined) {
+      problems.push(
+        `shipped: \`${arm}\` has no floor on \`${split}\`, so a regression in the product fails ` +
+          `nothing — the arm ships and nothing measures it`,
+      );
+    }
+    if (ves.split !== split) {
+      problems.push(`shipped: the R-VES reading is on \`${String(ves.split)}\` and the baseline ships an arm on \`${split}\``);
+    }
+    if (ves.arm !== arm) {
+      problems.push(
+        `shipped: the R-VES reading was taken on \`${String(ves.arm)}\` and the baseline says ` +
+          `\`${arm}\` ships; the published number and the shipped arm have to be the same arm`,
+      );
+    }
+    // A floor above the reading it was taken from would fail the run that produced it.
+    if (floor !== undefined && ves.ex !== undefined && floor > ves.ex) {
+      problems.push(
+        `shipped: the floor for \`${arm}\` on \`${split}\` is ${String(floor)} and the reading it ` +
+          `was taken from is ${String(ves.ex)}; a floor above its own reading fails the run that set it`,
+      );
+    }
+    if (winner === undefined) {
+      problems.push(`shipped: the ledger holds no decision, so nothing put \`${arm}\` in the product`);
+    } else {
+      if (winner.arm !== arm) {
+        problems.push(
+          `shipped: the ledger's last decision carries \`${winner.arm}\` and the baseline says ` +
+            `\`${arm}\` ships — the experiment and the product disagree about what won`,
+        );
+      }
+      if (ves.scored !== undefined && winner.total !== ves.scored) {
+        problems.push(
+          `shipped: the ledger's decision is over ${String(winner.total)} questions and the R-VES ` +
+            `reading over ${String(ves.scored)}; two denominators, so the two numbers are not one reading`,
+        );
+      }
+      if (ves.ex !== undefined && Math.abs(percentOf(winner.correct, winner.total) - ves.ex) > 0.005) {
+        problems.push(
+          `shipped: the ledger's counts say ${String(percentOf(winner.correct, winner.total))}% ` +
+            `(${String(winner.correct)} of ${String(winner.total)}) and the R-VES baseline says ` +
+            `${String(ves.ex)}%; one of the two was copied from a different run`,
+        );
+      }
+      if (ves.artifact?.workflowRun !== undefined && String(ves.artifact.workflowRun) !== last?.run) {
+        problems.push(
+          `shipped: the R-VES reading is the artifact of run ${String(ves.artifact.workflowRun)} and ` +
+            `the ledger's decision is from run ${String(last?.run)}`,
+        );
+      }
+    }
+  }
+  return problems;
 }
 
 /** The ledger as it sits on disk, with the shape refused rather than guessed when it is not v1. */
@@ -178,10 +345,11 @@ export function selfTest(check: typeof checkShipment = checkShipment): readonly 
 /**
  * Entry point: `--check` by default, `--self-test` to prove the check can fail.
  *
- * `--ledger <path>` reads a ledger from somewhere else, which exists for one reason: a refusal is
- * part of what this instrument is *for*, and a refusal that can only be produced by editing the
- * file this repository ships is a refusal nobody tests. The gate runs the default; the suite runs a
- * tampered file through this flag and reads the exit code.
+ * `--ledger <path>`, `--bird <path>` and `--ves <path>` read one of the four records from somewhere
+ * else, which exists for one reason: a refusal is part of what this instrument is *for*, and a
+ * refusal that can only be produced by editing the files this repository ships is a refusal nobody
+ * tests. The gate runs the defaults; the suite runs a tampered file through these flags and reads
+ * the exit code.
  */
 export function main(
   argv: readonly string[] = process.argv.slice(2),
@@ -201,12 +369,26 @@ export function main(
   const checked = check(records);
   for (const line of shipmentLines(checked.result)) log(line);
   for (const problem of checked.problems) log(`FAILED ${problem}`);
+  // The four records that imply "this arm ships" are read here rather than in a test, because this
+  // is the step the workflow runs: `pnpm bench:bird:ship` is where a document that disagrees with
+  // the product has to be able to stop a build.
+  //
+  // `--bird` and `--ves` exist for the same reason `--ledger` does: the tree this repository ships
+  // is not tampered with to test a gate, so every refusal below is produced through a flag.
+  const files: { bird?: string; ves?: string } = {};
+  for (const name of ['bird', 'ves'] as const) {
+    const at = argv.indexOf(`--${name}`);
+    const value = at >= 0 ? argv[at + 1] : undefined;
+    if (value !== undefined) files[name] = value;
+  }
+  const coordinates = shippedProblems(root, files, SHIPPED_SQL, records);
+  for (const problem of coordinates) log(`FAILED ${problem}`);
   log(
     `shipment: ${String(records.length)} decision(s) · ${checked.result.recipe} · ` +
       `alpha ${String(DEFAULT_SHIPMENT_POLICY.alpha)} · floor ${String(DEFAULT_SHIPMENT_POLICY.minDeltaPp)}pp · ` +
       `tariff ${String(DEFAULT_SHIPMENT_POLICY.tokenTariff)}pp/1x`,
   );
-  return checked.problems.length === 0 ? 0 : 1;
+  return checked.problems.length === 0 && coordinates.length === 0 ? 0 : 1;
 }
 
 if (isEntry(process.argv[1], import.meta.url)) {

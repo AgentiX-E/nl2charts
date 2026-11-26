@@ -20,7 +20,7 @@ const reader = (files: Record<string, unknown>): Reader => (file) => {
 
 const TREE = {
   'eval/baseline/bird.json': { floors: { minidev: { select: 56 }, dev: { 'select-mixed': 62.5 } } },
-  'eval/baseline/bird-ves.json': { rves: 56.56, scored: 600, of: 1532 },
+  'eval/baseline/bird-ves.json': { rves: 56.56, ex: 65.93, scored: 600, of: 1532 },
   'eval/text2vis/baseline.json': { top1: 664, render: { rendered: 1418 } },
   // Held as the manifest reads it: a percent under `arms.selected.published`, because every row of
   // this table is a percent and the arm's raw fraction stays in `arms.readings`.
@@ -210,7 +210,7 @@ describe('the gate', () => {
     const lines: string[] = [];
     const exit = await main([], reader(TREE), (line) => lines.push(line));
     expect(exit).toBe(0);
-    expect(lines.some((line) => line.includes('text2sql bird-dev: measured, EX = 62.5'))).toBe(true);
+    expect(lines.some((line) => line.includes('text2sql bird-dev: measured, EX = 65.93'))).toBe(true);
     expect(lines.some((line) => line.includes('text2viz text2vis: measured, top-1 = 664'))).toBe(true);
     expect(lines.at(-1)).toContain('6 of 9 leaderboards carry a number');
   });
@@ -242,10 +242,11 @@ describe('the table it prints', () => {
     expect(lines[0]).toContain('= —');
   });
 
-  it('says a floor is a floor, because 62.5 and 62.34 are different claims', () => {
-    // The log line is what a reader quotes into a document. `bird-dev` cites the floor a rerun may
-    // not fall below; a line that printed `62.5` bare would put a number in a report that no run
-    // produced, and the published reading on that split is 62.34.
+  it('says a floor is a floor, because a floor and a reading are different claims', () => {
+    // The log line is what a reader quotes into a document. A floor is the minimum a rerun may not
+    // fall below; a line that printed `62.5` bare would put a number in a report that no run
+    // produced, and the reading on that arm is 62.34. `bird-dev` itself stops citing a floor this
+    // round — its row is the shipped arm's run — so the property is tested on a row of its own.
     const lines = describeCoverage([row({
       id: 'f',
       status: 'measured',
@@ -286,7 +287,7 @@ describe('the defaults the workflow relies on', () => {
     const lines: string[] = [];
     const exit = await main([], undefined, (line) => lines.push(line));
     expect(exit).toBe(0);
-    expect(lines.some((line) => line.includes('bird-dev: measured, EX = 62.5'))).toBe(true);
+    expect(lines.some((line) => line.includes('bird-dev: measured, EX = 65.93'))).toBe(true);
   });
 
   it('prints to the console when no logger is injected', async () => {
