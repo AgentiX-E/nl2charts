@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { CANDIDATE_SQL_CAP, assertCandidateSurvival, candidateFailureTotals, candidateSurvivalBySource, candidateVerdicts, classifyCandidateFailure } from '../eval/bird/run.js';
+import {
+  CANDIDATE_SQL_CAP,
+  assertCandidateSurvival,
+  candidateFailureTotals,
+  candidateSurvivalBySource,
+  candidateVerdicts,
+  classifyCandidateFailure,
+  thrownMessage,
+} from '../eval/bird/run.js';
 
 /**
  * Three ways a candidate fails to exist, and three different repairs.
@@ -204,5 +212,14 @@ describe('the candidate record', () => {
       'SELECT 1',
     );
     expect(verdicts.map((verdict) => verdict.chosen)).toEqual([true, false]);
+  });
+});
+
+describe('the sentence a thrown value carries', () => {
+  it('reads an Error, and does not crash on a value someone threw raw', () => {
+    // `throw 'boom'` is legal, and the record of a dropped candidate is exactly where it would
+    // land: a `record.message` that threw would lose the case it was describing.
+    expect(thrownMessage(new Error('no such column: T2.School'))).toBe('no such column: T2.School');
+    expect(thrownMessage('boom')).toBe('boom');
   });
 });

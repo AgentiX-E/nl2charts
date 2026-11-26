@@ -2763,6 +2763,18 @@ export interface DroppedCandidate {
   readonly source?: string;
 }
 
+/**
+ * The message of a thrown value, which is not always an `Error`.
+ *
+ * `throw 'boom'` is legal and a library one dependency away, and a record of a dropped candidate
+ * that crashed on it would lose the case it was describing. Named rather than inlined because the
+ * two branches are worth one test each rather than one uncovered branch in four places.
+ */
+export function thrownMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 /** What one case cost the endpoint, in the endpoint's own unit. */
 export interface CaseTokens {
   readonly prompt: number;
@@ -8818,12 +8830,10 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
               // The statement and the sentence, together and verbatim: this is the pair the
               // refusal census classifies, and the pair the artifact has never held for a
               // candidate that was not the case's answer.
-              dropped.push({
-                stage: 'engine',
-                message: executed.error ?? 'the engine refused the statement and said nothing',
-                sql: askedSample.sql,
-                source,
-              });
+              // `message` is absent when the engine refused without a sentence, and an absent field
+              // is what the reader sees: a sentence invented here would be classified as if the
+              // engine had said it, and `other` is the honest class for a refusal with no words.
+              dropped.push({ stage: 'engine', message: executed.error, sql: askedSample.sql, source });
             }
           } catch (error) {
             // A sample that fails the guard or the engine casts no vote; the other
@@ -8839,13 +8849,15 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             // the pipeline does not hand the refused text back on the error, and a record that
             // filled this field with the last statement that *did* arrive would be a lie with a
             // plausible shape. Absent is the honest shape of a fact the harness does not have.
-            const refusedCode = (error as { code?: string }).code;
-            const refusedMessage = error instanceof Error ? error.message : String(error);
+            // Fields left undefined are dropped by `JSON.stringify` at write time, so the artifact
+            // stays sparse without a conditional per field — and there is no branch here that a
+            // test cannot reach, which is the difference between a record and a record that is
+            // only exercised on the happy path.
             dropped.push({
               stage: kind,
-              ...(refusedCode === undefined ? {} : { code: refusedCode }),
-              ...(refusedMessage === '' ? {} : { message: refusedMessage }),
-              ...(drawnSource === undefined ? {} : { source: drawnSource }),
+              code: (error as { code?: string }).code,
+              message: thrownMessage(error),
+              source: drawnSource,
             });
           }
         }
@@ -8941,23 +8953,16 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
                 // field for all of them: a record that covered the draws and not the fourth
                 // opinion would describe a mixed arm's pool while omitting the member the arm
                 // paid an extra call for.
-                dropped.push({
-                  stage: 'engine',
-                  message: executed.error ?? 'the engine refused the statement and said nothing',
-                  sql: reply.sql,
-                  source: arm.dissent,
-                });
+                dropped.push({ stage: 'engine', message: executed.error, sql: reply.sql, source: arm.dissent });
               }
             } catch (error) {
               const kind = classifyCandidateFailure((error as { code?: string }).code);
               sampleErrors.push(kind === 'llm' ? 'llm' : undefined);
               lost[kind] += 1;
-              const refusedCode = (error as { code?: string }).code;
-              const refusedMessage = error instanceof Error ? error.message : String(error);
               dropped.push({
                 stage: kind,
-                ...(refusedCode === undefined ? {} : { code: refusedCode }),
-                ...(refusedMessage === '' ? {} : { message: refusedMessage }),
+                code: (error as { code?: string }).code,
+                message: thrownMessage(error),
                 source: arm.dissent,
               });
             }
