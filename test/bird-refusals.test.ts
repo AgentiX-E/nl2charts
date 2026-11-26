@@ -17,6 +17,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { mcnemarExact } from '@agentix-e/nl2charts-devkit';
 import { describe, expect, it } from 'vitest';
 import { SHIPPED_SQL } from '@agentix-e/nl2charts-ai';
 import {
@@ -67,6 +68,43 @@ interface PublishedBaseline {
   readonly invariant: { readonly passing: number; readonly changedByTheDateRule: number };
   readonly secondArm: { readonly refused: number; readonly unanswered: number; readonly note: string };
   readonly candidates: { readonly recorded: boolean; readonly invariant: string };
+  readonly refiner: {
+    readonly parent: string;
+    readonly arm: string;
+    readonly asked: number;
+    readonly parentPassed: number;
+    readonly armPassed: number;
+    readonly deltaPp: number;
+    readonly pooled: { readonly wins: number; readonly losses: number; readonly p: number };
+    readonly reached: SideReading;
+    readonly unchanged: SideReading;
+    readonly funnel: {
+      readonly total: number;
+      readonly firstPass: number;
+      readonly ranOnceWrong: number;
+      readonly repaired: number;
+      readonly fixedByRepair: number;
+      readonly stillFailing: number;
+      readonly stillNotExecuting: number;
+    };
+    readonly criterion: {
+      readonly registered: string;
+      readonly deltaMet: boolean;
+      readonly pMet: boolean;
+      readonly flipCountMet: boolean;
+      readonly fixedInsideThePriced25: number;
+    };
+    readonly verdict: string;
+  };
+}
+
+interface SideReading {
+  readonly cases: number;
+  readonly parentPassed: number;
+  readonly armPassed: number;
+  readonly wins: number;
+  readonly losses: number;
+  readonly p: number;
 }
 
 const BASELINE = JSON.parse(readFileSync(new URL('../eval/baseline/bird-refusals.json', import.meta.url), 'utf8')) as PublishedBaseline;
@@ -1004,5 +1042,80 @@ describe('the dev reading this repository publishes', () => {
     // The sentence a reader hits when the second arm's table is empty has to name the field that
     // would fill it: "0 refusals" alone reads as a finding about the arm.
     expect(BASELINE.secondArm.note).toContain('candidateRecord');
+  });
+});
+
+describe('the refinement arm\u2019s reading, audited against its own parts', () => {
+  const { refiner } = BASELINE;
+
+  it('divides the pair into the questions the lever reached and the questions it did not', () => {
+    // Two sides that do not cover the split would let a reader attribute any delta to the lever:
+    // the whole reading below rests on these two adding up to the artifact.
+    expect(refiner.reached.cases + refiner.unchanged.cases).toBe(refiner.asked);
+    expect(refiner.reached.parentPassed + refiner.unchanged.parentPassed).toBe(refiner.parentPassed);
+    expect(refiner.reached.armPassed + refiner.unchanged.armPassed).toBe(refiner.armPassed);
+    expect(refiner.reached.wins + refiner.unchanged.wins).toBe(refiner.pooled.wins);
+    expect(refiner.reached.losses + refiner.unchanged.losses).toBe(refiner.pooled.losses);
+    // A win is a case the parent lost and the arm got; a loss is the reverse. Both sides are
+    // recounted from the two pass counts rather than trusted, because the pass counts are what the
+    // artifact holds and the win/loss pair is what a reader quotes.
+    for (const side of [refiner.reached, refiner.unchanged]) {
+      expect(side.wins - side.losses).toBe(side.armPassed - side.parentPassed);
+    }
+  });
+
+  it('recomputes all three p-values instead of trusting the ones it publishes', () => {
+    expect(refiner.pooled.p).toBeCloseTo(mcnemarExact(refiner.pooled.losses, refiner.pooled.wins), 4);
+    expect(refiner.reached.p).toBeCloseTo(mcnemarExact(refiner.reached.losses, refiner.reached.wins), 4);
+    expect(refiner.unchanged.p).toBeCloseTo(mcnemarExact(refiner.unchanged.losses, refiner.unchanged.wins), 4);
+    // The pooled test is significant and neither side is. That is the round's finding, not an
+    // accident of rounding: it is what happens when a large unchanged side is summed with a small
+    // moved one, and a file that recorded only the pooled number would record a lever that paid.
+    expect(refiner.pooled.p).toBeLessThan(0.05);
+    expect(refiner.reached.p).toBeGreaterThan(0.05);
+    expect(refiner.unchanged.p).toBeGreaterThan(0.05);
+  });
+
+  it('computes the published delta from the counts, whole statements first', () => {
+    // Same rule as the repair price above: 65.21 and 66.51 differ by 1.31 while 20 statements of
+    // 1,532 is 1.305, and subtracting two rounded percentages is the mistake this file refuses.
+    expect(refiner.deltaPp).toBeCloseTo((100 * (refiner.armPassed - refiner.parentPassed)) / refiner.asked, 2);
+    expect(refiner.armPassed - refiner.parentPassed).toBe(20);
+  });
+
+  it('holds the funnel to its two identities, because the obvious sum is wrong', () => {
+    const f = refiner.funnel;
+    expect(f.total).toBe(refiner.asked);
+    expect(f.firstPass + f.ranOnceWrong + f.repaired).toBe(f.total);
+    expect(f.fixedByRepair + f.stillFailing).toBe(f.repaired);
+    // Six of the eight repaired cases that were fixed also execute, so `stillNotExecuting` nests
+    // inside `stillFailing`: 8 + 6 + 15 reads as 29 against a population of 23.
+    expect(f.stillNotExecuting).toBeLessThanOrEqual(f.stillFailing);
+    expect(f.fixedByRepair + f.stillNotExecuting + f.stillFailing).toBeGreaterThan(f.repaired);
+    // The arm's accuracy is the first pass plus the turns that landed, and nothing else.
+    expect(f.firstPass + f.fixedByRepair).toBe(refiner.armPassed);
+  });
+
+  it('derives the criterion\u2019s three clauses from the numbers rather than asserting them', () => {
+    const { criterion } = refiner;
+    expect(criterion.deltaMet).toBe(refiner.deltaPp >= 1.0);
+    expect(criterion.pMet).toBe(refiner.pooled.p < 0.05);
+    // The clause registered as "i.e. >= 16 of the 25" is about the *priced* population, and the
+    // number that answers it is the cases the turn fixed inside those 25 — not the pooled delta,
+    // and not `fixedByRepair`, which counts a turn that landed on a case the parent had answered.
+    expect(criterion.fixedInsideThePriced25).toBeLessThan(16);
+    expect(criterion.flipCountMet).toBe(criterion.fixedInsideThePriced25 >= 16);
+    expect(criterion.deltaMet && criterion.pMet && !criterion.flipCountMet).toBe(true);
+    expect(criterion.registered).toContain('16');
+  });
+
+  it('states its own verdict in the same direction as the arithmetic', () => {
+    // A verdict string is prose, and prose drifts. The three quantities a reader acts on are named
+    // in it, so a later edit to the numbers that forgets the sentence fails here.
+    expect(refiner.verdict).toContain('+0.39pp');
+    expect(refiner.verdict).toContain('70%');
+    expect(refiner.verdict).toContain('on demand');
+    const turnShare = (100 * (refiner.armPassed - refiner.parentPassed - (refiner.unchanged.armPassed - refiner.unchanged.parentPassed))) / refiner.asked;
+    expect(turnShare).toBeCloseTo(0.39, 2);
   });
 });

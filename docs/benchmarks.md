@@ -22171,3 +22171,114 @@ entered the funnel), `firstPass` (the ones that needed no turn), `repaired` (tur
 `fixedByRepair` (turns that turned a failure into a match) and `byClass` (the engine's own diagnostic
 family, `binding` / `syntax` / …). Quoting `total` as the market is how a funnel gets read as an
 opportunity: on the fixture that answers every refusal, `total` is 7 and `repaired` is 1.
+
+## The turn fixed six of the twenty-five, and the pairing supplied the other fourteen
+
+`macsql-prompt+repair` was dispatched against its parent on dev — run `45866761911`, `deepseek-chat`,
+1,532 questions, both arms in one artifact so the pairing is over the same question and the same gold.
+The registered criterion was **≥ +1.0pp with exact McNemar p < 0.05, i.e. ≥ 16 of the 25**. The
+dispatch met the first half and did not meet the second, and the gap between them is the reading.
+
+| arm | correct | accuracy | Wilson | calls/case |
+| --- | ---: | ---: | --- | ---: |
+| `macsql-prompt` | 999 | 65.21% | 62.79–67.55 | 1.000 |
+| `macsql-prompt+repair` | 1,019 | 66.51% | 64.11–68.83 | 1.015 |
+| delta | **+20** | **+1.31pp** | overlapping | +0.015 |
+
+Exact McNemar on the 72 discordant questions: 46 won, 26 lost, **p = 0.0245**. On the form the
+criterion was written in, that is a pass — the number cleared 1.0pp and the test cleared 0.05.
+
+### The funnel, and the four counts that do not add up
+
+| quantity | value | identity |
+| --- | ---: | --- |
+| `total` | 1,532 | every case that entered the funnel |
+| `firstPass` | 1,011 | the arm's own first statement matched |
+| `ranOnceWrong` | 498 | executed, judged wrong — no error to feed back |
+| `repaired` | 23 | turns that actually ran |
+| `fixedByRepair` | 8 | of those, ended in a match |
+| `stillFailing` | 15 | of those, ended wrong or out of budget |
+| `stillNotExecuting` | 6 | a **subset** of `stillFailing`, not a fourth bucket |
+
+`firstPass + ranOnceWrong + repaired = total` and `fixedByRepair + stillFailing = repaired`. The record
+carries both identities, printed here because the second one is not self-evident: `8 + 6 + 15` reads as
+29 against a population of 23, and a reader who adds the three is counting six cases twice. The
+mechanism's actual product is the nine-case gap between `stillFailing` (15) and `stillNotExecuting`
+(6) — nine repaired statements ended **executable and wrong**. That is a repair working correctly on a
+question the model misread, and no error sentence can say so.
+
+`byClass`, read off the first rejection of each repaired case: `binding` 20 (7 fixed), `unknown` 2
+(1 fixed), `timeout` 1 (0 fixed). Binding failures are the engine naming a column, which is the one
+class a turn can act on, and it acted on 7 of 20.
+
+### The +1.31pp is two numbers, and the second one is not the lever
+
+A paired delta assumes the arms differ by the lever and by nothing else. Here 1,509 of the 1,532
+questions sent **byte-identical prompt tokens** (verified per case, not assumed: `tokens.prompt` equal
+on 1,509 of 1,509, and different on 23 of 23), so on those questions the repair arm made the same
+first call and re-sampled a temperature-0 endpoint. Whatever moved there is the run's own displacement.
+
+| side | cases | parent | repair | delta | won / lost | exact McNemar |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| prompt changed (`reached`) | 23 | 2 | 8 | **+26.09pp** | 7 / 1 | p = 0.0703 |
+| prompt identical (`unchanged`) | 1,509 | 997 | 1,011 | +0.93pp | 39 / 25 | p = 0.1034 |
+| pooled | 1,532 | 999 | 1,019 | +1.31pp | 46 / 26 | p = 0.0245 |
+
+Fourteen statements — 70% of the net +20 — came from questions whose prompt did not change by one
+character. The turn's own share is **+6 statements, +0.39pp**, and on its own 23 cases it reads
+p = 0.0703: real in sign, not separable from noise at this n.
+
+The 4.24% flip rate is not new and it is not a defect. `eval/bird/drift.ts` was written for exactly
+this and `I-84` measured 42 statements changing under 1,532 identical prompts for a net −0.78pp; the
+narrow-block round measured its A/A side at +2.23pp. What is new is the *ratio*: the control side is
+now large enough to carry a pooled delta past a threshold on its own arithmetic, and this is the first
+round where a criterion phrased as "≥ +1.0pp **i.e.** ≥ 16 of 25" lands on two different answers.
+
+### What was registered, what was measured
+
+| the criterion, clause by clause | registered | measured | verdict |
+| --- | --- | --- | --- |
+| +1.0pp or better on dev | ≥ +1.0pp | **+1.31pp** | **met** |
+| exact McNemar p < 0.05 | p < 0.05 | p = 0.0245 | **met** |
+| "i.e. ≥ 16 of the 25" | 16 cases fixed by a turn | **6** of the 25 | **not met** |
+
+The third row is the one the round was about. Two of the 25 priced refusals were already answered by
+the arm's own first draw on the retry, three executed-and-wrong in the retry so the funnel had no
+error to feed back, and four turns fired on cases the pricing never counted — 19 of the 23 turns
+overlapped the priced set, and 6 of those 19 became correct. The `i.e.` was the defect: it equated a
+pooled delta with a local flip count, and the pooled test is the one that counts flips anywhere,
+including 1,509 questions where nothing was sent differently. Both halves are true; they are not the
+same claim.
+
+**So the verdict is graded, not binary.** The mechanism exists — a turn on the engine's own sentence
+turns 7 of the 20 binding refusals into a match, and costs one case the other arm had right — and the
+arm as a whole is worth +0.39pp against a threshold of +1.0pp. It stays in `ON_DEMAND_ARMS`.
+Promoting it to the chain would spend +1.5% of prompt tokens and +1.5% of calls per case — mean prompt
+3,694 → 3,751, completion 137 → 138 — to bank a number that is 70% drift.
+
+**What this closes and what it does not.** The refinement family is now priced, dispatched and read at
+its own scale: a second turn is not the next point on BIRD, because the ceiling was 1.63pp and the
+realisable part of it is 0.39pp at this model. The largest mechanical class is still `name-not-joined`
+at 17 cases (1.11pp), and a repair turn is the wrong instrument for it — the column lives in a table
+the statement does not read, and feeding back `no such column` makes the model rewrite a name rather
+than add a join. That one needs a retry with another table, which is a different mechanism and a
+different dispatch.
+
+### The same arm, four days apart, differs by eleven statements
+
+The parent in the table above reads **999**, and the published dev reading of that arm is **1,010**
+(65.93%, run `44991167518`). Same arm, same 1,532 questions, same `deepseek-chat`, no change to the
+`macsql-bird` template between them — `feeb61d` touched that file after the older artifact and only
+*added* `macsql-bird-qp` and `macsql-bird-os` beside it.
+
+Eleven statements, 0.72pp, from the endpoint re-sampling four days later. That is smaller than the 42
+statements `I-84` recorded and smaller than the 14 net the A/A side of this pair moved, and it belongs
+to the same population: **the shipped arm's dev number is one draw, not a constant.** The coverage
+table keeps 65.93 because replacing a published reading with a later single sample is the mistake
+this repository has already written down; what it gains instead is this paragraph, which says the
+number has a spread and how big it has been observed to be.
+
+It also fixes the resolution of everything above it. The pair's +20 statements is under twice the
+gap between two runs of one arm, which is why +26.09pp on 23 questions reads as p = 0.0703 rather
+than as a win: at this corpus and this model, **a 20-statement delta is one run-to-run draw away from
+being nothing**, and only the paired design makes it distinguishable at all.

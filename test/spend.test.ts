@@ -33,7 +33,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SHIPMENT_POLICY, adjudicateDecision } from '@agentix-e/nl2charts-ai';
-import { PRICES } from '../eval/price.js';
+import { PRICES, billOf } from '../eval/price.js';
 import {
   adjudicateSpend,
   BUDGET_YUAN,
@@ -53,6 +53,7 @@ import {
   TOKEN_TARIFF,
   writeRow,
   type Ledger,
+  type LedgerRow,
   type SpendArtifact,
 } from '../eval/bird/spend.js';
 
@@ -401,6 +402,11 @@ describe('recording a basis', () => {
 
 describe('the shipped ledger', () => {
   const ledger = readLedger();
+  const rowOf = (model: string): LedgerRow => {
+    const found = ledger.rows[model];
+    if (found === undefined) throw new Error(`the ledger has no row for ${model}`);
+    return found;
+  };
 
   it('prices only models price.ts can cost', () => {
     for (const [model, entry] of Object.entries(ledger.rows)) {
@@ -417,7 +423,17 @@ describe('the shipped ledger', () => {
     // first version of a spend gate that refuses the work is a gate that gets `|| true` on it.
     const verdict = adjudicateSpend({ model: 'deepseek-chat', limit: 1534 }, { ledger });
     expect(verdict.code).toBe('ok');
-    expect(verdict.projection?.total).toBeCloseTo(0.00245592 * 1534 * SAFETY_MULTIPLE, 5);
+    // Priced from the row, not from a literal. This line used to hold `0.00245592` — the money a
+    // case cost on a basis nobody wrote down — and when the row moved to the shipped arm plus its
+    // repair turn (3,137 prompt / 2,548 cached → 3,751 / 3,564) the literal turned a re-pricing into
+    // a test failure. A duplicated measurement is the one kind of constant that is always stale.
+    const row = rowOf('deepseek-chat');
+    const perCase = billOf('deepseek-chat', {
+      promptTokens: row.prompt,
+      completionTokens: row.completion,
+      cachedPromptTokens: row.cached,
+    });
+    expect(verdict.projection?.total).toBeCloseTo((perCase ?? 0) * 1534 * SAFETY_MULTIPLE, 5);
     expect(verdict.projection?.total).toBeLessThan(BUDGET_YUAN);
   });
 

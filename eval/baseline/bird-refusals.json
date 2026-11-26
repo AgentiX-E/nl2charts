@@ -133,5 +133,53 @@
     "why": "`candidateFailures` was a count and it was arm-level only, so the level where a voting arm's refusals happen was unreadable: one candidate refused, the case answered with the other two, and the artifact said `{ engine: 1 }` with no statement and no sentence. That is what `select-mixed-rule`'s published zero was a fact about.",
     "readAt": "this artifact was written before the record existed, so its candidate table is a silence rather than eight zeroes, and the tool prints that sentence instead of a table",
     "cost": "0: the record is written by a runner that was already generating the candidates; the next dispatch that reads it is one a plan had already priced"
+  },
+  "refiner": {
+    "arm": "macsql-prompt+repair",
+    "parent": "macsql-prompt",
+    "run": "45866761911",
+    "asked": 1532,
+    "parentPassed": 999,
+    "armPassed": 1019,
+    "deltaPp": 1.31,
+    "pooled": {
+      "wins": 46,
+      "losses": 26,
+      "p": 0.0245
+    },
+    "reached": {
+      "cases": 23,
+      "parentPassed": 2,
+      "armPassed": 8,
+      "wins": 7,
+      "losses": 1,
+      "p": 0.0703
+    },
+    "unchanged": {
+      "cases": 1509,
+      "parentPassed": 997,
+      "armPassed": 1011,
+      "wins": 39,
+      "losses": 25,
+      "p": 0.1034
+    },
+    "funnel": {
+      "total": 1532,
+      "firstPass": 1011,
+      "ranOnceWrong": 498,
+      "repaired": 23,
+      "fixedByRepair": 8,
+      "stillFailing": 15,
+      "stillNotExecuting": 6
+    },
+    "criterion": {
+      "registered": ">= +1.0pp with exact McNemar p < 0.05 on dev, i.e. >= 16 of the 25 priced cases",
+      "deltaMet": true,
+      "pMet": true,
+      "flipCountMet": false,
+      "fixedInsideThePriced25": 6
+    },
+    "identity": "firstPass + ranOnceWrong + repaired = total; fixedByRepair + stillFailing = repaired; and stillNotExecuting is a subset of stillFailing rather than a fourth bucket",
+    "verdict": "The mechanism is present: 7 of the 20 binding refusals become a match and one case the parent had right is lost, so the turn is worth +6 statements (+0.39pp). The other 14 of the 20 net statements are the pair's own displacement over the 1,509 questions whose prompt tokens did not change. The arm stays on demand: promoting it would spend 1.5% more prompt tokens and 1.5% more calls a case for a number that is 70% drift."
   }
 }

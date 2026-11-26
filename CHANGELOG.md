@@ -82,6 +82,28 @@ cannot be argued with.
   jsDelivr's 20 MB cap answered 49 bytes. `pnpm bench:wikisql:ask`, `wikisql-ask.yml`, and a pilot
   (`--limit 40`) that costs ¥0.04 before a split that costs ¥8.66.
 
+### Measured
+- **The refinement turn is worth six cases, and the pairing supplied the other fourteen.** Run
+  `45866761911` paired `macsql-prompt` against `macsql-prompt+repair` on dev: **999 → 1,019 of 1,532,
+  +1.31pp**, exact McNemar on 72 discordant questions p = 0.0245 (46 won, 26 lost), ¥5.64 against a
+  ¥5.64 price. The registered criterion was ≥ +1.0pp with p < 0.05 *i.e.* ≥ 16 of the 25 priced
+  refusals; the first two clauses hold and the third does not. The pair splits by whether the lever
+  changed what was sent, and 1,509 of the 1,532 questions sent byte-identical prompt tokens (equal on
+  1,509 of 1,509, different on 23 of 23): that side moved **+0.93pp** (39 won, 25 lost, p = 0.1034) on
+  nothing but a re-sample, while the 23 questions the turn reached moved **2 → 8** (7 won, 1 lost,
+  p = 0.0703). So the mechanism is real and worth **+6 statements, +0.39pp**, and 70% of the published
+  delta is the run's own displacement. The arm stays in `ON_DEMAND_ARMS`: promoting it would spend
+  1.5% more prompt tokens (3,694 → 3,751) and 1.5% more calls per case to bank a number it did not
+  earn. `eval/baseline/bird-refusals.json` gains a `refiner` block whose internals are audited rather
+  than asserted — the two sides must sum to the pair, all three p-values are recomputed from their own
+  win/loss pairs, and `firstPass + ranOnceWrong + repaired = total` — because the funnel's obvious sum
+  is wrong: `8 + 6 + 15` reads as 29 against a population of 23, `stillNotExecuting` being a subset of
+  `stillFailing` and not a fourth bucket. The parent of that pair reads **999** where the published
+  dev reading of the same arm is **1,010** — same arm, same split, no template change between them,
+  so eleven statements of the difference is the endpoint re-sampling four days later, which is the
+  same displacement `I-84` measured at 42. The coverage table keeps 65.93; the new paragraph in
+  `docs/benchmarks.md` records the spread instead of silently substituting a later sample.
+
 ### Fixed
 - **Two documents each said which arm ships, and they named different arms.** The coverage table
   cited `select-mixed` for BIRD dev — its floor 62.5 beside its 62.34 reading — while the row under

@@ -2,13 +2,13 @@
   "note": "What a case costs on one model, in tokens a case, measured on the run named in each row. Money is derived from eval/price.ts at read time, so a price change re-prices every row. Written by `pnpm bench:spend --record`; see eval/bird/spend.ts for what reads it.",
   "rows": {
     "deepseek-chat": {
-      "prompt": 3137,
-      "completion": 147,
-      "cached": 2548,
+      "prompt": 3751,
+      "completion": 138,
+      "cached": 3564,
       "cases": 3064,
-      "arm": "select-mixed-rule",
-      "run": "44991167518",
-      "asOf": "2026-11-22",
+      "arm": "macsql-prompt+repair",
+      "run": "45866761911",
+      "asOf": "2026-11-26",
       "served": [
         "deepseek-flash"
       ]
