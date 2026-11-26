@@ -98,7 +98,15 @@ export interface Table {
   readonly id: string;
   readonly header: readonly string[];
   readonly types: readonly string[];
-  readonly rows: readonly (readonly string[])[];
+  /**
+   * The table's cells, as the corpus stores them.
+   *
+   * `unknown` rather than `string` because the JSON does not keep that promise: a column of counts
+   * arrives as numbers and an empty cell as `null`. The first pilot refused 14 of 40 cases with
+   * `value.replaceAll is not a function` — a prompt renderer that assumed a string, discovered by the
+   * refusal's own evidence rather than by the model, which had answered 26 of 40 correctly.
+   */
+  readonly rows: readonly (readonly unknown[])[];
 }
 
 /** One question's reply, kept beside the statement so a reader can audit the extraction. */
@@ -216,8 +224,8 @@ export function parseTables(text: string): Map<string, Table> {
 }
 
 /** One cell as the prompt spells it: quoted, with a quote inside it escaped the way SQL escapes one. */
-function cellOf(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
+export function cellOf(value: unknown): string {
+  return `'${String(value ?? '').replaceAll("'", "''")}'`;
 }
 
 /**

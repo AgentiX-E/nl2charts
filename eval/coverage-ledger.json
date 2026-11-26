@@ -806,7 +806,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.69
+      "branches": 98.7
     },
     "eval/wikisql/exec.ts": {
       "lines": 98.42,

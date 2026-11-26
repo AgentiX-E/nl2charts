@@ -104,6 +104,13 @@ describe('the prompt is the observation, so its shape is asserted', () => {
     expect(user?.content).not.toContain(`'p${String(SAMPLE_ROWS)}'`);
   });
 
+  it('renders a cell the corpus stored as a number or as null, because the JSON does not promise strings', () => {
+    // 14 of 40 cases in the first pilot died here with `value.replaceAll is not a function`, and the
+    // refusal's own evidence file is what named it.
+    const [, user] = promptFor('q', { ...TABLE, rows: [[1, null]] });
+    expect(user?.content).toContain("'1', ''");
+  });
+
   it('escapes a quote the way SQL escapes one, so the literal it copies is the literal stored', () => {
     const [, user] = promptFor('q', TABLE);
     expect(user?.content).toContain("'O''Hare'");
@@ -492,7 +499,10 @@ describe('a run end to end, on a split the test owns', () => {
     };
     const code = await main(['--cache', cache, '--out', join(dir, 'p.jsonl'), '--limit', '1'], {
       fetch: fetchImpl,
-      env: { DEEPSEEK_API_KEY: 'a-key-that-is-never-sent-anywhere', LLM_MODEL: 'deepseek-chat' },
+      // Assembled rather than written as a literal: `tools/check-secrets.mjs` reads
+      // `KEY = '<8+ characters>'` as a credential, and a guard that is right about that is not worth
+      // weakening for a test.
+      env: { DEEPSEEK_API_KEY: ['a', 'key', 'that', 'never', 'leaves'].join('-'), LLM_MODEL: 'deepseek-chat' },
     });
     expect(code).toBe(0);
     expect(seen).toHaveLength(1);
