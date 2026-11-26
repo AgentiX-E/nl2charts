@@ -7,6 +7,21 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **The 28 statements the engine never ran, and the two rewrites that reach three of them.**
+  `bench:bird:residue` measures only cases that ran and answered with different rows; on the shipped
+  arm's dev artifact that leaves 104 of 522 failures outside it, and they had never been described.
+  `eval/bird/refusals.ts` splits them: 76 are `arity` (different column count — and all 76 also
+  return different rows, so they are the artifact's first failed check rather than a second
+  population) and 28 are refusals, classified by the engine's own sentence — 17 `name-not-joined`
+  (a column of a table the statement does not read; 12 are one database's `Laboratory` columns), 4
+  `name-misqualified`, 3 `YEAR()`, 1 `DATEDIFF`, 2 step-budget, 1 two-statement reply. Two rules
+  reach seven of them, six run and **three are right: 65.93% → 66.12%, +0.20pp at ¥0** — a tenth of
+  Spider's +2.13pp for the same exercise, because Spider's judge parses and BIRD's executes. The
+  cast in `YEAR(x)` → `CAST(STRFTIME('%Y', x) AS INTEGER)` is the whole difference between a rewrite
+  that answers and one that silently returns no rows. `pnpm bench:bird:refusals`, its step in
+  `bird-dev.yml`, and `eval/baseline/bird-refusals.json`. The largest mechanical class (17 cases,
+  1.11pp) is a join and is *not* repaired: it is the trigger the next round fires on.
+- **WikiSQL has a reading: 85.30% EX on dev, one call a question, ¥8.66.** `eval/wikisql/ask.ts`
 - **Spider reads 61.90% instead of 59.77%, and the 2.13pp cost nothing but a rewrite.** The 45
   statements the `grammar` arm still had refused were classified by re-running the reference parser
   on each and grouping its own sentence: `eval/spider/judge.py` now returns `reason` beside

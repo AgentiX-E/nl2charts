@@ -86,6 +86,7 @@
     "bench:bird:compound": "tsx eval/bird/compound.ts",
     "bench:bird:selectivity": "tsx eval/bird/selectivity.ts",
     "bench:bird:residue": "tsx eval/bird/residue.ts",
+    "bench:bird:refusals": "tsx eval/bird/refusals.ts",
     "bench:bird:join": "tsx eval/bird/join.ts",
     "bird:stratify": "node tools/stratify-mixed.mjs",
     "bench:bird:drift": "tsx eval/bird/drift.ts",

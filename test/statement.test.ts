@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codeOnly, literalSites, referencedFields, stringLiterals, tableRefs } from '../eval/bird/statement.js';
+import { codeOnly, literalSites, qualifiedRefs, referencedFields, stringLiterals, tableRefs } from '../eval/bird/statement.js';
 
 /**
  * The scanner exists so that an edit lands on the token a human would point at. Every
@@ -380,5 +380,39 @@ describe('the field scanner at its edges', () => {
     // every statement a formatter produced, and reading past it would index outside the string.
     expect(referencedFields('select qty from orders   ').qualified).toEqual([]);
     expect(referencedFields('select qty from orders   ').bare).toContain('qty');
+  });
+});
+
+describe('the qualified pairs and the characters they occupy', () => {
+  it('reports the span of the whole pair, quoting included, so a caller can replace exactly it', () => {
+    const sql = 'select T2.`School`, T1.`Website` from frpm as T2 join schools as T1 on T1.x = T2.y';
+    const refs = qualifiedRefs(sql);
+    expect(refs[0]).toEqual({ start: 7, end: 18, qualifier: 'T2', column: 'School', columnRaw: '`School`' });
+    // The edit a repair would make is a slice at these offsets and nothing else.
+    expect(`${sql.slice(0, refs[0]?.start)}T1.${refs[0]?.columnRaw}${sql.slice(refs[0]?.end)}`).toBe(
+      'select T1.`School`, T1.`Website` from frpm as T2 join schools as T1 on T1.x = T2.y',
+    );
+  });
+
+  it('reports a pair whose column contains a dot, which is why the split is not a lastIndexOf', () => {
+    const refs = qualifiedRefs('select d."v1.2" from data d');
+    expect(refs).toEqual([{ start: 7, end: 15, qualifier: 'd', column: 'v1.2', columnRaw: '"v1.2"' }]);
+  });
+
+  it('collapses the whitespace inside a pair into the span it reports', () => {
+    const sql = 'select T1 . qty from orders as T1';
+    expect(qualifiedRefs(sql)[0]).toMatchObject({ qualifier: 'T1', column: 'qty' });
+    expect(sql.slice(qualifiedRefs(sql)[0]?.start, qualifiedRefs(sql)[0]?.end)).toBe('T1 . qty');
+  });
+
+  it('finds no pair in a literal or in a bare name', () => {
+    expect(qualifiedRefs("select 1 from items where name = 'a.b'")).toEqual([]);
+    expect(qualifiedRefs('select name, price from items')).toEqual([]);
+  });
+
+  it('reports every occurrence of the same pair, in the order they appear', () => {
+    const refs = qualifiedRefs('select o.qty from orders o where o.qty > 1 order by o.qty');
+    expect(refs.map((ref) => ref.qualifier)).toEqual(['o', 'o', 'o']);
+    expect(refs.map((ref) => ref.start)).toEqual([...refs.map((ref) => ref.start)].sort((left, right) => left - right));
   });
 });

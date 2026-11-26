@@ -1,0 +1,123 @@
+{
+  "note": "The 104 failures of the shipped arm's dev artifact that `bench:bird:residue` does not read, split by the first check that failed and, for the 28 refusals, by the engine's own sentence. `eval/bird/refusals.ts` produces every number here from artifact 14742543517 (run 44991167518, 1,532 questions, 1,010 correct = 65.93%). Two things are deliberately not claimed. The 76 `arity` cases are **not** a separate defect: every one of them also returns different rows, so the artifact's `reason` is the first check that failed rather than a kind of failure, and a reader who counted 418 + 76 as two populations would be double-counting one. The 17 `name-not-joined` cases are **not** repaired: the column exists in a table the statement does not read, and adding that join would be the instrument inventing the relation the model failed to find — the rule round 198 drew on Spider. What the file does claim is that the two rules it does have are worth +3 statements, which is +0.20pp, and that they cannot lower a reading because they are applied only to statements the engine refused.",
+  "instrument": "eval/bird/refusals.ts",
+  "dataset": "BIRD dev",
+  "split": "dev",
+  "arm": "macsql-prompt",
+  "provenance": {
+    "run": "44991167518",
+    "artifact": "14742543517",
+    "at": "2026-11-22T06:19:00.000Z",
+    "model": "deepseek-chat"
+  },
+  "asked": 1532,
+  "passed": 1010,
+  "failed": 522,
+  "kinds": {
+    "values": 418,
+    "arity": 76,
+    "refused": 28,
+    "unanswered": 0
+  },
+  "classes": [
+    {
+      "refusal": "name-misqualified",
+      "cases": 4,
+      "attempted": 4,
+      "readable": 3,
+      "exact": 2,
+      "rule": "requalify",
+      "why": "the column exists in a table the statement reads, and the statement qualified it with another one — `T2.`School`` where `schools` is T1"
+    },
+    {
+      "refusal": "name-not-joined",
+      "cases": 17,
+      "attempted": 0,
+      "readable": 0,
+      "exact": 0,
+      "rule": null,
+      "why": "the column exists in a table the statement never reads; 12 of the 17 are one database's `Laboratory` columns written without a join to `Laboratory`"
+    },
+    {
+      "refusal": "name-nowhere",
+      "cases": 0,
+      "attempted": 0,
+      "readable": 0,
+      "exact": 0,
+      "rule": null,
+      "why": "no table of the database carries the name — the class is printed empty because its emptiness is a finding about this corpus, not an absence of code"
+    },
+    {
+      "refusal": "date-function",
+      "cases": 3,
+      "attempted": 3,
+      "readable": 3,
+      "exact": 1,
+      "rule": "year",
+      "why": "MySQL's `YEAR(x)`; BIRD's own gold statements spell it `STRFTIME('%Y', x)`, and the rewrite casts to INTEGER because SQLite compares TEXT to INTEGER by storage class"
+    },
+    {
+      "refusal": "other-function",
+      "cases": 1,
+      "attempted": 0,
+      "readable": 0,
+      "exact": 0,
+      "rule": null,
+      "why": "`DATEDIFF`, and the corpus's own gold for that question answers with a difference of day-of-month numbers, so no single rewrite is the answer"
+    },
+    {
+      "refusal": "step-budget",
+      "cases": 2,
+      "attempted": 0,
+      "readable": 0,
+      "exact": 0,
+      "rule": null,
+      "why": "`interrupted`: the statement was aborted at the step budget, which is a defect in what was written and not in how it was spelled"
+    },
+    {
+      "refusal": "statement-count",
+      "cases": 1,
+      "attempted": 0,
+      "readable": 0,
+      "exact": 0,
+      "rule": null,
+      "why": "the reply held two statements for a two-part question; one result set is what the judge compares, so choosing is a decision and not a rewrite"
+    },
+    {
+      "refusal": "other",
+      "cases": 0,
+      "attempted": 0,
+      "readable": 0,
+      "exact": 0,
+      "rule": null,
+      "why": "a message outside every class above; printed as a class so a new sentence from the engine cannot arrive without a row"
+    }
+  ],
+  "repair": {
+    "tried": 7,
+    "ran": 6,
+    "right": 3,
+    "deltaPp": 0.2
+  },
+  "reading": {
+    "asWritten": 1010,
+    "asWrittenPct": 65.93,
+    "correct": 1013,
+    "repairedPct": 66.12
+  },
+  "invariant": {
+    "passing": 1010,
+    "containingYear": 0,
+    "changedByTheDateRule": 0,
+    "why": "a repair is reached only from a refusal, and the date rule is the only one that could fire on an accepted statement; it fires on none of the 1,010, so the accepted set is byte-identical and the difference between the two readings is exactly the refusals that became right"
+  },
+  "secondArm": {
+    "arm": "select-mixed-rule",
+    "asked": 1532,
+    "passed": 980,
+    "refused": 0,
+    "unanswered": 7,
+    "note": "0 refusals is not a finding about the arm. Its guard drops a candidate that fails to execute before the judge sees the case, so a refusal arrives as `no sample survived guard and execution` — 7 cases, each hiding up to three refused candidates. The census refuses to publish an empty table as a measurement (`censusProblems` fails the run), which is how the difference between 'nothing was refused' and 'nothing refused is visible here' stayed visible. Reading this arm's refusals needs the candidate-level record, which the artifact does not keep."
+  },
+  "next": "The largest mechanical class is `name-not-joined` at 17 cases (1.11pp), and it is not a rewrite: it is a retry with another table. That is the trigger the multi-agent round should fire on — the statement names a column that lives in a table it does not read, which is decidable without a model and costs no tokens to detect."
+}

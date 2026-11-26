@@ -446,6 +446,8 @@ interface CodeToken {
   readonly text: string;
   /** True when the token was written in double quotes, which is how BIRD escapes names with spaces. */
   readonly quoted: boolean;
+  /** Where the token starts in the statement, quotes included. */
+  readonly start: number;
   readonly end: number;
 }
 
@@ -457,11 +459,11 @@ function nextToken(text: string, from: number): CodeToken | undefined {
     const closing = text[at] === '[' ? ']' : (text[at] as string);
     const close = text.indexOf(closing, at + 1);
     if (close === -1) return undefined;
-    return { text: text.slice(at + 1, close), quoted: true, end: close + 1 };
+    return { text: text.slice(at + 1, close), quoted: true, start: at, end: close + 1 };
   }
   const match = /^[A-Za-z_][\w$]*/.exec(text.slice(at));
-  if (match === null) return { text: text.charAt(at), quoted: false, end: at + 1 };
-  return { text: match[0], quoted: false, end: at + match[0].length };
+  if (match === null) return { text: text.charAt(at), quoted: false, start: at, end: at + 1 };
+  return { text: match[0], quoted: false, start: at, end: at + match[0].length };
 }
 
 function isIdentifier(token: CodeToken): boolean {
@@ -510,9 +512,54 @@ function codeKeepingNames(sql: string): string {
 export function referencedFields(sql: string): ReferencedFields {
   const alias = new Map<string, string>();
   for (const ref of tableRefs(sql)) alias.set(ref.alias.toLowerCase(), ref.table.toLowerCase());
-  const code = codeKeepingNames(sql);
+  const scanned = scanFields(sql);
   const qualified = new Set<string>();
-  const bare = new Set<string>();
+  for (const ref of scanned.qualified) {
+    const table = alias.get(ref.qualifier.toLowerCase());
+    // A pair whose qualifier matches no `from`/`join` reference is left out for the reason the
+    // interface states: guessing at a correlated subquery's table would put a column on a card
+    // that cannot express it.
+    if (table !== undefined) qualified.add(`${table}\u0000${ref.column.toLowerCase()}`);
+  }
+  const fields: FieldRef[] = [];
+  for (const key of qualified) {
+    const [table, column] = key.split('\u0000');
+    if (table !== undefined && column !== undefined) fields.push({ table, column });
+  }
+  return { qualified: fields, bare: [...new Set(scanned.bare)] };
+}
+
+/**
+ * One `alias.column` pair as it was written, with the characters it occupies.
+ *
+ * The offsets exist because one consumer edits the statement: a name that the engine refused is
+ * repaired by re-qualifying it, and a repair that re-renders the statement from a parse tree is a
+ * repair that has to be right about every other token as well. Replacing two spans and copying the
+ * rest is the smallest thing that can be wrong.
+ *
+ * `columnRaw` is the column exactly as it appeared, quotes included, so a rewrite of `T2."School"`
+ * keeps the quoting the model chose and the diff is the qualifier alone.
+ */
+export interface QualifiedRef {
+  readonly start: number;
+  readonly end: number;
+  readonly qualifier: string;
+  readonly column: string;
+  readonly columnRaw: string;
+}
+
+/**
+ * The qualified pairs with their offsets, and the bare names, from one pass over the code.
+ *
+ * Whitespace between the qualifier, the dot and the column is collapsed into the span: `T1 . id`
+ * is one pair whose replacement is written without the spaces. Nothing in this repository emits
+ * that spelling and a rewrite that preserved it would be preserving a token boundary nobody asked
+ * about.
+ */
+function scanFields(sql: string): { qualified: readonly QualifiedRef[]; bare: readonly string[] } {
+  const code = codeKeepingNames(sql);
+  const qualified: QualifiedRef[] = [];
+  const bare: string[] = [];
   let token = nextToken(code, 0);
   while (token !== undefined) {
     if (!isIdentifier(token)) {
@@ -522,20 +569,25 @@ export function referencedFields(sql: string): ReferencedFields {
     const after = nextToken(code, token.end);
     if (after !== undefined && after.text === '.') {
       const column = nextToken(code, after.end);
-      const table = alias.get(token.text.toLowerCase());
-      if (column !== undefined && isIdentifier(column) && table !== undefined) {
-        qualified.add(`${table}\u0000${column.text.toLowerCase()}`);
+      if (column !== undefined && isIdentifier(column)) {
+        qualified.push({
+          start: token.start,
+          end: column.end,
+          qualifier: token.text,
+          column: column.text,
+          columnRaw: sql.slice(column.start, column.end),
+        });
       }
       token = column === undefined ? undefined : nextToken(code, column.end);
       continue;
     }
-    bare.add(token.text.toLowerCase());
+    bare.push(token.text.toLowerCase());
     token = after;
   }
-  const fields: FieldRef[] = [];
-  for (const key of qualified) {
-    const [table, column] = key.split('\u0000');
-    if (table !== undefined && column !== undefined) fields.push({ table, column });
-  }
-  return { qualified: fields, bare: [...bare] };
+  return { qualified, bare };
+}
+
+/** The qualified pairs of a statement, for a caller that has to edit one of them. */
+export function qualifiedRefs(sql: string): readonly QualifiedRef[] {
+  return scanFields(sql).qualified;
 }

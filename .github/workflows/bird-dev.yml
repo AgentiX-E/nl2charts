@@ -281,6 +281,14 @@ jobs:
       # request the artifact cannot meet, and a request that names nothing.
       - name: What kind of wrong the no-answer statements are
         run: pnpm bench:bird:gap:values eval/out/bird-eval.json --arm "$(node tools/bird-arm.mjs eval/out/bird-eval.json)"
+      # The other half of the failure population: the statements the engine never ran. `--arm` is
+      # omitted on purpose, because the default is read from `SHIPPED_SQL.arm` — this step is about
+      # the arm the product sends, and a name written here would be a second place for that answer
+      # to live. A dispatch that leaves the arm out prints `no case for ...` and exits zero, since
+      # an arm nobody asked about is a dispatch decision; an arm that answered 1,532 questions and
+      # refused none is a corpus claim, and that one fails the run.
+      - name: What the engine refused, and what a rewrite would have bought
+        run: pnpm bench:bird:refusals --artifact eval/out/bird-eval.json
       # The same instrument on the split with room for a result. No `--strict`: the ceiling is
       # a reading, and the two failures it can catch are the ones the Mini-Dev gate already
       # fails on.

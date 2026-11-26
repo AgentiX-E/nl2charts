@@ -179,6 +179,17 @@ rejects, a field it will not accept. `NL2C_E_LLM_REJECTED`, as opposed to
 were one code until a reasoning model's `temperature: 0` came back as 400 and read as "the
 endpoint is unreachable". Carries the endpoint's own sentence in `details.detail`.
 
+**Refused statement** — A case where the engine returned no rows at all, which is a
+different failure from a statement that ran and answered wrongly. `bench:bird:refusals`
+splits BIRD's refusals by the engine's own sentence and, for a name it could not
+resolve, by where the name lives: `name-misqualified` (a table the statement reads
+owns it, under another alias — re-qualifiable), `name-not-joined` (a table it does
+not read owns it — a missing join, which no rewrite may add) and `name-nowhere`.
+On the shipped arm's dev split the 28 refusals are 17, 4 and 0, and the two rules
+reach three statements — **+0.20pp**, against +2.13pp for the same exercise on
+Spider, because BIRD's judge executes and Spider's parses. **The worth of a
+dialect repair is the judge's sensitivity to spelling.**
+
 **Replay provider** — A first-class LLM provider that returns recorded responses
 by matching the prompt. Used in CI so the real pipeline runs deterministically.
 

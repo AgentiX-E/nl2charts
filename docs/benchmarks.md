@@ -11200,6 +11200,83 @@ and never wired, and wiring it is a separate change because the direction it gua
 the dialect (`null-order.ts` treats every engine it does not name as SQLite, and DuckDB sorts the
 other way). Two free rules do not compose for free.
 
+## The 28 statements the engine never ran, and the two rewrites that reach three of them
+
+`bench:bird:residue` measures one population and says so in its own predicate: statements that ran
+and answered with different **rows**. On the shipped arm's dev artifact that leaves 418 of 522
+failures inside the measurement and **104 outside it**, and nothing has ever described the 104.
+`bench:bird:refusals` is that description, and it splits them by the first check that failed.
+
+| population | cases | share | what it is |
+|---|---:|---:|---|
+| `values` | 418 | 80.1% | ran, same arity, different rows — the residue's subject |
+| `arity` | 76 | 14.6% | ran, **different** arity — and every one of them also returns different rows |
+| `refused` | 28 | 5.4% | the engine never returned rows |
+| `unanswered` | 0 | — | an arm that produced no candidate at all |
+
+**The 76 are not a second defect.** `classifyFailureShape` tests row count, then arity, then values,
+so a case that matches on rows and differs on columns is labelled `column-count` even when its rows
+are wrong too — and on this artifact all 76 are. A reader who added 418 and 76 would count one
+population twice; the census names the class `arity` and prints it beside `values` for exactly that
+reason.
+
+The 28 refusals are the part worth splitting, and the split is the engine's own sentence:
+
+| the engine said | cases | class | rule | ran | right |
+|---|---:|---|---|---:|---:|
+| `no such column: X`, and X lives in a table the statement **does not read** | 17 | `name-not-joined` | — | 0 | 0 |
+| `no such column: X`, and X lives in a table the statement reads under another alias | 4 | `name-misqualified` | `requalify` | 3 | 2 |
+| `no such function: YEAR` | 3 | `date-function` | `year` | 3 | 1 |
+| `no such function: DATEDIFF` | 1 | `other-function` | — | 0 | 0 |
+| `interrupted` | 2 | `step-budget` | — | 0 | 0 |
+| `one statement at a time` | 1 | `statement-count` | — | 0 | 0 |
+
+**Two rules, three statements.** `requalify` rewrites a qualifier to the alias of the one table the
+statement reads that owns the column; `year` rewrites `YEAR(x)` to `CAST(STRFTIME('%Y', x) AS
+INTEGER)`. Seven statements are reached, six run, **three are right**: 1,010 → 1,013 = **65.93% →
+66.12%**, **+0.20pp**.
+
+That is a tenth of what the same exercise was worth on Spider (+2.13pp), and the difference is not
+the model — it is the judge. Spider's metric is a parse, so a spelling is worth points; BIRD's is an
+execution, so a statement that runs and answers the wrong question is worth nothing. **The value of a
+dialect repair is the judge's sensitivity to spelling**, and on an execution-judged corpus that is
+0.20pp.
+
+**The cast is not decoration.** `STRFTIME('%Y', x) = 1964` compares TEXT to INTEGER, and SQLite
+orders those by storage class — the comparison is false for every row and the rewrite returns
+nothing. Case `1188` is the one that caught it: without the cast the rule runs and answers empty, and
+the census would have reported three readable statements and zero right ones instead of one. Two of
+the three `YEAR` cases still answer wrong (a column order and an aggregation), so the class's own
+conversion rate is 33% and the rule's worth is one statement.
+
+**The largest mechanical class is a join, and it is not repaired.** 17 statements name a column of a
+table they do not read; 12 of them are one database's `Laboratory` columns written without a join to
+`Laboratory`. Adding that join would run, and it would be the instrument inventing the relation the
+model failed to find — the line round 198 drew on Spider, held here for the same reason and at a
+larger price: **17 cases = 1.11pp**, more than every rule in this section added together. It is
+reported as the next round's **trigger** instead: "the column you named lives in table T you did not
+join" is decidable from the declared corpus, needs no model, and costs no tokens to detect.
+
+**A zero that is a defect.** The same census on `select-mixed-rule` reads **0 refusals and 7
+`unanswered`** — not because nothing was refused, but because that arm's guard drops a candidate that
+fails to execute before the judge sees the case, so a refusal arrives as *no sample survived guard and
+execution*. The census refuses to publish an empty table as a measurement: a corpus of 1,532
+questions that refused nothing is a claim, and `censusProblems` fails the run on it. Reading that
+arm's refusals needs the candidate-level record, which the artifact does not keep.
+
+**Why the reading cannot fall.** A repair is reached only from a refusal, and the date rule is the
+only one that could fire on a statement the engine accepted — it fires on **0 of the 1,010**. The
+accepted set is therefore byte-identical to the one the artifact judged, the difference between the
+two readings is exactly the refusals that became right, and the number is comparable with the
+per-arm readings above rather than a second, softer measurement.
+
+```bash
+BIRD_SPLIT=dev pnpm bench:bird:refusals --artifact eval/out/bird-eval.json
+```
+
+`--arm` defaults to `SHIPPED_SQL.arm`, so a bare run is about the arm the product sends; the step in
+`bird-dev.yml` omits the flag for the same reason.
+
 ## What the systems that train nothing actually do
 
 The comparison that matters is not "ours against theirs" but "ours against the ones that pay the
