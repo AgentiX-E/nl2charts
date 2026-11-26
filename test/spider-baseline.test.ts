@@ -7,6 +7,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { RULES } from '../eval/spider/normalize.js';
 
 interface Arm {
   readonly arm: string;
@@ -45,6 +46,31 @@ interface Baseline {
     readonly highPp: number;
     readonly verdict: string;
   }[];
+  readonly exactAfterNormalize: number;
+  readonly normalized: {
+    readonly arm: string;
+    readonly instrument: string;
+    readonly exact: number;
+    readonly exactPct: number;
+    readonly predErrors: number;
+    readonly yuan: number;
+    readonly run: number | null;
+    readonly replayOf: number;
+  };
+  readonly diagnosis: {
+    readonly instrument: string;
+    readonly of: number;
+    readonly readable: number;
+    readonly exact: number;
+    readonly classes: readonly {
+      readonly refusal: string;
+      readonly cases: number;
+      readonly readable: number;
+      readonly exact: number;
+      readonly rule: string | null;
+      readonly why: string;
+    }[];
+  };
   readonly unparseable: {
     readonly total: number;
     readonly bareAlias: number;
@@ -124,5 +150,40 @@ describe('the Spider baseline is a citation, so its arithmetic has to close', ()
     expect(reasonerGrammar?.exactPct).toBe(54.16);
     expect(reasoner?.predErrors).toBeGreaterThan(chat?.predErrors as number);
     expect(reasoner?.yuan).toBeGreaterThan(chat?.yuan as number);
+  });
+
+  it('cites the repaired reading, and the arithmetic of the repair closes on its own counts', () => {
+    // The row's number is the one a submission would be scored on; the as-written reading travels
+    // beside it so a prompt arm is never compared against a repair by accident.
+    expect(BASELINE.asked).toBe(1_034);
+    expect(BASELINE.exactAfterNormalize).toBe(61.9);
+    expect(BASELINE.normalized.exact).toBe(BASELINE.exact + BASELINE.diagnosis.exact);
+    expect(BASELINE.normalized.exactPct).toBeCloseTo((100 * BASELINE.normalized.exact) / BASELINE.asked, 2);
+    expect(BASELINE.normalized.predErrors).toBe(BASELINE.predErrors - BASELINE.diagnosis.readable);
+    // Zero, because a repair is a rewrite of an answer that was already bought — and a reading that
+    // claimed a cost would be a reading that bought a second set of answers.
+    expect(BASELINE.normalized.yuan).toBe(0);
+    expect(BASELINE.normalized.run).toBeNull();
+    expect(BASELINE.normalized.replayOf).toBe(45_807_713_388);
+  });
+
+  it('classifies every refusal, and names a rule only where a rule exists', () => {
+    const classes = BASELINE.diagnosis.classes;
+    const total = (key: 'cases' | 'readable' | 'exact') => classes.reduce((sum, row) => sum + row[key], 0);
+    expect(BASELINE.diagnosis.of).toBe(BASELINE.predErrors);
+    expect(total('cases')).toBe(BASELINE.diagnosis.of);
+    expect(total('readable')).toBe(BASELINE.diagnosis.readable);
+    expect(total('exact')).toBe(BASELINE.diagnosis.exact);
+    for (const row of classes) {
+      expect(row.exact).toBeLessThanOrEqual(row.readable);
+      expect(row.readable).toBeLessThanOrEqual(row.cases);
+      expect(row.why.length).toBeGreaterThan(20);
+      // A class that names a rule names one this repository has; a class with no rule says so.
+      if (row.rule !== null) expect(RULES.map((rule) => rule.name)).toContain(row.rule);
+    }
+    // Six statements that no repair reaches, and they are the reason the fifth prompt arm was retired
+    // rather than bought: a sentence can only ask a model to write differently, and these are not
+    // spellings — `||`, `NOT IN`, a derived table, a parenthesised `OR`, a scalar subquery on the left.
+    expect(classes.filter((row) => row.rule === null).reduce((sum, row) => sum + row.cases, 0)).toBe(6);
   });
 });

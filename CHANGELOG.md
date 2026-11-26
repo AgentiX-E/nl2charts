@@ -7,6 +7,19 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **Spider reads 61.90% instead of 59.77%, and the 2.13pp cost nothing but a rewrite.** The 45
+  statements the `grammar` arm still had refused were classified by re-running the reference parser
+  on each and grouping its own sentence: `eval/spider/judge.py` now returns `reason` beside
+  `pred: "error"` — 21 `<>` (which its operator list spells `!=`), 11 self-aliases
+  (`FROM teacher AS teacher`), 4 `INNER JOIN`, 3 `CAST`, and 6 that are not spellings of anything the
+  grammar has. `eval/spider/normalize.ts` is the four repairs worth having and `eval/spider/residue.ts`
+  measures them: 37 of the 45 refusals become readable and 22 of those were already right, so the
+  reading is 618 + 22 = 640 of 1,034 at **¥0** in model calls, because it re-scores answers that were
+  already bought. The repair is applied *only* where the parser refused, which is why the reading
+  cannot fall — measured, not argued: 0 of the 618 accepted statements change under the rules.
+  `pnpm bench:spider:residue`, `pnpm bench:spider:score --normalize` (which writes both `reading` and
+  `asWritten`), and `spider-ask.yml`'s `normalize` input, on by default.
+- **WikiSQL has a reading: 85.30% EX on dev, one call a question, ¥8.66.** `eval/wikisql/ask.ts`
 - **WikiSQL has a reading: 85.30% EX on dev, one call a question, ¥8.66.** `eval/wikisql/ask.ts`
   renders the table the corpus actually ships — both column names (`col1 (text) — "Player"`, because
   the database says the first and the question says the second), the sample rows folded the way the

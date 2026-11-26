@@ -54,6 +54,17 @@ and negotiates routing. It contains no model calls and no `node:*` imports.
 **Dialect** — The SQL flavour of an engine (`duckdb`, `postgres`, `sqlite`).
 Carried on the engine and in span attributes.
 
+**Dialect repair** — A rewrite that spells a statement the way a benchmark's own
+parser reads it, applied *only* after that parser refused it (`<>` → `!=`,
+`INNER JOIN` → `JOIN`, dropping an alias that repeats its table, dropping a
+numeric cast over a bare column). It is not a cleaner: a statement the parser
+accepted is never touched, so a repaired reading cannot be lower than the
+reading it came from. On Spider's dev split the four repairs turn 37 of 45
+refusals readable and 22 of them right — 59.77% → 61.90% at no model cost. A
+rewrite that changes what the query selects is refused rather than applied:
+`AND (a OR b)` parses once its parentheses are stripped and still answers the
+wrong question, so it buys nothing for a meaning it changed.
+
 **Engine** — The adapter that actually runs SQL. `core` defines the interface;
 `node` implements it for native DuckDB. An engine is the only component that
 touches a database.

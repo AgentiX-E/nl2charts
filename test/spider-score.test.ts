@@ -13,6 +13,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildDatabase } from '../eval/spider/fetch.mjs';
 import {
+  applyRepairs,
+  cacheOf,
   casesTextOf,
   main,
   parsePredictions,
@@ -193,16 +195,22 @@ describe('the tool, with the judge handed to it', () => {
     );
   });
 
-  it('falls back to the default corpus directory, and says which file it could not read', () => {
+  it('resolves the corpus from the flag, then the environment, then the repository cache', () => {
+    // Asserted on the resolver rather than on a run: a run with no flag and no variable reads the
+    // repository's own cache, and a test that proved the fallback by deleting that cache would pass
+    // only on a machine that has never fetched the corpus — which is the machine CI is not.
+    const empty = { predictions: 'p', out: undefined, cache: undefined, limit: undefined, cases: undefined, normalize: false };
+    expect(cacheOf(empty, {})).toMatch(/eval\/\.cache\/spider$/u);
+    expect(cacheOf(empty, { SPIDER_CACHE: '/tmp/corpus' })).toBe('/tmp/corpus');
+    expect(cacheOf({ ...empty, cache: '/explicit' }, { SPIDER_CACHE: '/tmp/corpus' })).toBe('/explicit');
+  });
+
+  it('says which file it could not read when the corpus directory has no questions', () => {
     const predictions = join(dirOf(), 'p.jsonl');
     writeFileSync(predictions, '');
-    const previous = process.env.SPIDER_CACHE;
-    delete process.env.SPIDER_CACHE;
-    try {
-      expect(() => main(['--predictions', predictions], () => {}, { judge: judgeOf(() => ({ em: 1 })) })).toThrow(/dev\.json/u);
-    } finally {
-      if (previous !== undefined) process.env.SPIDER_CACHE = previous;
-    }
+    expect(() => main(['--predictions', predictions, '--cache', dirOf()], () => {}, { judge: judgeOf(() => ({ em: 1 })) })).toThrow(
+      /dev\.json/u,
+    );
   });
 
   it('returns non-zero when a gold does not parse, and names the first one', () => {
@@ -236,6 +244,82 @@ describe('the tool, with the judge handed to it', () => {
   });
 });
 
+describe('the repairs, and the reading they move', () => {
+  const pair = (pred: string) => ({ db: 'db.sqlite', pred, gold: 'SELECT name FROM singer' });
+
+  it('replaces a refusal and leaves every accepted verdict exactly where it was', () => {
+    const asked = [pair('SELECT name FROM singer'), pair('SELECT name FROM singer AS singer'), pair('SELECT a FROM t WHERE a <> 1')];
+    const verdicts = [{ em: 1, gold: 'ok', pred: 'ok' }, { em: 0, gold: 'ok', pred: 'error' }, { em: 0, gold: 'ok', pred: 'error' }];
+    const seen: string[] = [];
+    const repaired = applyRepairs(asked, verdicts, (pairs) => {
+      for (const entry of pairs) seen.push(entry.pred);
+      return [{ pred: 'ok', em: 0, gold: 'ok' }, { pred: 'ok', em: 1, gold: 'ok' }];
+    });
+    // Only the refused statements were handed to the second pass, and only those two came back changed.
+    expect(seen).toEqual(['SELECT name FROM singer', 'SELECT a FROM t WHERE a != 1']);
+    expect(repaired.verdicts[0]).toBe(verdicts[0]);
+    expect(repaired.verdicts[2]).toEqual({ pred: 'ok', em: 1, gold: 'ok' });
+    expect([repaired.refused, repaired.repaired, repaired.repairedExact]).toEqual([2, 2, 1]);
+  });
+
+  it('asks the judge nothing when nothing was refused', () => {
+    const verdicts = [{ em: 1, gold: 'ok', pred: 'ok' }];
+    let calls = 0;
+    const repaired = applyRepairs([pair('SELECT name FROM singer')], verdicts, () => {
+      calls += 1;
+      return [];
+    });
+    expect(calls).toBe(0);
+    expect(repaired.verdicts).toBe(verdicts);
+    expect([repaired.refused, repaired.repaired, repaired.repairedExact]).toEqual([0, 0, 0]);
+  });
+
+  it('refuses a second pass that answered a different number of pairs', () => {
+    expect(() =>
+      applyRepairs([pair('a'), pair('b')], [{ pred: 'error' }, { pred: 'error' }], () => [{ pred: 'ok' }]),
+    ).toThrow('the judge answered 1 of 2 repairs');
+  });
+
+  it('writes both numbers when it is asked to, so a prompt arm and a repair cannot be confused', () => {
+    const cache = corpus();
+    const predictions = join(dirOf(), 'p.jsonl');
+    const out = join(dirOf(), 'r.json');
+    writeFileSync(predictions, `${JSON.stringify({ index: 0, sql: 'SELECT name FROM singer WHERE singer_id <> 1' })}\n`);
+    const lines: string[] = [];
+    const code = main(['--cache', cache, '--predictions', predictions, '--out', out, '--normalize'], (line) => lines.push(line), {
+      judge: (pairs) =>
+        pairs.map((entry) =>
+          entry.pred.includes('!=') ? { em: 1, gold: 'ok', pred: 'ok' } : { em: 0, gold: 'ok', pred: 'error', reason: 'Error col: >' },
+        ),
+    });
+    expect(code).toBe(0);
+    expect(lines.join('\n')).toContain('as written  0 / 1 = 0.00%');
+    expect(lines.join('\n')).toContain('repaired    1 of 1 refusal(s) now parse, 1 also exact');
+    const written = JSON.parse(readFileSync(out, 'utf8')) as {
+      reading: { exact: number; predErrors: number };
+      asWritten: { exact: number; predErrors: number };
+      repaired: { refused: number; parseable: number; exact: number };
+    };
+    // The headline is the repaired reading; the as-written one travels beside it rather than instead.
+    expect(written.reading.exact).toBe(1);
+    expect(written.asWritten.exact).toBe(0);
+    expect(written.asWritten.predErrors).toBe(1);
+    expect(written.repaired).toEqual({ refused: 1, parseable: 1, exact: 1 });
+  });
+
+  it('writes one reading when it is not asked to repair, because two numbers would be an invitation to pick', () => {
+    const cache = corpus();
+    const predictions = join(dirOf(), 'p.jsonl');
+    const out = join(dirOf(), 'r.json');
+    writeFileSync(predictions, `${JSON.stringify({ index: 0, sql: 'SELECT name FROM singer' })}\n`);
+    main(['--cache', cache, '--predictions', predictions, '--out', out], () => {}, {
+      judge: () => [{ em: 1, gold: 'ok', pred: 'ok' }],
+    });
+    const written = JSON.parse(readFileSync(out, 'utf8')) as Record<string, unknown>;
+    expect(Object.keys(written).sort()).toEqual(['reading', 'split']);
+  });
+});
+
 describe('the flags', () => {
   it('reads every flag it documents, and refuses a limit that is not a count', () => {
     expect(resolveSettings(['--predictions', 'p', '--out', 'o', '--cache', 'c', '--limit', '5', '--cases', 'k'])).toEqual({
@@ -244,12 +328,20 @@ describe('the flags', () => {
       cache: 'c',
       limit: 5,
       cases: 'k',
+      normalize: false,
     });
     expect(() => resolveSettings(['--limit', '0'])).toThrow('positive integer');
   });
 
   it('refuses a flag that needs a value and ignores none of them silently', () => {
-    expect(resolveSettings([])).toEqual({ predictions: undefined, out: undefined, cache: undefined, limit: undefined });
+    expect(resolveSettings([])).toEqual({
+      predictions: undefined,
+      out: undefined,
+      cache: undefined,
+      limit: undefined,
+      cases: undefined,
+      normalize: false,
+    });
     expect(() => resolveSettings(['--limit', 'x'])).toThrow('positive integer');
   });
 

@@ -48,7 +48,14 @@ def schema_of(db):
 
 
 def compare(db, pred, gold):
-    """Exact match for one pair, with a parse verdict for each side and no shared label."""
+    """Exact match for one pair, with a parse verdict for each side and no shared label.
+
+    A refused prediction also carries `reason`: the parser's own sentence for why it stopped. The
+    count of refusals says how many were lost, and the reason says to whom — a prompt that names four
+    restrictions turns a refusal into a readable statement, and a refusal that survives them is one
+    more sentence the prompt does not have yet. Without the reason, the only way to find that sentence
+    is to read 1,034 statements; with it, the refusals group themselves.
+    """
     schema = schema_of(db)
     try:
         gold_sql = get_sql(schema, gold)
@@ -57,8 +64,8 @@ def compare(db, pred, gold):
         return {"em": 0, "gold": "error", "pred": "unparsed"}
     try:
         pred_sql = get_sql(schema, pred)
-    except Exception:
-        return {"em": 0, "gold": gold_state, "pred": "error"}
+    except Exception as error:
+        return {"em": 0, "gold": gold_state, "pred": "error", "reason": str(error)[:160]}
     # Two parses for two arguments: `compare(pred, pred)` would hand the evaluator one object and it
     # would consume it.
     return {"em": 1 if EVALUATOR.eval_exact_match(pred_sql, get_sql(schema, gold)) else 0,

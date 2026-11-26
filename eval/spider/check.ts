@@ -78,6 +78,14 @@ export interface Verdict {
   readonly gold?: string;
   readonly pred?: string;
   readonly error?: string;
+  /**
+   * Why the reference refused a prediction, in its own words.
+   *
+   * `pred: 'error'` is a count; this is the classification. `eval/spider/normalize.ts` maps the
+   * vocabulary this field carries onto refusal classes, so a prompt rule or a repair is chosen from
+   * what the parser said rather than from a reading of 1,034 statements.
+   */
+  readonly reason?: string;
 }
 
 export function judgeAll(

@@ -710,19 +710,31 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 95.45
+      "branches": 95.9
     },
     "eval/spider/check.ts": {
       "lines": 98.93,
       "statements": 98.93,
       "functions": 100,
-      "branches": 98.88
+      "branches": 98.9
+    },
+    "eval/spider/normalize.ts": {
+      "lines": 98.55,
+      "statements": 98.55,
+      "functions": 100,
+      "branches": 95.58
+    },
+    "eval/spider/residue.ts": {
+      "lines": 98.18,
+      "statements": 98.18,
+      "functions": 100,
+      "branches": 97.91
     },
     "eval/spider/score.ts": {
-      "lines": 98.16,
-      "statements": 98.16,
+      "lines": 98.84,
+      "statements": 98.84,
       "functions": 100,
-      "branches": 98.27
+      "branches": 98.94
     },
     "eval/text2vis/ablate.ts": {
       "lines": 100,

@@ -26,9 +26,11 @@ const TREE = {
   // manifest reads, and the file itself is checked against its own counts in
   // `test/wikisql-baseline.test.ts` rather than here.
   'eval/baseline/wikisql.json': { exact: 7183, exactPct: 85.3, scored: 8421 },
-  // Spider's row carries the reading its corpus was built for this round; the counts are checked
-  // against the percentage in `test/spider-baseline.test.ts`.
-  'eval/baseline/spider.json': { exact: 618, exactPct: 59.77, scored: 1034 },
+  // Spider's row cites the reading a submission would be scored on — the statement as the reference's
+  // grammar reads it, after `eval/spider/normalize.ts` — and the as-written reading travels beside it
+  // in the same file. The counts behind both are checked against their percentages in
+  // `test/spider-baseline.test.ts` rather than here.
+  'eval/baseline/spider.json': { exact: 618, exactPct: 59.77, exactAfterNormalize: 61.9, scored: 1034 },
   // Held as the manifest reads it: a percent under `arms.selected.published`, because every row of
   // this table is a percent and the arm's raw fraction stays in `arms.readings`.
   'eval/nvbench2/metrics.json': { arms: { selected: { published: { 'f1@3': 32.23 } } } },

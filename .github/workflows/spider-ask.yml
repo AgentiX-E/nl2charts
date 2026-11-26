@@ -16,6 +16,11 @@ name: spider-ask
 # **The metric is exact match, and the row says so.** A skeleton cannot answer `SELECT` for real, so
 # execution accuracy is out of reach from here; the reference's component match is the comparison, and
 # it is the one Spider's own leaderboard reports as EM.
+#
+# **A statement is scored as the dialect the reference reads.** `eval/spider/normalize.ts` repairs four
+# spellings the reference's grammar does not have — `<>`, `INNER JOIN`, an alias that only repeats its
+# table, a numeric cast over a bare column — and never touches a statement the parser accepted, so the
+# repairs cannot lower a reading. They are worth 22 statements on dev, and the step prints both numbers.
 
 on:
   workflow_dispatch:
@@ -38,6 +43,11 @@ on:
         required: false
         default: ''
         type: string
+      normalize:
+        description: 'Repair the dialect the reference refuses (<> -> !=, INNER JOIN -> JOIN, a self-alias, a numeric cast) before scoring'
+        required: true
+        default: true
+        type: boolean
       accept_cost:
         description: 'Yuan this dispatch may project (blank = the ¥45 ceiling in eval/spider/ask.ts)'
         required: false
@@ -122,12 +132,19 @@ jobs:
           if [ -n "$ACCEPT_COST" ]; then ARGS="$ARGS --accept-cost $ACCEPT_COST"; fi
           pnpm bench:spider:ask $ARGS
 
+      # `--normalize` is on by default because a submission is scored on the statement it sends, and
+      # eight of this corpus's refusals were spellings rather than mistakes: 45 statements the parser
+      # refused, 37 of them readable after `eval/spider/normalize.ts`, 22 of those also right — 618 to
+      # 640 of 1,034, at zero model cost. The step prints the as-written reading beside it, so a
+      # prompt arm is never compared against a repair by accident.
       - name: Score the predictions
         env:
           LIMIT: ${{ inputs.limit }}
+          NORMALIZE: ${{ inputs.normalize }}
         run: |
           ARGS="--predictions eval/out/spider-predictions.jsonl --out eval/out/spider-reading.json"
           if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
+          if [ "$NORMALIZE" = "true" ]; then ARGS="$ARGS --normalize"; fi
           pnpm bench:spider:score $ARGS
 
       - name: Keep the artifact

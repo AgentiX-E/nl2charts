@@ -18041,7 +18041,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 |---|---|---|---|---|
 | WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% (`values` arm) |
 | WikiSQL dev | the same questions, no sample rows | EX | measured | 81.93% (`schema` arm, **−3.37pp**, p<0.0001) |
-| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | **59.77%** (`grammar`, chat); 57.35% (`schema`, chat), 54.16% (`grammar`, reasoner), 50.68% (`schema`, reasoner) |
+| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | **61.90%** (`grammar` + dialect repair, chat; 59.77% as written); 57.35% (`schema`, chat), 54.16% (`grammar`, reasoner), 50.68% (`schema`, reasoner) |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) |
 | BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) |
@@ -19382,6 +19382,57 @@ Two consequences are stated in the corpus manifest rather than left to a reader:
 accuracy is out of reach from this corpus; and three Spider databases ship a table literally named
 `sqlite_sequence`, which SQLite refuses to create as a table — `world_1` is in dev, so the builder
 takes the name through `PRAGMA writable_schema` instead of quietly dropping it.
+
+### The residual 45: eight spellings, four repairs, and a number that cannot go down
+
+The plan for this round was a fifth prompt arm: classify the 45 statements `grammar` still had
+refused, then decide whether one more sentence was worth a dispatch. The classification was the
+cheaper experiment and it answered against the plan. The refusals are not one missing idea — they are
+**eight mechanical facts about the dialect**, and four of the eight can be repaired *after* the model
+has answered:
+
+| the judge's reason | cases | what it means | rule | readable | exact |
+|---|---:|---|---|---:|---:|
+| `Error col: >` | 21 | `<>`, which is not in the reference's operator list — it reads `<` and stops at `>` | `notEqual` | 21 | 13 |
+| `Alias teacher has the same name in table` | 11 | `FROM teacher AS teacher`: an alias equal to a table name is refused as ambiguous | `duplicateAlias` | 11 | 4 |
+| `'inner'` | 4 | `INNER JOIN`; `INNER` is not a token the `FROM` parser reads | `innerJoin` | 2 | 2 |
+| `Error col: cast` | 3 | `CAST(x AS INTEGER)`, which this grammar does not have | `cast` | 3 | 3 |
+| `Error col: \|\|` | 2 | string concatenation; the grammar has no spelling for it | — | 0 | 0 |
+| `Error col: not` | 2 | `NOT IN (subquery)`; `IN` is a condition, `NOT IN` is not | — | 0 | 0 |
+| `Error col: select` | 1 | a scalar subquery on the left of a comparison | — | 0 | 0 |
+| *(no message)* | 1 | `AND (a OR b)`; the parser raised with nothing to say | — | 0 | 0 |
+| **total** | **45** | | | **37** | **22** |
+
+`eval/spider/normalize.ts` is those four rules, and `eval/spider/residue.ts` is the measurement that
+chose them: it judges every prediction once as written, judges each refusal again after the repair, and
+counts three things per class — refused, readable, and *right*. The third count is the one that decides:
+of the 140 statements the prompt rule made readable, only 25 were also right, and these 22 are the other
+way round — they were right and merely misspelled.
+
+**The reading**: 618 + 22 = **640 of 1,034 = 61.90%**, against 59.77% as written — **+2.13pp**, larger
+than either prompt arm, for **¥0** in model calls, because it re-scores answers that were already
+bought (run `45807713388`'s artifact, replayed locally; a dispatch produces the same number directly).
+The paired view is degenerate by construction and that is the point: `onlyFirst` is 0.
+
+**Why it cannot lower a reading.** A repair is only ever applied where the parser refused. A statement
+that parses is never rewritten, so the accepted set of a repaired reading is byte-identical to the set
+it is compared with and the difference between the two numbers is exactly the refusals that became
+right. That is measured rather than argued: replaying the 1,034 predictions through the four rules
+changes **0 of the 618** statements the parser accepted.
+
+**What is left alone, and why.** `||`, `NOT IN`, a derived table in `FROM`, and a parenthesised boolean
+group are not spellings of something this grammar has. Rewriting them would not be a dialect fix, it
+would be a different query — and a harness that scores its own rewriter is not measuring the model. The
+one statement that proves the line is drawable is `#754`: stripping its parentheses makes it parse, and
+it still reads wrong, so that rule would have bought **0.00pp** in exchange for changing which rows the
+query selects.
+
+Two things follow in the harness rather than in prose. `pnpm bench:spider:score --normalize` takes an
+optional second pass over refusals and writes **both** readings into the artifact (`reading` and
+`asWritten`), so a prompt arm is never compared against a repair by accident; `spider-ask.yml` turns it
+on by default. And `pnpm bench:spider:residue` reproduces this table from any predictions file, because
+the same question — which sentences are worth writing — returns for every corpus, and the answer should
+be a measurement each time rather than an opinion.
 
 ### Where each of the three absent rows would have to go, and what WikiSQL now has
 
