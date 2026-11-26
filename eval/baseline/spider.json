@@ -51,6 +51,18 @@
       "predErrors": 45,
       "yuan": 2.9,
       "run": 45807713388
+    },
+    {
+      "arm": "grammar",
+      "promptVersion": "spider-grammar@1",
+      "model": "deepseek-reasoner",
+      "asked": 1034,
+      "scored": 1034,
+      "exact": 560,
+      "exactPct": 54.16,
+      "predErrors": 86,
+      "yuan": 5.7,
+      "run": 45807912450
     }
   ],
   "unparseable": {
@@ -62,7 +74,7 @@
     "other": 48,
     "note": "Classes measured by re-running the reference parser on each refused statement: `FROM t x` needs `AS`, `IN ('a','b')` is not in the grammar (a subquery is), `SELECT AVG(x) AS y` is not either, and an OUTER JOIN is not a table reference. Each class is a sentence the grammar arm adds; `other` is left unnamed because it mixes unknown columns with constructs not worth a rule."
   },
-  "note": "The row cites the highest arm measured on this corpus (grammar, chat tier). The first reading was the schema arm at 57.35% (run 45802615591), and it is kept as the baseline every later arm pairs against. 185 statements of that first reading were refused by the reference parser — 88 bare table aliases, 22 value-list IN, 20 column aliases in SELECT, 7 outer joins — which is why the grammar arm exists: naming those four restrictions takes refusals to 45 and exact match to 59.77%, but only 25 of the 140 statements it made readable were also right, so the dialect was worth 2.4pp of accuracy and not the 13pp the refusal count suggested. Among the 849 statements the parser accepted in the first reading, 593 read exact (69.85%).",
+  "note": "The row cites the highest arm measured on this corpus (grammar, chat tier). The first reading was the schema arm at 57.35% (run 45802615591), and it is kept as the baseline every later arm pairs against. 185 statements of that first reading were refused by the reference parser — 88 bare table aliases, 22 value-list IN, 20 column aliases in SELECT, 7 outer joins — which is why the grammar arm exists: naming those four restrictions takes refusals to 45 and exact match to 59.77%, but only 25 of the 140 statements it made readable were also right, so the dialect was worth 2.4pp of accuracy and not the 13pp the refusal count suggested. Among the 849 statements the parser accepted in the first reading, 593 read exact (69.85%). Under the grammar arm the reasoning tier reads 54.16% with 86 refusals: the four sentences took its refusals from 314 to 86 and its accuracy from 50.68% to 54.16%, and it is still 5.61pp behind chat on the same 1,034 questions. 41 of that 58-case gap is the statements it alone left unreadable, so most of the remaining difference is still dialect and a smaller part is semantics — either way the ordering does not reverse.",
   "because": "the corpus was reachable this round after two rounds of saying it was not, and the first thing it showed was that the instrument was measuring SQLite's dialect rather than Spider's",
   "paired": [
     {
@@ -96,6 +108,22 @@
       "p": 0.0,
       "mdePp": 3.44,
       "verdict": "under the schema arm the reasoning tier is 6.67pp behind, and 314 of its statements were refused against 185 for chat"
+    },
+    {
+      "first": "grammar",
+      "second": "grammar@reasoner",
+      "model": "deepseek-reasoner",
+      "cases": 1034,
+      "both": 504,
+      "onlyFirst": 114,
+      "onlySecond": 56,
+      "neither": 360,
+      "deltaPp": -5.61,
+      "lowPp": -8.08,
+      "highPp": -3.14,
+      "p": 0.0,
+      "mdePp": 3.53,
+      "verdict": "with the dialect named, the reasoning tier is still 5.61pp behind; 41 of the 58-case gap is the 41 extra statements it left unreadable, so naming the grammar moved both arms and did not reverse the order"
     }
   ]
 }

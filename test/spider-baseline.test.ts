@@ -117,6 +117,11 @@ describe('the Spider baseline is a citation, so its arithmetic has to close', ()
     expect(reasoner?.exact).toBe(524);
     // The tier with the larger bill refused more statements, not fewer: the difference between the
     // two rows is dialect before it is reasoning, and the record has to make that visible.
+    // Under `schema` the reasoner refuses 314 against 185; under `grammar`, 86 against 45. The four
+    // sentences took 228 refusals off the reasoner and did not reverse the order.
+    const reasonerGrammar = BASELINE.arms.find((arm) => arm.arm === 'grammar' && arm.model === 'deepseek-reasoner');
+    expect(reasonerGrammar?.predErrors).toBe(86);
+    expect(reasonerGrammar?.exactPct).toBe(54.16);
     expect(reasoner?.predErrors).toBeGreaterThan(chat?.predErrors as number);
     expect(reasoner?.yuan).toBeGreaterThan(chat?.yuan as number);
   });

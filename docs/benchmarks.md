@@ -18041,7 +18041,7 @@ reader can act on, and a missing row for a leaderboard the plan names.
 |---|---|---|---|---|
 | WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% (`values` arm) |
 | WikiSQL dev | the same questions, no sample rows | EX | measured | 81.93% (`schema` arm, **−3.37pp**, p<0.0001) |
-| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | **59.77%** (`grammar`, chat); 57.35% (`schema`, chat), 50.68% (`schema`, reasoner) |
+| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | **59.77%** (`grammar`, chat); 57.35% (`schema`, chat), 54.16% (`grammar`, reasoner), 50.68% (`schema`, reasoner) |
 | BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | 56.0 (floor) |
 | BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) |
 | BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) |
@@ -19360,6 +19360,22 @@ discordant cases — and the honest half of the result is what did *not* happen:
 13.2pp the refusal count suggested**, because a statement that parses and answers the wrong question
 still scores zero. That is the same lesson WikiSQL's pilot taught in a different key: a refused answer
 and a wrong answer are different facts, and only the second is a fact about the model.
+
+The reasoning tier under the same arm reads **560 of 1,034 = 54.16%** (run `45807912450`, ¥5.70) with
+**86** refusals — the four sentences took 228 refusals off it and moved it 3.5pp — and it is still
+**5.61pp behind chat on the same questions** (paired: −5.61pp [−8.08, −3.14], p < 0.0001, 114 cases
+only it got right against 56). So the ordering survives naming the dialect. Where does the gap come
+from? 58 cases separate the two readings and **41 of them are the statements the reasoner alone left
+unreadable**: it is still more likely to decorate a column with `AS`, and the remainder is semantic.
+The honest sentence is narrower than "reasoning hurts": on Spider's exact match, with this prompt, the
+chat tier is ahead, most of the difference is still dialect, and the tier costs 2× per call.
+
+| arm | tier | EX | refusals | ¥ | ¥/call |
+|---|---|---:|---:|---:|---:|
+| `schema` | chat | 57.35% | 185 | 2.09 | 0.00202 |
+| `schema` | reasoner | 50.68% | 314 | 9.60 | 0.00928 |
+| `grammar` | chat | **59.77%** | 45 | 2.90 | 0.00280 |
+| `grammar` | reasoner | 54.16% | 86 | 5.70 | 0.00551 |
 
 Two consequences are stated in the corpus manifest rather than left to a reader: the metric here is
 **exact match (component match)**, because a skeleton cannot answer a `SELECT` for real, so execution
