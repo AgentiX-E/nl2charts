@@ -71,6 +71,46 @@ export const PROMPT_VERSION = 'wikisql-ask@2';
 export const SAMPLE_ROWS = 5;
 
 /**
+ * The arms this file can run, and the one thing that separates them.
+ *
+ * `values` is the arm the first reading was taken with — schema, five sample rows, and an
+ * instruction to copy a literal as the rows spell it. `schema` is the same prompt with the rows
+ * removed and the instruction replaced by the fact they were carrying (this database stores text
+ * folded to lowercase). Everything else is byte-identical, which is what makes the difference
+ * between the two readings an answer to a question rather than a description of a change.
+ *
+ * The question is worth asking because WikiSQL questions are about *values*: `who was picked first`
+ * needs an ordinal column, but `the writer of "The Duff"` needs a literal that exists in one cell
+ * with one spelling. If the rows are what let a model copy that spelling, removing them should cost
+ * accuracy in proportion to how many questions name a value; if the sentence alone is enough, the
+ * rows are five lines of prompt paid on every one of 8,421 questions for nothing.
+ *
+ * Two versions, because a version is a name for a byte-string: `@2` is the arm that has a reading
+ * (85.30%, run 45772639103) and reusing its name for a prompt with no rows would have made two
+ * different prompts share one coordinate.
+ */
+export const ARMS = {
+  values: { version: PROMPT_VERSION, sampleRows: SAMPLE_ROWS },
+  schema: { version: 'wikisql-schema@1', sampleRows: 0 },
+} as const;
+
+export type ArmName = keyof typeof ARMS;
+
+/** The arms, as the strings a flag may carry. Printed by the refusal that names them. */
+export const ARM_NAMES = Object.keys(ARMS) as readonly ArmName[];
+
+/** The arm a flag value names, or a refusal that lists the ones that exist. */
+export function armNamed(name: string): ArmName {
+  if (Object.hasOwn(ARMS, name)) return name as ArmName;
+  throw new Error(`--arm must be one of ${ARM_NAMES.join(', ')}, got ${name}`);
+}
+
+/** The prompt version an arm writes into its log line and its baseline row. */
+export function promptVersionFor(arm: ArmName): string {
+  return ARMS[arm].version;
+}
+
+/**
  * The share of replies that may be unreadable before this file refuses to publish.
  *
  * An unreadable reply is not a wrong answer, so a run that scores it as one reports the reader.
@@ -91,12 +131,36 @@ export const MAX_UNREADABLE_SHARE = 0.01;
  */
 export const PER_CASE = { promptTokens: 400, completionTokens: 60 } as const;
 
+/**
+ * The completion bound for a model that reasons before it answers.
+ *
+ * A reasoning tier bills its thinking as completion tokens and returns none of them: the reply is
+ * one statement of twenty tokens, and the invoice can be two thousand. A projection computed from
+ * what arrives would therefore approve a dispatch at a sixtieth of its cost — the failure mode this
+ * file's projection exists to prevent, and the one that gets discovered after the money is spent.
+ * Two thousand is above every recorded reasoning run in this repository; the bill printed after the
+ * run is still the number a reader quotes.
+ */
+export const REASONING_COMPLETION_TOKENS = 2000;
+
+/** Whether a model name is a reasoning tier. A name, because there is no other signal before a call. */
+export function reasonsFirst(model: string): boolean {
+  return /reasoner|thinking|-r1\b|^o[134]/iu.test(model);
+}
+
+/** The per-case bound to price `model` at. */
+export function perCaseFor(model: string): { readonly promptTokens: number; readonly completionTokens: number } {
+  return reasonsFirst(model)
+    ? { promptTokens: PER_CASE.promptTokens, completionTokens: REASONING_COMPLETION_TOKENS }
+    : PER_CASE;
+}
+
 /** The ceiling a dispatch may project, in yuan, without saying the number out loud. */
 export const BUDGET_YUAN = 45;
 
 /** What `questions` cases would cost at the per-case bound, or nothing when the model has no price. */
 export function projectedYuan(questions: number, model: string): number | undefined {
-  const per = billOf(model, PER_CASE);
+  const per = billOf(model, perCaseFor(model));
   return per === undefined ? undefined : per * questions;
 }
 
@@ -148,6 +212,8 @@ export interface Settings {
   readonly out: string;
   readonly cache: string | undefined;
   readonly concurrency: number;
+  /** Which prompt this dispatch sends. Two arms are comparable only under one reader and one judge. */
+  readonly arm: ArmName;
   /** The yuan this dispatch may project, when the caller is willing to say it out loud. */
   readonly acceptCost: number | undefined;
   /** The ceiling the projection is compared against, when the caller narrows the default. */
@@ -160,6 +226,7 @@ export function resolveSettings(argv: readonly string[]): Settings {
   let out = 'eval/out/wikisql-predictions.jsonl';
   let cache: string | undefined;
   let concurrency = 6;
+  let arm: ArmName = 'values';
   let acceptCost: number | undefined;
   let budget = BUDGET_YUAN;
   for (let index = 0; index < argv.length; index += 1) {
@@ -176,6 +243,11 @@ export function resolveSettings(argv: readonly string[]): Settings {
       index += 1;
     } else if (flag === '--cache' && value !== undefined) {
       cache = value;
+      index += 1;
+    } else if (flag === '--arm' && value !== undefined) {
+      // Refused rather than defaulted: a typo that silently ran the baseline arm would publish a
+      // second reading of `values` under the name of the arm the caller meant to test.
+      arm = armNamed(value);
       index += 1;
     } else if (flag === '--concurrency' && value !== undefined) {
       concurrency = Number(value);
@@ -203,7 +275,7 @@ export function resolveSettings(argv: readonly string[]): Settings {
   if (!Number.isFinite(budget) || budget <= 0) {
     throw new Error(`--budget must be a positive number of yuan, got ${String(budget)}`);
   }
-  return { split, limit, out, cache, concurrency, acceptCost, budget };
+  return { split, limit, out, cache, concurrency, arm, acceptCost, budget };
 }
 
 /** Parse `{split}.tables.jsonl` into a map by table id. */
@@ -257,7 +329,7 @@ export function sqlNameOf(index: number): string {
  * the corpus's own strings (`text`, `real`) rather than this repository's `quantitative` vocabulary,
  * because the corpus's numbers were produced with the corpus's words.
  */
-export function promptFor(question: string, table: Table): readonly LlmMessage[] {
+export function promptFor(question: string, table: Table, arm: ArmName = 'values'): readonly LlmMessage[] {
   // Two names per column, because the corpus has two. The database calls the third column of every
   // table `col2`; the corpus's `tables.jsonl` calls it `Position`; and the first pilot sent only the
   // second, so a model that wrote `SELECT "Position"` produced `OperationalError: no such column`
@@ -265,21 +337,39 @@ export function promptFor(question: string, table: Table): readonly LlmMessage[]
   const columns = table.header.map(
     (name, index) => `  ${sqlNameOf(index)} (${table.types[index] ?? 'text'}) — "${name}"`,
   );
-  const sample = table.rows.slice(0, SAMPLE_ROWS).map((row) => `  ${row.map(cellOf).join(', ')}`);
+  const rows = ARMS[arm].sampleRows;
+  const sample = table.rows.slice(0, rows).map((row) => `  ${row.map(cellOf).join(', ')}`);
+  // What the rows were teaching, said in words when they are not there. This is the arm's only
+  // content: a prompt with the rows removed *and* the lowercase fact removed would be testing two
+  // changes at once, and a reader could not say which one cost what.
+  //
+  // The `values` arm's four lines are byte-for-byte the ones `wikisql-ask@2` was measured with —
+  // a version is a name for a byte-string, so reflowing the paragraph while adding a second arm
+  // would have renamed the baseline without moving it.
+  const instruction =
+    sample.length === 0
+      ? [
+          'Write one SELECT statement that answers the question. Name a column by the SQL name before the',
+          'dash (col0, col1, …) and never by the label in quotes after it; the label is what the question',
+          'means by a column, and the name is what the statement must say. When the question names a value,',
+          'write it lowercase: this database stores text folded, so a literal copied from the page spells',
+          'a value no cell holds.',
+        ]
+      : [
+          'Write one SELECT statement that answers the question. Name a column by the SQL name before the',
+          'dash (col0, col1, …) and never by the label in quotes after it; the label is what the question',
+          'means by a column, and the name is what the statement must say. When the question names a value,',
+          'copy it exactly as the rows above spell it.',
+        ];
   const system = 'You write one SQLite statement for one table. You answer with the statement only.';
   const user = [
     `The table is called "${tableNameOf(table.id)}". Its columns are, in order:`,
     ...columns,
-    '',
-    `The first ${String(sample.length)} rows, as this table stores them:`,
-    ...sample,
+    ...(sample.length === 0 ? [] : ['', `The first ${String(sample.length)} rows, as this table stores them:`, ...sample]),
     '',
     `Question: ${question}`,
     '',
-    'Write one SELECT statement that answers the question. Name a column by the SQL name before the',
-    'dash (col0, col1, …) and never by the label in quotes after it; the label is what the question',
-    'means by a column, and the name is what the statement must say. When the question names a value,',
-    'copy it exactly as the rows above spell it.',
+    ...instruction,
     'Answer with the statement and nothing else.',
   ].join('\n');
   return [
@@ -336,17 +426,23 @@ export async function askAll(
   tables: ReadonlyMap<string, Table>,
   provider: LlmProvider,
   concurrency: number,
+  arm: ArmName = 'values',
 ): Promise<readonly AskRecord[]> {
-  return pool(rows, concurrency, async (row) => askOne(row, tables.get(row.tableId), provider));
+  return pool(rows, concurrency, async (row) => askOne(row, tables.get(row.tableId), provider, arm));
 }
 
 /** One question. A missing table is a case this corpus cannot ask, not a crash. */
-async function askOne(row: SplitRow, table: Table | undefined, provider: LlmProvider): Promise<AskRecord> {
+async function askOne(
+  row: SplitRow,
+  table: Table | undefined,
+  provider: LlmProvider,
+  arm: ArmName,
+): Promise<AskRecord> {
   if (table === undefined) {
     return { index: row.index, sql: undefined, reply: '', truncated: false, error: `no table ${row.tableId}` };
   }
   try {
-    const response = await provider.complete({ messages: promptFor(row.question, table), temperature: 0, purpose: 'generate' });
+    const response = await provider.complete({ messages: promptFor(row.question, table, arm), temperature: 0, purpose: 'generate' });
     const truncated = response.finishReason === 'length';
     return {
       index: row.index,
@@ -475,7 +571,7 @@ export async function main(
   const cache = cacheDir(settings.cache);
   const open = await openSplit(cache, settings.split, settings.limit);
   const tables = parseTables(readFileSync(join(cache, `${settings.split}.tables.jsonl`), 'utf8'));
-  log(`wikisql ask: ${String(open.rows.length)} question(s) on ${String(settings.split)}, ${String(tables.size)} table(s), ${provider.model}, ${PROMPT_VERSION}`);
+  log(`wikisql ask: ${String(open.rows.length)} question(s) on ${String(settings.split)}, ${String(tables.size)} table(s), ${provider.model}, arm ${settings.arm}, ${promptVersionFor(settings.arm)}`);
   // Priced before it is sent, because a run that is discovered to be expensive afterwards is a run
   // that was authorised by a field nobody read. Above the budget the caller says the number.
   const projected = projectedYuan(open.rows.length, provider.model);
@@ -508,7 +604,7 @@ export async function main(
         return response;
       },
     };
-    const records = await askAll(open.rows, tables, metered, settings.concurrency);
+    const records = await askAll(open.rows, tables, metered, settings.concurrency, settings.arm);
     const counts = tallyOf(records);
     const bill = billOf(provider.model, { promptTokens, completionTokens });
     const tally: AskTally = { ...counts, promptTokens, completionTokens, yuan: bill ?? 0 };

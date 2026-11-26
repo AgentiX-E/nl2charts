@@ -806,7 +806,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.7
+      "branches": 98.83
     },
     "eval/wikisql/exec.ts": {
       "lines": 98.42,
@@ -820,11 +820,17 @@
       "functions": 100,
       "branches": 100
     },
-    "eval/wikisql/run.ts": {
-      "lines": 96.52,
-      "statements": 96.52,
+    "eval/wikisql/paired.ts": {
+      "lines": 98.7,
+      "statements": 98.7,
       "functions": 100,
-      "branches": 96.66
+      "branches": 96.72
+    },
+    "eval/wikisql/run.ts": {
+      "lines": 96.76,
+      "statements": 96.76,
+      "functions": 100,
+      "branches": 96.9
     }
   }
 }

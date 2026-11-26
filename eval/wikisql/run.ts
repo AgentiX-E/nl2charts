@@ -42,6 +42,15 @@ export interface Settings {
   readonly cache: string | undefined;
   /** Print the digest of every gold answer instead of a report, for the differential fixture. */
   readonly digest: boolean;
+  /**
+   * Where to write one line per judged case.
+   *
+   * The aggregate reading cannot answer the question every later arm asks: *which* cases moved. Two
+   * arms scored over the same split are two paired samples, and the discordant cases are the only
+   * ones a paired test uses — a count of them cannot be recovered from two totals, and re-deriving
+   * it by re-running the judge is a way to get a different number than the one that was reported.
+   */
+  readonly cases: string | undefined;
 }
 
 export function resolveSettings(argv: readonly string[]): Settings {
@@ -51,6 +60,7 @@ export function resolveSettings(argv: readonly string[]): Settings {
   let out: string | undefined;
   let cache: string | undefined;
   let digest = false;
+  let cases: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     // The bound is the guarantee: `argv[index]` cannot be undefined inside it. Writing the read
     // without the cast makes the type say it might be, and the guard that follows is a branch no
@@ -79,6 +89,10 @@ export function resolveSettings(argv: readonly string[]): Settings {
       if (value === undefined) throw new Error('--cache needs a path');
       cache = value;
       index += 1;
+    } else if (flag === '--cases') {
+      if (value === undefined) throw new Error('--cases needs a path');
+      cases = value;
+      index += 1;
     } else if (flag === '--digest') {
       digest = true;
     } else if (flag.startsWith('--')) {
@@ -87,7 +101,7 @@ export function resolveSettings(argv: readonly string[]): Settings {
       throw new Error(`unexpected argument ${flag}`);
     }
   }
-  return { split, limit, predictions, out, cache, digest };
+  return { split, limit, predictions, out, cache, digest, cases };
 }
 
 /** How many statements are in flight at once. The oracle queues them; this bounds memory, not speed. */
@@ -198,6 +212,22 @@ export async function score(
   return { readings, missing: rows.length - asked.length };
 }
 
+/**
+ * One line per judged case: the two verdicts, and whether the prediction even executed.
+ *
+ * `predOk` is here because the two failures a case can be are different questions — a statement that
+ * did not run (a schema error, and the reader can be blamed) and a statement that ran and returned
+ * other rows (the model's answer, and only the model can be blamed). An aggregate reading folds them
+ * together, and a paired comparison that folded them together would credit an arm for turning a
+ * crash into a wrong answer.
+ */
+export function casesTextOf(readings: readonly CaseReading[]): string {
+  return readings
+    .map((case_) => JSON.stringify({ index: case_.index, ordered: case_.ordered, bag: case_.bag, predOk: case_.pred.ok }))
+    .join('\n')
+    .concat(readings.length === 0 ? '' : '\n');
+}
+
 /** The report, as lines: what was asked, what answered, and what the two comparisons saw. */
 export function reportLines(reading: Reading, validation: Validation | undefined): readonly string[] {
   const lines = [
@@ -294,14 +324,22 @@ export async function main(
         predErrors: 0,
       };
       let missing = 0;
+      // Always a value, so the `--cases` write below is one statement rather than a branch that
+      // only a call with predictions can take.
+      let casesReadings: readonly CaseReading[] = [];
       if (settings.predictions !== undefined) {
         const predictions = parsePredictions(readFileSync(settings.predictions, 'utf8'));
         const scored = await score(read, (row, sql) => judge.predictOf(row.tableId, sql), rows, predictions);
         reading = { ...reading, ...readingOf(scored.readings, rows.length) };
+        casesReadings = scored.readings;
         missing = scored.missing;
       }
       for (const line of reportLines(reading, validation)) log(line);
       if (missing > 0) log(`  missing  ${String(missing)} questions have no prediction`);
+      if (settings.cases !== undefined) {
+        writeFileSync(settings.cases, casesTextOf(casesReadings));
+        log(`  cases    ${settings.cases} (${String(casesReadings.length)})`);
+      }
       if (settings.out !== undefined) {
         writeFileSync(
           settings.out,

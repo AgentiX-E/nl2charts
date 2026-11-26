@@ -13,6 +13,10 @@ name: wikisql-ask
 # same number. The archive is immutable upstream, so caching it keeps a network failure from
 # arriving as a score.
 #
+# **Two arms, one reader.** `values` is the prompt the first reading was taken with; `schema` is the
+# same prompt with the five sample rows removed and the fact they carried said in words. The paired
+# comparison is `eval/wikisql/paired.ts`, which joins the two per-case files this workflow keeps.
+#
 # **The comparable number is the split's own leaderboard, and the model is part of the coordinate.**
 # Every published WikiSQL figure above 90% was produced by a fine-tuned system; this repository does
 # not train, so the reading is reported beside the model that produced it and the split's size, and
@@ -26,6 +30,14 @@ on:
         required: true
         default: 'deepseek-chat'
         type: string
+      arm:
+        description: 'Prompt arm: values (schema + five sample rows) or schema (the same, no rows)'
+        required: true
+        default: 'values'
+        type: choice
+        options:
+          - 'values'
+          - 'schema'
       split:
         description: 'Split to answer (dev carries the public labels; test is scored by submission only)'
         required: true
@@ -110,11 +122,12 @@ jobs:
       # past the ceiling, so a dispatch that would cost more than it was authorised for stops here.
       - name: Ask every question once
         env:
+          ARM: ${{ inputs.arm }}
           ACCEPT_COST: ${{ inputs.accept_cost }}
           LIMIT: ${{ inputs.limit }}
           CONCURRENCY: ${{ inputs.concurrency }}
         run: |
-          ARGS="--split $WIKISQL_SPLIT --concurrency $CONCURRENCY --out eval/out/wikisql-predictions.jsonl"
+          ARGS="--split $WIKISQL_SPLIT --arm $ARM --concurrency $CONCURRENCY --out eval/out/wikisql-predictions.jsonl"
           if [ -n "$LIMIT" ]; then ARGS="$ARGS --limit $LIMIT"; fi
           if [ -n "$ACCEPT_COST" ]; then ARGS="$ARGS --accept-cost $ACCEPT_COST"; fi
           pnpm bench:wikisql:ask $ARGS
@@ -126,14 +139,16 @@ jobs:
         run: |
           pnpm bench:wikisql --split "$WIKISQL_SPLIT" \
             --predictions eval/out/wikisql-predictions.jsonl \
-            --out eval/out/wikisql-reading.json
+            --out eval/out/wikisql-reading.json \
+            --cases eval/out/wikisql-cases.jsonl
       - name: Keep the artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wikisql-${{ inputs.split }}-${{ inputs.model }}
+          name: wikisql-${{ inputs.split }}-${{ inputs.arm }}-${{ inputs.model }}
           path: |
             eval/out/wikisql-predictions.jsonl
             eval/out/wikisql-predictions.unreadable.jsonl
             eval/out/wikisql-reading.json
+            eval/out/wikisql-cases.jsonl
           if-no-files-found: warn

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
-import { cacheDir, diff, main, openSplit, reportLines, resolveSettings, score, selfTest, validate } from '../eval/wikisql/run.js';
+import { cacheDir, casesTextOf, diff, main, openSplit, reportLines, resolveSettings, score, selfTest, validate } from '../eval/wikisql/run.js';
 import { parseSplit } from '../eval/wikisql/exec.js';
 import type { Answer, Reading, SplitRow } from '../eval/wikisql/exec.js';
 
@@ -78,8 +78,13 @@ describe('resolveSettings', () => {
     });
   });
 
+  it('takes a path for the per-case verdicts, because an aggregate cannot say which cases moved', () => {
+    expect(resolveSettings(['--cases', 'c.jsonl']).cases).toBe('c.jsonl');
+    expect(() => resolveSettings(['--cases'])).toThrow('--cases needs a path');
+  });
+
   it('refuses a flag without its value', () => {
-    for (const flag of ['--split', '--limit', '--predictions', '--out', '--cache']) {
+    for (const flag of ['--split', '--limit', '--predictions', '--out', '--cache', '--cases']) {
       expect(() => resolveSettings([flag])).toThrow(/needs/);
     }
   });
@@ -108,6 +113,21 @@ describe('cacheDir', () => {
       else process.env.WIKISQL_CACHE = previous;
     }
     expect(cacheDir()).toBe(resolve('eval/.cache/wikisql'));
+  });
+});
+
+describe('the per-case file, which is what a paired comparison reads', () => {
+  it('writes one line per judged case, with both verdicts and whether it ran at all', () => {
+    const text = casesTextOf([
+      { index: 3, gold: { ok: true, rows: [[1]] }, pred: { ok: true, rows: [[1]] }, ordered: true, bag: true },
+      { index: 5, gold: { ok: true, rows: [[1]] }, pred: { ok: false, error: 'no such column' }, ordered: false, bag: false },
+    ]);
+    expect(text).toBe(
+      '{"index":3,"ordered":true,"bag":true,"predOk":true}\n{"index":5,"ordered":false,"bag":false,"predOk":false}\n',
+    );
+    // An empty split writes an empty file, not a file holding one empty line: the reader that joins
+    // two case files must be able to tell "no cases" from "one case with no fields".
+    expect(casesTextOf([])).toBe('');
   });
 });
 
@@ -244,6 +264,25 @@ describe('main', () => {
     expect(written.split).toBe('dev');
     expect(written.validation.cases).toBe(2);
     expect(written.reading.goldErrors).toBe(0);
+  });
+
+  it('writes one verdict per judged case where a paired comparison can read them', async () => {
+    const dir = fixture(GOOD);
+    writeFileSync(
+      join(dir, 'p.jsonl'),
+      '{"index":0,"sql":"select col1 from table_1_2_3 where col0 = 2 order by col1 desc"}\n' +
+        '{"index":1,"sql":"select count(col0) from table_1_2_3"}\n',
+    );
+    const cases = join(dir, 'cases.jsonl');
+    const out = lines();
+    expect(await main(['--cache', dir, '--predictions', join(dir, 'p.jsonl'), '--cases', cases], out.log)).toBe(0);
+    expect(out.seen.join('\n')).toContain(`cases    ${cases} (2)`);
+    const written = readFileSync(cases, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { index: number; ordered: boolean; predOk: boolean });
+    expect(written.map((row) => row.index)).toEqual([0, 1]);
+    // The first question is right but sorted the other way: `ordered` false is the leaderboard's
+    // verdict and `predOk` true says the statement ran, which is the distinction a paired test keeps.
+    expect(written[0]).toEqual({ index: 0, ordered: false, bag: true, predOk: true });
+    expect(written[1]).toEqual({ index: 1, ordered: true, bag: true, predOk: true });
   });
 
   it('restricts the split to the first N questions', async () => {

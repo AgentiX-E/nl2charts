@@ -12,11 +12,18 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LlmProvider, LlmRequest, LlmResponse } from '@agentix-e/nl2charts-ai';
 import {
+  ARMS,
+  ARM_NAMES,
   BUDGET_YUAN,
   MAX_UNREADABLE_SHARE,
   PER_CASE,
   PROMPT_VERSION,
+  REASONING_COMPLETION_TOKENS,
   SAMPLE_ROWS,
+  armNamed,
+  perCaseFor,
+  promptVersionFor,
+  reasonsFirst,
   cellOf,
   sqlNameOf,
   askAll,
@@ -140,6 +147,41 @@ describe('the prompt is the observation, so its shape is asserted', () => {
   it('is a constant, because two versions are two instruments', () => {
     expect(PROMPT_VERSION).toBe('wikisql-ask@2');
   });
+
+  it('takes the rows out of the schema arm and leaves everything else where it was', () => {
+    // The arm's whole content: five rows removed, the fact they carried said in words. Every other
+    // line — the table name, the two names per column, the question, the instruction's first three
+    // lines — is the same string in both arms, so the difference the reading measures is one block.
+    const [, values] = promptFor('who was picked first?', TABLE, 'values');
+    const [, schema] = promptFor('who was picked first?', TABLE, 'schema');
+    expect(values?.content).toContain('The first 3 rows, as this table stores them:');
+    expect(values?.content).toContain("'ada'");
+    expect(schema?.content).not.toContain('rows, as this table stores them');
+    expect(schema?.content).not.toContain("'ada'");
+    expect(schema?.content).toContain('col0 (real) — "Pick"');
+    expect(schema?.content).toContain('Question: who was picked first?');
+    // Header and both column lines, character for character: the arms differ after them, not in them.
+    expect(schema?.content?.split('\n').slice(0, 3)).toEqual(values?.content?.split('\n').slice(0, 3));
+  });
+
+  it('says in words what the rows were showing, so the arm moves one thing', () => {
+    const [, schema] = promptFor('who wrote "The Duff"?', TABLE, 'schema');
+    expect(schema?.content).toContain('write it lowercase');
+    expect(schema?.content).not.toContain('copy it exactly as the rows above spell it');
+  });
+
+  it('names a version per arm, and the baseline keeps the one it was measured under', () => {
+    expect(ARMS.values.version).toBe(PROMPT_VERSION);
+    expect(ARMS.schema.version).not.toBe(PROMPT_VERSION);
+    expect(promptVersionFor('values')).toBe('wikisql-ask@2');
+    expect(ARM_NAMES).toEqual(['values', 'schema']);
+    expect(armNamed('schema')).toBe('schema');
+    expect(() => armNamed('schemas')).toThrow('--arm must be one of values, schema, got schemas');
+  });
+
+  it('defaults to the arm that has a reading, so a bare dispatch repeats the baseline', () => {
+    expect(promptFor('q', TABLE)).toEqual(promptFor('q', TABLE, 'values'));
+  });
 });
 
 describe('the reader decides what counts as an answer', () => {
@@ -260,13 +302,14 @@ describe('the split and the flags', () => {
     expect(() => resolveSettings(['--concurrency', '0'])).toThrow('positive integer');
   });
 
-  it('defaults to dev, the whole split, six in flight, and one predictions file', () => {
+  it('defaults to dev, the whole split, six in flight, the measured arm, and one predictions file', () => {
     expect(resolveSettings([])).toEqual({
       split: 'dev',
       limit: undefined,
       out: 'eval/out/wikisql-predictions.jsonl',
       cache: undefined,
       concurrency: 6,
+      arm: 'values',
       acceptCost: undefined,
       budget: 45,
     });
@@ -274,8 +317,11 @@ describe('the split and the flags', () => {
 
   it('reads every flag it documents', () => {
     expect(
-      resolveSettings(['--split', 'test', '--limit', '5', '--out', 'x.jsonl', '--cache', '/tmp/c', '--concurrency', '2', '--accept-cost', '12.5']),
-    ).toEqual({ split: 'test', limit: 5, out: 'x.jsonl', cache: '/tmp/c', concurrency: 2, acceptCost: 12.5, budget: 45 });
+      resolveSettings([
+        '--split', 'test', '--limit', '5', '--out', 'x.jsonl', '--cache', '/tmp/c',
+        '--concurrency', '2', '--arm', 'schema', '--accept-cost', '12.5',
+      ]),
+    ).toEqual({ split: 'test', limit: 5, out: 'x.jsonl', cache: '/tmp/c', concurrency: 2, arm: 'schema', acceptCost: 12.5, budget: 45 });
   });
 
   it('ignores a flag it does not know rather than eating the next argument', () => {
@@ -306,6 +352,22 @@ describe('the projection, because a bill is authorised before the calls', () => 
 
   it('has no projection for a model with no price, rather than a cheap-looking zero', () => {
     expect(projectedYuan(10, 'a-model-with-no-row')).toBeUndefined();
+  });
+
+  it('prices a reasoning tier at what it bills, not at what it replies', () => {
+    // A reasoner returns one statement and bills two thousand thinking tokens that never appear in
+    // the reply. A projection read off the reply would approve the dispatch at a sixtieth of its
+    // cost, which is the one error this projection exists to prevent.
+    expect(reasonsFirst('deepseek-reasoner')).toBe(true);
+    expect(reasonsFirst('glm-4.5-thinking')).toBe(true);
+    expect(reasonsFirst('o3-mini')).toBe(true);
+    expect(reasonsFirst('deepseek-chat')).toBe(false);
+    expect(perCaseFor('deepseek-reasoner')).toEqual({ promptTokens: 400, completionTokens: REASONING_COMPLETION_TOKENS });
+    expect(perCaseFor('deepseek-chat')).toEqual({ promptTokens: PER_CASE.promptTokens, completionTokens: PER_CASE.completionTokens });
+    const chat = projectedYuan(100, 'deepseek-chat') as number;
+    const reasoner = projectedYuan(100, 'deepseek-reasoner') as number;
+    // Same input price, same output price: the difference is entirely the completion bound.
+    expect(reasoner).toBeGreaterThan(chat * 3);
   });
 
   it('bounds a case above what the corpus renders, because an under-estimate is the costly error', () => {
@@ -355,6 +417,26 @@ describe('asking', () => {
     const records = await askAll(rows, tables, providerOf(() => reply('SELECT Pick FROM table_1_2_3')), 2);
     expect(records.map((record) => record.index)).toEqual([0, 1]);
     expect(records.every((record) => record.sql === 'SELECT Pick FROM table_1_2_3')).toBe(true);
+  });
+
+  it('sends the arm it was told to, and the request is where that is observable', async () => {
+    // The arm is a property of the bytes on the wire; asserting it on `promptFor` alone would pass
+    // for an asker that built the right prompt and sent another.
+    const rows = parseSplit(readFileSync(join(corpus(), 'dev.jsonl'), 'utf8'));
+    const tables = parseTables(readFileSync(join(corpus(), 'dev.tables.jsonl'), 'utf8'));
+    const sent: string[] = [];
+    const provider: LlmProvider = {
+      id: 'test',
+      model: 'deepseek-chat',
+      complete: async (request) => {
+        sent.push(request.messages.map((message) => message.content).join('\n'));
+        return reply('SELECT Pick FROM table_1_2_3');
+      },
+    };
+    await askAll(rows, tables, provider, 1, 'schema');
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).not.toContain('as this table stores them');
+    expect(sent[1]).toContain('write it lowercase');
   });
 
   it('records a question whose table the corpus does not ship instead of throwing on it', async () => {
