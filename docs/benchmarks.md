@@ -22029,3 +22029,75 @@ and the next budget should go elsewhere.
 costs ¥20–30 of a fetcher and a fixed corpus — a *new row* against *1.6 points on an existing one*.
 Both are worth doing; only one of them can be paid for this week, and the argument for which is a
 sentence about what the table is missing rather than about what the model can do.
+
+### Two spends, audited before either is paid: ¥6–10 and ¥3–6
+
+Both numbers in the plan were written before the ledger had a measured basis, and neither survives the
+arithmetic. This section is the audit, with the basis named so a reader can redo it.
+
+#### The refinement turn on BIRD is ¥6–10, not ¥45–60
+
+The price of a dispatch is tokens per case times cases times the model's tariff, and this repository
+has a *measured* basis for exactly this shape of call — `eval/bird/shipment.json`'s ledger row from
+`44991167518`, 3,137 prompt / 2,548 cached / 147 completion tokens a case. `pnpm bench:spend` applies
+it rather than a guess:
+
+```
+$ npx tsx eval/bird/spend.ts --model deepseek-chat --limit 1532 --arms macsql-prompt
+spend: ok
+  ¥0.0025 a case × 1532 ×1.5 safety = ¥5.64, against a budget of ¥10.00.
+```
+
+| what | cases | calls a case | raw CNY | with the 1.5 safety | where the number comes from |
+| --- | ---: | ---: | ---: | ---: | --- |
+| one full dev pass of a single-call arm | 1,532 | 1 | 3.76 | 5.64 | `bench:spend`, measured basis |
+| a second pass for the refine turn | 1,532 | 1 | 1.8–3.1 | 2.7–4.7 | the refine prompt is question + statement + error: 250 tokens without the card, 3,639 with it |
+| **the whole pre-registered test, one run** | 1,532 | 1 + 1 | **5.6–6.9** | **8.4–10.3** | refiner arm and the shipped arm paired *inside one artifact*, which is the only way a delta exists |
+
+So **¥45–60 is six times the decision**. It is what three mechanisms at once cost — Refiner, unit tester
+and error-specific revision, each with its own control — and the registered criterion (≥ 16 of 25 cases,
+exact McNemar p < 0.05) is decidable from **one** of them. The other two are only worth buying if the
+first one lands, because they share its trigger and differ by a paragraph of prompt: buying all three
+in parallel buys the same 25 cases three times and answers "which prompt" before asking "does the
+mechanism exist".
+
+One thing the ¥45–60 did buy correctly is the *time* estimate: the arm is a code change (a repair turn
+gated on an engine sentence) plus its tests, which is a day, and the dispatch is an hour. The money was
+never the constraint; the day was.
+
+#### VisCodeBench is not a fetcher, and the row was wrong about why
+
+The `gap` string said the corpus "cannot be vendored the way BIRD and Text2Vis are" because the dataset
+is "deliberately private". Half of that is true and it is not the half that blocks: **the sample inputs
+are downloadable from the leaderboard**, the scoring engine `t2v_eval` is public and *LLM-independent*,
+and what is private is the reference solutions — which is the submission path, not the corpus. `t2v_eval`
+monkey-patches matplotlib, seaborn, pandas and geopandas, logs the series each call draws, and compares
+two log directories; nothing in it calls a model.
+
+That changes what the ¥20–30 is for. There is no judge to pay:
+
+| item | cost | note |
+| --- | ---: | --- |
+| scoring | **¥0** | their server, `t2v_eval`, LLM-independent |
+| `accessibility` | **¥0** | `calculate_accessibility_score(image_path)` needs no reference at all |
+| generation, 300-sample stratified pilot | **¥3–6** | 3–6k prompt + 300–800 completion tokens a sample |
+| generation, all 2,672 | ¥21–53 | the same tariff, and the retries a failing program costs |
+| the rest | **engineering** | a code-emitting output mode (Python in a notebook region, not a chart spec) and a Codabench submission |
+
+So the plan's ¥20–30 was approximately right for a *full pass* and wrong about the first step: the
+cheapest useful thing is a 300-sample pilot at **¥3–6** that measures two numbers nobody has — tokens a
+sample, and the share of generated programs that raise — exactly as WikiSQL's 40-case pilot (¥0.16)
+measured the reader before 8,421 questions were bought.
+
+#### What can run at the same time
+
+| track | depends on | money | can run beside |
+| --- | --- | ---: | --- |
+| candidate-level refusal record | nothing | 0 | anything |
+| the refinement arm | the record for its *mechanism* reading, not for its score | 6–10 | the record, VisCodeBench's pilot |
+| VisCodeBench pilot | a code-emitting mode (a build, not a dispatch) | 3–6 | the record; **not** the refinement dispatch until the mode exists |
+
+All three are separable, and only two of them can be *paid* this week without building something first.
+The refinement dispatch and the candidate record do not share a queue: the record is a local process and
+the dispatch takes the single `bird-eval-DEEPSEEK_API_KEY` slot, so "in parallel" means the record is
+written while the arm runs, which is what the plan already orders.

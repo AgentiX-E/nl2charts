@@ -322,11 +322,21 @@ export const BENCHMARKS: readonly Benchmark[] = [
     metrics: ['execution', 'chart content', 'displayed data similarity', 'accessibility'],
     status: 'absent',
     gap:
-      'The dataset is deliberately private (it is released through a leaderboard, to keep it out of '
-      + 'training corpora), so it cannot be vendored the way BIRD and Text2Vis are. Its task is also a '
-      + 'different contract: the system emits Python code into a marked region of a notebook, and the '
-      + 'reading intercepts the plotting calls to compare displayed data. Building it means a submission '
-      + 'path rather than a local harness, and a code-emitting mode this product does not ship.',
+      'Not a fetch problem, which is what this row said for two rounds and was wrong about: the sample '
+      + 'inputs are downloadable from the leaderboard (Codabench competition 16125) and the scoring '
+      + 'engine `t2v_eval` is public and LLM-independent — it monkey-patches matplotlib, seaborn, pandas '
+      + 'and geopandas, logs the series each call draws to `series.jsonl`, and compares two log '
+      + 'directories. What is private is the reference solutions, and that is the whole submission path: '
+      + 'log the displayed data locally, upload the zip, let their server score it. So the two real '
+      + 'costs are engineering, not money. (1) A code-emitting mode: the contract is Python written into '
+      + 'a marked region of a notebook, not a chart spec, and this product emits specifications. (2) A '
+      + 'submission path: a Codabench entry, a Docker run of 2,672 generated programs, and retries where '
+      + 'the program raises. The money is generation only — no judge model exists in this metric, which '
+      + 'is why the estimate is a token count rather than a judgement: 2,672 samples at 3–6k prompt and '
+      + '300–800 completion tokens is ¥21–53 at deepseek-chat prices, and a 300-sample stratified pilot '
+      + 'that measures tokens a sample and the execution-failure rate is ¥3–6. `accessibility` is the '
+      + 'one metric that needs no reference at all (`calculate_accessibility_score(image_path)`), so a '
+      + 'pilot can report it locally before any submission exists.',
   },
 ];
 
