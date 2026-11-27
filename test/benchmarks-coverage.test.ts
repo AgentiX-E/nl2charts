@@ -14,6 +14,7 @@ import {
   type Benchmark,
   type Reader,
 } from '../eval/benchmarks.js';
+import type { NoiseFloor } from '../eval/benchmarks.js';
 
 /** A reader over an in-memory tree, so the gate's rules are tested without touching the disk. */
 const reader = (files: Record<string, unknown>): Reader => (file) => {
@@ -364,7 +365,10 @@ describe('the noise floor', () => {
   it('accepts the in-run A/A pair, and prints the two copies rather than a run compared with itself', () => {
     // The Mini-Dev floor is two copies of one arm inside one dispatch: `runs` are equal by
     // construction, so the refusal above has to be answered by the arms, not by the run ids.
-    const floor = { corpus: 'x', arm: 'a', runs: ['7', '7'], arms: ['a', 'a#2'], cases: 100, flipped: 24, net: 2 };
+    // Typed rather than inferred: a literal in an argument position is contextually typed into a
+    // tuple, but a `const` is not, and `string[]` is not `readonly [string, string]` — which is how
+    // this test passed locally and failed the CI typecheck (run `45975721855`).
+    const floor: NoiseFloor = { corpus: 'x', arm: 'a', runs: ['7', '7'], arms: ['a', 'a#2'], cases: 100, flipped: 24, net: 2 };
     expect(noiseProblems([floor])).toEqual([]);
     const [line] = noiseLines([floor]);
     expect(line).toContain('between a and a#2, two copies inside run 7');
