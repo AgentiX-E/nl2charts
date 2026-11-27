@@ -756,12 +756,13 @@ function reading(overrides: Partial<RewriteReading> & { readonly rule: string })
 
 describe('rewriteProblems', () => {
   it('refuses a baseline that does not reproduce the score', () => {
-    const problems = rewriteProblems({ recomputed: 979, declared: 980, scored: 1532, readings: [] });
+    const problems = rewriteProblems({ split: 'dev', recomputed: 979, declared: 980, scored: 1532, readings: [] });
     expect(problems.join(' ')).toContain('the artifact claims 980');
   });
 
   it('refuses a rule that broke a statement', () => {
     const problems = rewriteProblems({
+      split: 'dev',
       recomputed: 1,
       declared: 1,
       scored: 1,
@@ -771,7 +772,7 @@ describe('rewriteProblems', () => {
   });
 
   it('passes a report whose baseline reconciles', () => {
-    expect(rewriteProblems({ recomputed: 980, declared: 980, scored: 1532, readings: [] })).toEqual([]);
+    expect(rewriteProblems({ split: 'dev', recomputed: 980, declared: 980, scored: 1532, readings: [] })).toEqual([]);
   });
 
   it('refuses a rule that was priced and never decided about', () => {
@@ -779,6 +780,7 @@ describe('rewriteProblems', () => {
     // rejection and it is not an adoption; it is a measurement nobody used, and the union used to
     // treat it as the pipeline's.
     const problems = rewriteProblems({
+      split: 'dev',
       recomputed: 1,
       declared: 1,
       scored: 1,
@@ -788,7 +790,7 @@ describe('rewriteProblems', () => {
   });
 
   it('refuses a refusal that states no reason', () => {
-    const problems = rewriteProblems({ recomputed: 1, declared: 1, scored: 1, readings: [reading({ rule: 'quiet', adoption: 'refused' })] });
+    const problems = rewriteProblems({ split: 'dev', recomputed: 1, declared: 1, scored: 1, readings: [reading({ rule: 'quiet', adoption: 'refused', refusedOn: 'dev' })] });
     expect(problems.join(' ')).toContain('says no reason');
   });
 
@@ -796,12 +798,59 @@ describe('rewriteProblems', () => {
     // One of the two is stale, and a report that carries both is a report whose reader cannot tell
     // which one the code believes.
     const problems = rewriteProblems({
+      split: 'dev',
       recomputed: 1,
       declared: 1,
       scored: 1,
       readings: [reading({ rule: 'stale', adoption: 'product', reason: 'refused in an earlier round' })],
     });
     expect(problems.join(' ')).toContain('one of the two is stale');
+  });
+
+  it('refuses a refusal that names no split, because its counts would belong to no corpus', () => {
+    const problems = rewriteProblems({
+      split: 'dev',
+      recomputed: 1,
+      declared: 1,
+      scored: 1,
+      readings: [reading({ rule: 'nowhere', adoption: 'refused', reason: 'a reason' })],
+    });
+    expect(problems.join(' ')).toContain('belong to no corpus');
+  });
+
+  it('refuses a refusal the split it was refused on now contradicts', () => {
+    // A winning rule may only be refused when something that ships already collects its wins.
+    const doubt: RewriteReading = reading({
+      rule: 'too-good',
+      adoption: 'refused',
+      reason: 'it lost in an earlier round',
+      refusedOn: 'dev',
+      won: 9,
+      lost: 1,
+      net: 8,
+      mcnemar: 0.011,
+      wonCases: ['q1', 'q2'],
+    });
+    const problems = rewriteProblems({ split: 'dev', recomputed: 1, declared: 1, scored: 1, readings: [doubt] });
+    expect(problems.join(' ')).toContain('and wins there');
+    expect(problems.join(' ')).toContain('no shipped rule turns those cases');
+  });
+
+  it('allows a winning rule to be refused when a shipped rule already turns those cases', () => {
+    // `ground-case-empty` is this row: it wins, and the gate it applies is a strict subset of the
+    // edit the product ships, so refusing it gives up nothing. A check that reddened every refused
+    // winner would fail on the one row it had a chance to check.
+    const gated: RewriteReading = reading({ rule: 'gated', adoption: 'refused', reason: 'the gate costs it', refusedOn: 'dev', won: 3, lost: 0, net: 3, mcnemar: 0.02, wonCases: ['q1'] });
+    const shipped: RewriteReading = reading({ rule: 'shipped', adoption: 'product', won: 4, lost: 0, net: 4, wonCases: ['q1', 'q2'] });
+    expect(rewriteProblems({ split: 'dev', recomputed: 1, declared: 1, scored: 1, readings: [gated, shipped] })).toEqual([]);
+  });
+
+  it('does not call a Minidev artifact a contradiction of a refusal read on dev', () => {
+    // The counts are the artifact's, not the refusal's. On another split the row is silent about
+    // whether the refusal still holds, and a check that fired here would refuse every attempt to
+    // price a rule on a corpus it was not refused on.
+    const doubt: RewriteReading = reading({ rule: 'elsewhere', adoption: 'refused', reason: 'it lost on dev', refusedOn: 'dev', won: 9, lost: 1, net: 8, mcnemar: 0.011, wonCases: ['q1'] });
+    expect(rewriteProblems({ split: 'minidev', recomputed: 1, declared: 1, scored: 1, readings: [doubt] })).toEqual([]);
   });
 });
 
@@ -824,6 +873,26 @@ describe('rewriteLines', () => {
     expect(text).toContain('null-order');
     expect(text).toContain('a claim');
     expect(text).toContain('+0.39pp');
+  });
+
+  it('says which corpus a refusal was decided on, and whether these are its counts', () => {
+    // The two sentences a reader needs to join a sentence to a column: a refusal read on the split
+    // being priced owns the counts beside it, and one read elsewhere does not.
+    const render = (split: string): string =>
+      rewriteLines({
+        split,
+        arm: 'a',
+        scored: 100,
+        recomputed: 60,
+        declared: 60,
+        agreed: 100,
+        readings: [reading({ rule: 'narrow', adoption: 'refused', reason: 'it loses', refusedOn: 'dev', won: 0, lost: 4 })],
+        union: 0,
+        overlap: [],
+        problems: [],
+      }).join('\n');
+    expect(render('dev')).toContain('refused on dev, and these are that split\'s counts');
+    expect(render('minidev')).toContain("refused on dev; the counts above are minidev's");
   });
 
   it('prints the refusals beside the defects, and nothing when there were none', () => {
@@ -1193,12 +1262,29 @@ describe('the verdict a rule carries', () => {
     }
   });
 
-  it('names the counts in the refusal it took two rounds to write', () => {
-    const refused = rule('drop-count-distinct');
-    expect(refused.adoption).toBe('refused');
-    // The numbers are the verdict: 33 won is why it was tempting, 18 lost is why it did not ship.
-    expect(refused.reason).toContain('33');
-    expect(refused.reason).toContain('18');
+  it('refuses every rule that names the split it was refused on', () => {
+    // The counts a refusal is decided by belong to a corpus, and the columns printed beside the
+    // sentence belong to whichever corpus the harness was pointed at. Naming the split is the only
+    // thing that joins them — three of these sentences read "on dev" while the harness was pricing
+    // Mini-Dev, and nothing failed.
+    for (const priced of REWRITE_RULES) {
+      if (priced.adoption !== 'refused') continue;
+      expect(priced.refusedOn, `${priced.name} is refused and names no split`).toBeDefined();
+    }
+    expect(rule('drop-count-distinct').refusedOn).toBe('dev');
+  });
+
+  it('keeps the counts out of the sentence, because a number in prose has no reader', () => {
+    // Every refusal quoted its own counts for three rounds and every one of them was stale by the
+    // time a dev artifact priced it: 35 fired became 28, 17 became 10, 119 became 121. The report
+    // prints the counts this run took; the sentence carries only the argument, and the corpus is
+    // `refusedOn`'s job — a SQL fragment like `* 1.0` is code, not a count.
+    const countsInProse = /\b\d+\b\s*(?:fired|won|lost)\b|\b(?:fired|won|lost|repairs?|cases?)\b[^.;]{0,16}\b\d+\b/i;
+    for (const priced of REWRITE_RULES) {
+      if (priced.reason === undefined) continue;
+      expect(countsInProse.test(priced.reason), `${priced.name} quotes counts in its reason`).toBe(false);
+      expect(/\b(?:minidev|dev)\b/i.test(priced.reason), `${priced.name} names a split in its reason`).toBe(false);
+    }
   });
 
   it('agrees with the product about which edits the pipeline applies', () => {

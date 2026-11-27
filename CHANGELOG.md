@@ -16,6 +16,26 @@ cannot be argued with.
   `true` it carried for one round.
 
 ### Fixed
+- **The dev artifact existed, and pricing it moved the shipped stack from 2.22pp to 1.17pp.** Round
+  204's plan was a ¥2–4 dispatch to re-run `macsql-prompt` on dev so that a dev artifact would exist
+  to price. It already existed: `bird-dev` run `45678159001` uploaded 1,532 cases with the statement
+  each one executed, and `bench:bird:rewrite` reproduces the arm exactly (`1002 = 65.40%, agreement
+  1532/1532`) before printing anything. On dev the three shipped edits are worth **18 cases, +1.17pp**
+  (`null-order` 3 won, `ground-shipped` 15 won, `drop-unordered-limit` 0 fired), against 11 cases and
+  +2.22pp on the Mini-Dev subsample — so the subsample overstates the stack by 1.9×, and the
+  `ground-shipped` dev reading moved from the published 17 wins / +1.11pp to **15 wins / +0.98pp**,
+  because the same 1,532 questions were answered by different statements in a different run. No rule
+  lost a case on either corpus.
+- **Five refusals quoted counts that no longer existed, and nothing could notice.** A refusal's reason
+  is a sentence about a corpus; the columns printed beside it are numbers about whichever corpus the
+  caller priced. Every one of the five refusals disagreed with the dev re-reading, and the three that
+  said "on dev" had been printed beside Mini-Dev columns for two rounds. The counts are gone from the
+  sentences, each refusal carries `refusedOn` (the split it was decided on), and `rewriteProblems`
+  fails on a refusal with no split, on a split tag that is not the one being priced (printed as
+  `refused on dev; the counts above are minidev's`), and on a refusal the split it names contradicts —
+  positive net, `p < 0.05`, and no shipped rule turning those cases. That last clause is what keeps
+  `ground-case-empty` admissible: it wins, and refusing it gives up nothing because the edit that
+  ships collects the same cases.
 - **The rewrite report's union counted edits no product runs.** The union — distinct cases at least
   one adopted rule repairs, the number a product claim would quote — was computed over `net > 0`, and
   a sign is not a verdict: `drop-count-distinct` (33 won, 18 lost on dev, refused) contributed its

@@ -79,9 +79,11 @@ export const SHIPPED_EDITS: readonly ShippedEdit[] = [
     enabled: true,
     needs: 'data',
     reading:
-      'BIRD dev 1,532 questions: 26 fired, 17 won, 0 lost, +1.11pp, exact McNemar p < 0.0001; Mini-Dev 496, ' +
-      're-priced after the reader moved into this package: 11 fired, 10 won, 0 lost, +2.02pp, p = 0.0020. ' +
-      'Ungated on purpose — the gate that only fires after an empty result took 7 of the 14 wins',
+      'BIRD dev 1,532 questions, run 45678159001: 26 fired, 15 won, 0 lost, +0.98pp, exact McNemar p < 0.0001. ' +
+      'Mini-Dev 496, run 45846766964: 11 fired, 10 won, 0 lost, +2.02pp, p = 0.0020. The two splits disagree by a ' +
+      'factor of two and the subsample is the flattering one, which is why the run id is here: the earlier dev ' +
+      'reading of this same edit was 17 won and +1.11pp, taken on an artifact nobody wrote down. Ungated on purpose ' +
+      '— the gate that only fires after an empty result took most of the wins',
   },
   {
     rule: 'drop-unordered-limit',
@@ -97,9 +99,10 @@ export const SHIPPED_EDITS: readonly ShippedEdit[] = [
     enabled: true,
     needs: 'dialect',
     reading:
-      'BIRD dev 1,532: 61 fired, 3 won, 0 lost. Mini-Dev 496: 23 fired, 1 won, 0 lost. Both deltas are below ' +
-      'their split\u2019s resolution (0.3pp and 0.6pp), so the claim is "no cost" and not "more accurate"; the ' +
-      'edit was held back for two rounds by a default that read every unnamed engine as SQLite',
+      'BIRD dev 1,532, run 45678159001: 64 fired, 3 won, 0 lost. Mini-Dev 496, run 45846766964: 23 fired, 1 won, ' +
+      '0 lost. Both deltas are below their split\u2019s resolution (0.3pp and 0.6pp), so the claim is "no cost" and ' +
+      'not "more accurate"; the edit was held back for two rounds by a default that read every unnamed engine as ' +
+      'SQLite',
   },
 ];
 

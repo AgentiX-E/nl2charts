@@ -22576,3 +22576,94 @@ No score moved. The union is smaller because it is now true, not because an edit
 three shipping rules are the same three the pipeline already applied. The one number that changed is
 the one a reader was being invited to quote — 4.23pp of Mini-Dev became 2.22pp — and the honest
 reading of that change is that the earlier figure included work no product performs.
+
+## The dev artifact was in the workspace all along
+
+The section above ended with a hole it named itself: the dev-split reading of `ground-shipped` — 26
+fired, 17 won, +1.11pp — had never been re-executed after the reader moved into `packages/ai`, because
+the pricer takes an artifact and only the Mini-Dev one was on disk. The plan that followed from it was
+a dispatch: re-run `macsql-prompt` on dev, ¥2–4, so that a dev artifact exists to be priced.
+
+The dispatch was not needed. `bird-dev` uploads its artifact, and the run that produced the last dev
+reading (`45678159001`, 1,002 of 1,532 = 65.40%) still had it: 1,532 cases, every one carrying the
+statement it executed. Downloading it costs nothing, and the pricer reproduces the arm exactly —
+`baseline 1002 = 65.40%, agreement 1532/1532` — which is the condition it imposes before any number
+below is printed.
+
+### The shipped stack is worth +1.17pp on dev, and +2.22pp on Mini-Dev
+
+| rule | verdict | dev 1,532 (run `45678159001`) | Mini-Dev 496 (run `45846766964`) |
+| --- | --- | ---: | ---: |
+| `null-order` | ships | 64 fired, 3 won, 0 lost, +0.20pp, p = 0.25 | 23 fired, 1 won, 0 lost |
+| `drop-unordered-limit` | ships | 0 fired | 0 fired |
+| `ground-shipped` | ships | **26 fired, 15 won, 0 lost, +0.98pp, p < 0.0001** | 11 fired, 10 won, 0 lost, +2.02pp |
+| union of the three | — | **18 cases = +1.17pp** | 11 cases = +2.22pp |
+| `drop-count-distinct` | refused | 121 fired, 30 won, 19 lost, p = 0.15 | 35 fired, 9 won, 5 lost |
+| `drop-limit-on-count` | refused | 28 fired, 0 won, 15 lost, p < 0.0001 | 9 fired, 0 won, 4 lost |
+| `integer-division` | refused | 10 fired, 1 won, 0 lost | 5 fired, 1 won, 0 lost |
+| `ground-case-empty` | refused | 13 fired, 7 won, 0 lost | 4 fired |
+| `ground-case-any` | instrument | 26 fired, 15 won, 0 lost | 9 fired |
+| `ground-padding` | refused | 1 fired, 1 won | 1 fired, 1 won |
+| `ground-parenthetical` | refused | 1 fired, 0 won | 0 fired |
+
+Three things follow, and the first is a correction to a number this document already published:
+
+1. **The dev re-execution moves `ground-shipped` from 17 wins to 15, and from +1.11pp to +0.98pp.**
+   Same rule, same reader, same instrument — a different artifact, because the model's statements on
+   the same 1,532 questions are not the same statements from one run to the next. The direction is
+   the one every correction in this file has taken: the smaller number is the true one.
+2. **Mini-Dev overstates the whole stack by a factor of 1.9** (2.22pp against 1.17pp). It is a
+   difficulty-stratified subsample of dev, and the four extra cases the subsample finds are the ones
+   where a literal in the question was spelled differently from the column. Nobody should quote a
+   rewrite's price without the split, which is why every row here carries its run id.
+3. **No rule lost a case on either corpus.** The shipped edits stay adopted on the criterion they were
+   adopted on — a free edit must not lose — and the union is what the pipeline actually recovers:
+   18 cases, 1.17pp, not the 21 the `net > 0` reading used to print.
+
+### Five refusals, five stale sentences
+
+Pricing the table on dev also re-read every refusal, and every refusal disagreed with the sentence
+that justified it:
+
+| rule | the sentence said | dev says now |
+| --- | --- | --- |
+| `drop-limit-on-count` | 35 fired, 1 won, 19 lost | 28 fired, 0 won, 15 lost |
+| `integer-division` | 17 fired, changes no answer | 10 fired, 1 won |
+| `drop-count-distinct` | 119 fired, 33 won, 18 lost | 121 fired, 30 won, 19 lost |
+| `ground-case-empty` | 7 repairs gated against 14 ungated | 7 against 15 |
+| `ground-padding`, `ground-parenthetical` | one win each | 1 won and 0 won |
+
+Not one of these sentences is wrong about its own artifact. They are wrong about *this* one, and
+nothing in the code could tell the difference, because a count written in a sentence has no reader
+that fails when it stops being true. The three that said "on dev" were being printed beside a
+Mini-Dev artifact's columns for two rounds.
+
+The fix is not better prose. It is to delete the counts from the sentences, keep the argument, and
+give each refusal the one thing a sentence cannot carry: the split it was decided on.
+
+```ts
+readonly refusedOn?: string;   // on RewriteRule, carried into the reading
+```
+
+`rewriteProblems` now fails on three new shapes, each of which is a way the table can lie:
+
+- **A refusal that names no split.** The counts printed beside it belong to whatever corpus the
+  caller priced, and a reader cannot tell whether the sentence was ever about that corpus.
+- **A refusal the split it names now contradicts** — positive net, `p < 0.05`, and *no shipped rule
+  turning those cases*. The last clause is what keeps the check from being wrong about
+  `ground-case-empty`, which wins 7 and is still refused because the edit that ships collects those
+  same cases; refusing a winner is admissible exactly when something that ships already banks it.
+- **A split tag that is not the split being priced**: printed rather than failed — `refused on dev;
+  the counts above are minidev's` — because pricing a rule on a corpus it was never refused on is a
+  legitimate thing to do, and it is exactly the thing that was happening silently.
+
+The ledger's readings get the same treatment: `SHIPPED_EDITS` now names the run each count came from
+(`45678159001` for dev, `45846766964` for Mini-Dev). The 17-win reading was unrepeatable not because
+the number was wrong but because the artifact behind it was not recorded, and the cost of that
+omission is the 0.13pp this section just corrected.
+
+### What this round does not claim
+
+No score moved and no edit changed. The pipeline applies the same three edits it applied yesterday;
+what changed is what the document is allowed to say about them — 2.22pp became 1.17pp on the split a
+leaderboard would quote, and five refusals stopped quoting numbers that no longer exist.

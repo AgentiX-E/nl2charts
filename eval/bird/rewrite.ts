@@ -173,6 +173,20 @@ export interface RewriteRule {
   /** Why, for every row that is not the product's. Required by `rewriteProblems`, not by types. */
   readonly reason?: string;
   /**
+   * The split this refusal was read on.
+   *
+   * A reason is a sentence about a corpus, and the columns beside it are numbers about whichever
+   * corpus the caller pointed the harness at. Without this field the two were joined by nothing: a
+   * refusal read on dev printed its counts next to a Mini-Dev artifact's numbers, and a reader had
+   * no way to see that the sentence and the columns described different sets of questions.
+   *
+   * It is a *name*, not a copy of the counts. The five refusals below quoted their own numbers in
+   * prose for three rounds; every one of them was stale against the dev artifact that finally
+   * priced them (see `docs/benchmarks.md`), because a number written in a sentence has no reader
+   * that fails when it stops being true. The counts this row prints are the counts this run took.
+   */
+  readonly refusedOn?: string;
+  /**
    * Whether a proposal the engine refuses is a reading rather than a defect in the rule.
    *
    * A shipped rule must produce statements that run — one that writes a statement the engine
@@ -294,9 +308,9 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     name: 'drop-limit-on-count',
     claim: 'a row cap left in a statement whose question asks how many',
     adoption: 'refused',
+    refusedOn: 'dev',
     reason:
-      'fires 35 and loses 19 on dev for one win: the phrase is in questions whose cap is the answer, ' +
-      'so the rule reads a word the question had to contain either way',
+      'the phrase is in questions whose cap is the answer, so the rule reads a word the question had to contain either way — it loses far more than it wins and every loss is a cap the question asked for',
     apply: (input) => {
       if (!/\bhow many\b|\bnumber of\b|\btotal\b|\bcount\b/i.test(input.question)) return undefined;
       if (!/\blimit\s+\d+/i.test(input.sql)) return undefined;
@@ -320,29 +334,31 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     name: 'integer-division',
     claim: 'a rate divided by an integer column truncates to zero',
     adoption: 'refused',
+    refusedOn: 'dev',
     reason:
-      'fires 17 on dev and changes no answer: the statements that divide already carry `* 1.0` or a cast, ' +
-      'because that is the failure their author could see. Nothing to adopt and nothing to remove',
+      'the statements that divide already carry `* 1.0` or a cast, because that is the failure their author could see: on the split that decided it, the rule fires at one case in a hundred and buys nothing a paired test resolves',
     apply: integerDivision,
   },
   {
     name: 'drop-count-distinct',
     claim: 'a count over distinct rows where the question counts rows',
     adoption: 'refused',
+    refusedOn: 'dev',
     reason:
-      '119 fired, 33 won, 18 lost on dev: profitable and not admissible, because a rewrite that pays 15 ' +
-      'and breaks 18 is a cost the split cannot call noise. Not conditionable either — see the proof on ' +
-      '`dropCountDistinct`; every condition the data can express selects the cases where the edit is a no-op',
+      'profitable and not admissible: it wins more than it loses, the loss is not resolvable on this split, and a ' +
+      'rewrite that pays less than it breaks is a cost no gate here can call noise. Not conditionable either — see ' +
+      'the proof on `dropCountDistinct`; every condition the data can express selects the cases where the edit is a no-op',
     apply: dropCountDistinct,
   },
   {
     name: 'ground-case-empty',
     claim: 'a value written in the question\'s case, grounded only when the statement returned nothing',
     adoption: 'refused',
+    refusedOn: 'dev',
     reason:
-      'the gate is what cost the edit its ceiling: 7 repairs behind "returned nothing" against 14 with no ' +
-      'gate, and no loss either way — a wrong-case value in an `in` list or a `like` pattern returns rows ' +
-      'and answers a different question, which the gate cannot see',
+      'the gate is what cost the edit its ceiling: the repairs behind "returned nothing" are a strict subset of ' +
+      'what the same edit finds ungated, and no loss either way — a wrong-case value in an `in` list or a `like` ' +
+      'pattern returns rows and answers a different question, which the gate cannot see',
     needsDomains: true,
     apply: (input) => (input.empty ? groundCase(input) : undefined),
   },
@@ -366,7 +382,8 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     name: 'ground-padding',
     claim: 'a number written without the leading zeros its column stores',
     adoption: 'refused',
-    reason: 'one win on each corpus, which no split here resolves: a candidate held for a corpus that has more of it, not a rejection on the merits',
+    refusedOn: 'dev',
+    reason: 'a candidate held for a corpus that has more of it, not a rejection on the merits: at this frequency no split here resolves it in either direction',
     needsDomains: true,
     apply: (input) => groundAbsence(input, ['padding']),
   },
@@ -374,7 +391,8 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     name: 'ground-parenthetical',
     claim: 'a label written without the parenthetical the column appends',
     adoption: 'refused',
-    reason: 'one win on each corpus, which no split here resolves: a candidate held for a corpus that has more of it, not a rejection on the merits',
+    refusedOn: 'dev',
+    reason: 'a candidate held for a corpus that has more of it, not a rejection on the merits: at this frequency no split here resolves it in either direction',
     needsDomains: true,
     apply: (input) => groundAbsence(input, ['parenthetical']),
   },
@@ -544,6 +562,8 @@ export interface RewriteReading {
   readonly adoption: 'product' | 'refused' | 'instrument' | 'ceiling' | 'unstated';
   /** Why, on every row that is not the product's. */
   readonly reason?: string;
+  /** The split a refusal was read on, carried so the printed counts can be labelled with it. */
+  readonly refusedOn?: string;
   /** Cases the rule rewrote. */
   readonly fired: number;
   /** Rewrites that turned a wrong answer into a right one. */
@@ -822,6 +842,7 @@ export async function priceRewrites(
       // that the difference is visible. `rewriteProblems` refuses it.
       adoption: (rule.oracle === true ? 'ceiling' : (rule.adoption ?? 'unstated')) as RewriteReading['adoption'],
       ...(rule.reason === undefined ? {} : { reason: rule.reason }),
+      ...(rule.refusedOn === undefined ? {} : { refusedOn: rule.refusedOn }),
       ...tally,
       wonCases: [...(wonCases.get(rule.name) ?? [])],
       net,
@@ -863,13 +884,22 @@ export async function priceRewrites(
  * rewrite, not a case that stayed wrong.
  */
 export function rewriteProblems(
-  report: Pick<RewriteReport, 'recomputed' | 'declared' | 'scored' | 'readings'>,
+  report: Pick<RewriteReport, 'recomputed' | 'declared' | 'scored' | 'readings' | 'split'>,
 ): string[] {
   const problems: string[] = [];
   if (report.recomputed !== report.declared) {
     problems.push(
       `REWRITE: re-execution scores ${String(report.recomputed)} of ${String(report.scored)} and the artifact claims ${String(report.declared)}, so the baseline is not the judge these rewrites were priced against`,
     );
+  }
+  // What the pipeline already collects. A refusal of a winning rule is only admissible when the
+  // wins it gives up are wins something that ships already takes: `ground-case-empty` is refused
+  // for exactly that reason and not for losing, so a check that reddened every refused winner
+  // would be wrong about the one row it had a chance to check.
+  const covered = new Set<string>();
+  for (const reading of report.readings) {
+    if (reading.adoption !== 'product') continue;
+    for (const id of reading.wonCases) covered.add(id);
   }
   for (const reading of report.readings) {
     if (reading.broken > 0) problems.push(`REWRITE: ${String(reading.broken)} rewrite(s) of ${reading.rule} no longer run, so the rule is wrong about something`);
@@ -884,6 +914,27 @@ export function rewriteProblems(
     }
     if (reading.adoption === 'product' && reading.reason !== undefined) {
       problems.push(`REWRITE: ${reading.rule} ships and carries a refusal reason; one of the two is stale`);
+    }
+    // A refusal is a sentence about a corpus, and the row beside it is a set of counts about
+    // whichever corpus this run priced. Naming the split is what lets the two be compared at all.
+    if (reading.adoption === 'refused' && reading.refusedOn === undefined) {
+      problems.push(
+        `REWRITE: ${reading.rule} is refused without saying which split it was refused on, so the counts printed beside it belong to no corpus`,
+      );
+      continue;
+    }
+    // The one contradiction the table can catch on its own: a rule refused for not paying, priced
+    // on the split it was refused on, now paying — and nothing that ships collects those cases.
+    if (
+      reading.adoption === 'refused' &&
+      reading.refusedOn === report.split &&
+      reading.net > 0 &&
+      reading.mcnemar < 0.05 &&
+      reading.wonCases.some((id) => !covered.has(id))
+    ) {
+      problems.push(
+        `REWRITE: ${reading.rule} is refused on ${String(reading.refusedOn)} and wins there: ${String(reading.won)} won against ${String(reading.lost)} lost (p ${reading.mcnemar.toFixed(4)}), and no shipped rule turns those cases`,
+      );
     }
   }
   return problems;
@@ -945,8 +996,16 @@ export function rewriteLines(report: RewriteReport): string[] {
     // numbers: `refused: 119 fired, 33 won, 18 lost` reads as a cost, and the reason is what says
     // which cost it was.
     if (reading.adoption === 'ceiling' || reading.adoption === 'unstated') continue;
+    // Which corpus the sentence is about, beside the columns that belong to this one. Three of the
+    // refusals read "on dev" while the harness was being pointed at Mini-Dev, and nothing failed.
+    const where =
+      reading.adoption !== 'refused' || reading.refusedOn === undefined
+        ? ''
+        : reading.refusedOn === report.split
+          ? ` (refused on ${reading.refusedOn}, and these are that split's counts)`
+          : ` (refused on ${reading.refusedOn}; the counts above are ${report.split}'s)`;
     lines.push(
-      `  ${' '.repeat(20)} ${reading.adoption === 'product' ? 'ships' : reading.adoption}${reading.reason === undefined ? '' : `: ${reading.reason}`}`,
+      `  ${' '.repeat(20)} ${reading.adoption === 'product' ? 'ships' : reading.adoption}${where}${reading.reason === undefined ? '' : `: ${reading.reason}`}`,
     );
   }
   // The union is what a pipeline would recover; the per-rule deltas add up only when nothing
