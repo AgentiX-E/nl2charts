@@ -801,6 +801,23 @@ breaks). An engine the map does not name is **declined rather than assumed to be
 default that kept this rule out of the pipeline for two rounds, and the reason the MCP tool's DuckDB
 runner gets the `desc` form and not the `asc` one.
 
+**Domain reader** — The lookup the grounding rewrite needs: what does this column, in this statement,
+store? `packages/ai/src/domain.ts` holds both layers — `createDomainReader(run)` answers for a table
+and column with one `select distinct`, and `createGroundingReader(run)` resolves the statement's own
+aliases first (`t1.status` is `orders.status` only because the statement said so). One implementation
+serves the harness that priced the rule and the product that ships it, because a second one would
+agree on the easy statements and disagree on the ones with a CTE or a quoted identifier. It draws
+three states the harness used to collapse: `[]` is a column that stores nothing, `undefined` is a read
+that failed, and a read the runner capped is `undefined` too — a truncated set may not be narrowed,
+since finding one match in the first thousand values is how a substitution becomes a guess.
+
+**Grounding (`grounding`)** — The field on an `ask_question` result that says what the value rewrite
+did: `substitutions` (a literal rewritten to the spelling the column stores) and `refused` (a site the
+data could not settle). The second number is what keeps the first honest — a rule that fires on
+nothing because every read failed is otherwise indistinguishable from a database where every spelling
+was already right. `readDomains: false` turns the rule off and the field disappears, which is the
+control a deployment needs to measure its own corpus.
+
 **Ceiling (oracle rule)** — A rule that reads the gold statement. It cannot ship, because a
 deployment does not have the gold, but it bounds what an edit could ever be worth: if the ceiling is
 small, no version of the rule is worth building. `oracle-drop-limit` is the ceiling for the cap edit

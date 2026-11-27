@@ -22353,7 +22353,7 @@ because they belong to this one.
 | rule | fired | won | lost | net | p | verdict |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `drop-count-distinct` | 119 | 33 | **18** | +0.98pp | 0.0489 | priced, not adopted: a free rule may not lose |
-| `ground-shipped` (the `ground` arm's own edit) | 26 | 17 | 0 | +1.11pp | <0.0001 | already an arm; the product tool calls no domain reader |
+| `ground-shipped` (the `ground` arm's own edit) | 26 | 17 | 0 | +1.11pp | <0.0001 | adopted, and shipped this round; see "The priced rule that had no caller" |
 
 The first is the largest free edit this project has priced and it *loses 18*: a question that says
 "how many distinct" is a question whose `distinct` is the answer, and no question-side word list
@@ -22361,9 +22361,11 @@ separates the two readings well enough. It stays in `REWRITE_RULES` as a priced 
 
 The second is larger than everything in this section combined and is not a new mechanism: it is
 `applyGrounding`, which the `inline+evidence+ground` arm runs and the shipped arm does not. The
-`ask_question` tool has a runner and therefore could read a column's values, and it passes no
-`readColumnValues`; that is a product gap this round measured and did not close, and it is registered
-as the next round's first item rather than folded into this one.
+`ask_question` tool has a runner and therefore could read a column's values, and it passed no
+`readColumnValues` — a product gap measured in round 202 and left open on purpose. It is closed
+below: the rule now runs on the caller's database, through the same reader the harness prices with,
+and the next section is the argument that "the same reader" is a fact about one implementation rather
+than about two that happen to agree.
 
 ### The artifact can now say which free rewrite fired
 
@@ -22377,3 +22379,104 @@ both artifacts, and it is the rule that ships. The reason is not that the rule i
 the artifact records the statement the pipeline *executed*, which is the post-strip statement. An
 instrument reading the model's raw reply instead would have priced the shipped rule at its full
 ceiling for a second time and reported a lever that is already banked.
+
+## The priced rule that had no caller
+
+`ground-shipped` was the largest free edit in the repository and it reached nobody. The pipeline had
+the mechanism (`applyGrounding`, chosen over the gated form 14 wins to 7 with no loss either way),
+the harness passed it a reader, and the product — the tool the project is named for — has a runner
+and passed nothing. Round 202 registered that as the next round's first item; this is that round.
+
+The gap looked like one line. It was not, and the reason is the thing this section is about: the
+reader the harness prices with lived in `eval/bird/`, and the product cannot import it. The shortcut
+— a second reader in `packages/mcp`, over the same `Runner` — would have been born already diverged.
+Both would resolve `t1.status` to a table by scanning the statement, both would agree on
+`select * from orders t1 where t1.status = 'x'`, and they would disagree on the statements that
+matter: a CTE that names itself, a quoted column with an apostrophe, a `from` inside a literal. No
+test compares two implementations of one rule across a package boundary, so the divergence would
+have been found by a customer, as an accuracy number that stopped matching the benchmark.
+
+### One scanner, two callers, and a file that got smaller
+
+`eval/bird/statement.ts` knew how to answer "which tables does this statement read" — 593 lines of
+it, a scanner rather than a regular expression because the regular expression was wrong on
+`= 'from x'`, on `-- from y` and on `"O'Brien Rd"`. It moved into `packages/ai/src/sql-lex.ts`
+whole, with `codeOnly`, `definesOwnName` and the region machinery its neighbours already used, and
+`statement.ts` now imports it and re-exports it for the sixteen modules below that never had to
+change: **432 lines**, same behaviour, one implementation.
+
+Beside it is `packages/ai/src/domain.ts`, the lookup the rewrite needs. Two layers, because they
+answer two questions:
+
+- `createDomainReader(run)` — "what does this table's column hold". One `select distinct` per
+  column, cached, and the identifier quoted by doubling its own quote character.
+- `createGroundingReader(run)` — "what does the column in *this* statement hold", which is the first
+  layer plus the statement's own names for its tables.
+
+The harness's `groundingReader(run, db)` is now two lines over the second, and its `createDomainReader`
+two lines over the first. Both the product and the pricer call the same code, so "the rule that was
+priced" and "the rule that ships" are the same object rather than the same description.
+
+### Three semantics the move had to draw, and one defect it found
+
+The version that lived in the harness collapsed three states into two, which is the defect this
+repository keeps paying for — a default where a refusal belongs:
+
+| state | harness before | library now | what the rewrite reports |
+| --- | --- | --- | --- |
+| the read succeeded, the column holds nothing | `undefined` | `[]` | `absent` — a fact about the data |
+| the read failed | `undefined` | `undefined` | `unknown` — nobody looked |
+| the read was capped by the runner | not possible | `undefined` | `unknown` — a partial set cannot settle a literal |
+
+The third row is the product's, and it is why the cap is 1,000 distinct values rather than a
+performance knob: the edit's licence is the *set*, so a truncated set may not be narrowed — finding
+one match in the first thousand values is exactly how a substitution becomes a guess. The runner
+already reports `truncated`, so the reader turns it into a refusal, and a column with more than a
+thousand distinct values (a free-text field, an identifier) is one where the honest answer is that
+the question is not about stored spellings.
+
+A failure the move found, in code that had been priced twice: `select distinct` returns the NULL
+group as a row, and the old reader converted every row with `String(row[0])`, which turns an unknown
+value into the four-character spelling `null`. Any nullable column therefore answered with a value
+it does not contain, and a statement writing `'null'` — or a column storing `NULL` beside a real
+`null` — met a second spelling that does not exist. NULL is dropped where it enters now. This is the
+class of defect that a refactor finds and a test suite does not: the reader had tests, and every one
+of them fed it strings.
+
+### The re-pricing, and what it does and does not re-derive
+
+`bench:bird:rewrite` re-executes each case with and without an edit and refuses to print unless the
+re-execution reproduces the arm's published pass count. Run on the Mini-Dev artifact this workspace
+holds, after the move:
+
+| rule | fired | won | lost | net | exact McNemar | resolves |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `null-order` (shipped in 202) | 23 | 1 | 0 | +0.20pp | p = 1.000 | 0.6pp |
+| `ground-shipped` (shipped in 203) | 11 | 10 | 0 | +2.02pp | p = 0.0020 | 1.8pp |
+
+The first row is the regression test for the move: it is the same 23 fired / 1 won / 0 lost the
+Mini-Dev table published, reproduced by code that now lives in another package. The second is the
+rule this section is about, priced through the shared reader at 10 wins and no losses.
+
+What this does **not** re-derive: the dev-split `ground-shipped` row (26 fired / 17 won / 0 lost,
++1.11pp, p < 0.0001). The dev artifact is not in this workspace — the pricer takes an artifact, and
+only the Mini-Dev one was retained — so the dev number stands as the round-202 reading rather than as
+a reading taken after the move. It is the same instrument, the same rule and the same reader; the
+honest statement is that one corpus was re-executed and the other was not.
+
+Nothing in this section is a significance claim about the *product*. The rule is free, so it is
+adopted on the criterion the free rules have — it must not lose — and across the two corpora it has
+fired 37 times and won 27 of them without a single loss (26 firings before the move on dev, 11 after
+it on Mini-Dev).
+
+### The payload can say whether the rule ran
+
+`grounding` has been in `AskResult` since the rule was priced and in no tool payload — the third
+instance of one defect class in this file, after `capStripped` and, one level down, the funnel row
+that `caseRows` never carried. A deployment could not tell a database where every spelling was
+already right from one where every read failed, because both reported `grounding` nowhere.
+
+The tool now returns `{ substitutions, refused }` beside the statement, and `readDomains: false`
+turns the rule off — the control that makes the product's own corpus measurable rather than assumed.
+The cost is one `select distinct` per compared column and no tokens; the payload is what lets a
+reader of the bill see that.

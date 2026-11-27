@@ -14,18 +14,33 @@
  * rather than an error.
  */
 
+import {
+  CLAUSE_WORDS,
+  codeOnly,
+  definesOwnName,
+  enclosedBy,
+  ignoredRegions,
+  readIdentifier,
+  regionAt,
+  skipSpace,
+  tableRefs,
+} from '@agentix-e/nl2charts-ai';
+import type { Region, RegionKind, TableRef } from '@agentix-e/nl2charts-ai';
+
 /**
- * One table reference: the table, the name the rest of the statement uses for it, and
- * whether `from` or `join` introduced it.
+ * The statement's shape — which tables it reads, which names are its own, and where its code is —
+ * moved to `packages/ai` when the product started reading column domains.
  *
- * `joined` is not decoration. A repair that removes a table is only allowed to remove a
- * `join`; removing the `from` table leaves a statement that reads nothing.
+ * The move was not tidying. `ask_question` has to answer "what does the column in this statement
+ * hold" for the customer's own database, and that needs the same alias resolution the harness
+ * prices with: `t1.status` is `orders.status` only because the statement said so. Two scanners
+ * would agree on the easy statements and disagree on the ones with a CTE, a quoted identifier or a
+ * `from` inside a literal, and nothing in this repository compares them — so there is one scanner,
+ * in the library both callers already depend on, and this file re-exports it for the modules below
+ * that import from here.
  */
-export interface TableRef {
-  readonly table: string;
-  readonly alias: string;
-  readonly joined: boolean;
-}
+export { codeOnly, definesOwnName, tableRefs };
+export type { Region, RegionKind, TableRef };
 
 /** A single-quoted literal, with the offsets an edit needs. */
 export interface StringLiteral {
@@ -48,13 +63,6 @@ export interface LiteralSite {
   readonly operator: string;
 }
 
-/** Words that follow a table name without being its alias. */
-const CLAUSE_WORDS = new Set([
-  'where', 'on', 'join', 'inner', 'left', 'right', 'full', 'cross', 'natural', 'group',
-  'order', 'having', 'limit', 'offset', 'union', 'except', 'intersect', 'using', 'as',
-  'window', 'when', 'then', 'else', 'end',
-]);
-
 /**
  * Operators a literal can be compared with.
  *
@@ -68,34 +76,6 @@ const OPERATOR_PATTERN = [
   ...WORD_OPERATORS.map((operator) => `${operator.replace(/ /g, String.raw`\s+`)}\\b`),
   ...SYMBOL_OPERATORS,
 ].join('|');
-
-const BARE = /^[A-Za-z_][A-Za-z0-9_$]*/;
-
-function isSpace(char: string | undefined): boolean {
-  return char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\f';
-}
-
-function skipSpace(sql: string, from: number): number {
-  let index = from;
-  while (index < sql.length && isSpace(sql[index])) index += 1;
-  return index;
-}
-
-/** Read one identifier — quoted, bracketed or bare — or nothing when there is none. */
-function readIdentifier(sql: string, at: number): { text: string; end: number } | undefined {
-  const char = sql[at];
-  if (char === '"' || char === '`') {
-    const end = sql.indexOf(char, at + 1);
-    return end === -1 ? undefined : { text: sql.slice(at + 1, end), end: end + 1 };
-  }
-  if (char === '[') {
-    const end = sql.indexOf(']', at + 1);
-    return end === -1 ? undefined : { text: sql.slice(at + 1, end), end: end + 1 };
-  }
-  if (char === undefined) return undefined;
-  const bare = BARE.exec(sql.slice(at));
-  return bare === null ? undefined : { text: bare[0], end: at + bare[0].length };
-}
 
 /**
  * Read the literal that starts at `at`, or nothing when it never closes.
@@ -165,147 +145,6 @@ export function stringLiterals(sql: string): StringLiteral[] {
     index += 1;
   }
   return out;
-}
-
-/** What a region is, so a caller can decide whether to read through it. */
-type RegionKind = 'literal' | 'comment' | 'quoting';
-
-interface Region {
-  readonly start: number;
-  readonly end: number;
-  readonly kind: RegionKind;
-}
-
-/**
- * The region that starts at `at`, or nothing when code starts here.
- *
- * One reader for both walks. The two callers disagree on exactly one point — a table name may
- * be quoted and has to be read as a name, while a quoted `"2020"` is a column name and must
- * not be read as the number 2020 — so the walk is shared and the *filter* differs, which is
- * the difference the `kind` field exists to express.
- *
- * Quoting is a region even for the callers that read through it, and that is the whole point:
- * `"O'Brien"` is a column name, and a walk that did not skip it would open a literal at the
- * apostrophe and read the rest of the statement as a value.
- *
- * An unterminated literal is not a region: `readLiteral` refuses it, the statement is broken,
- * and a caller that guessed where the quote closes would be guessing about text it never saw.
- */
-function regionAt(sql: string, at: number): { end: number; kind: RegionKind } | undefined {
-  const char = sql[at] as string;
-  const next = sql[at + 1];
-  if (char === '-' && next === '-') {
-    const end = sql.indexOf('\n', at);
-    return { end: end === -1 ? sql.length : end, kind: 'comment' };
-  }
-  if (char === '/' && next === '*') {
-    const end = sql.indexOf('*/', at + 2);
-    return { end: end === -1 ? sql.length : end + 2, kind: 'comment' };
-  }
-  if (char === '"' || char === '`') {
-    const end = sql.indexOf(char, at + 1);
-    return { end: end === -1 ? sql.length : end + 1, kind: 'quoting' };
-  }
-  if (char === '[') {
-    const end = sql.indexOf(']', at + 1);
-    return { end: end === -1 ? sql.length : end + 1, kind: 'quoting' };
-  }
-  if (char === "'") {
-    const literal = readLiteral(sql, at);
-    return literal === undefined ? undefined : { end: literal.end, kind: 'literal' };
-  }
-  return undefined;
-}
-
-/**
- * The regions a keyword must not be looked for in: literals and both comment forms.
- *
- * Quoted identifiers are walked over but not reported, because a table name may legitimately
- * be quoted and `readIdentifier` handles them where they are read.
- */
-function ignoredRegions(sql: string): Region[] {
-  const regions: Region[] = [];
-  let index = 0;
-  while (index < sql.length) {
-    const region = regionAt(sql, index);
-    if (region === undefined) {
-      index += 1;
-      continue;
-    }
-    if (region.kind !== 'quoting') regions.push({ start: index, end: region.end, kind: region.kind });
-    index = region.end;
-  }
-  return regions;
-}
-
-function enclosedBy(regions: readonly Region[], at: number): boolean {
-  return regions.some((region) => at >= region.start && at < region.end);
-}
-
-/**
- * The statement with every quoted region blanked out, at the same length.
- *
- * Length is preserved because the caller finds a pattern and then looks the position up in the
- * original: a mask built by deleting text moves every offset after the first literal, which is
- * the class of bug this file exists to avoid. Blanking rather than removing also keeps word
- * boundaries — two identifiers either side of a literal do not become one token.
- */
-export function codeOnly(sql: string): string {
-  const blank = sql.split('');
-  let index = 0;
-  while (index < sql.length) {
-    const region = regionAt(sql, index);
-    if (region === undefined) {
-      index += 1;
-      continue;
-    }
-    for (let at = index; at < region.end; at += 1) blank[at] = ' ';
-    index = region.end;
-  }
-  return blank.join('');
-}
-
-/**
- * Every `from` and `join` reference, in the order they appear.
- *
- * The alias is the statement's own name for the table: `from orders as o`, `from orders o`
- * and `from orders` all resolve, and the third reports the table name as its own alias so
- * a caller can compare `o.` and `orders.` without special-casing either.
- */
-export function tableRefs(sql: string): TableRef[] {
-  const ignored = ignoredRegions(sql);
-  const out: TableRef[] = [];
-  const keyword = /\b(from|join)\b/gi;
-  for (let match = keyword.exec(sql); match !== null; match = keyword.exec(sql)) {
-    if (enclosedBy(ignored, match.index)) continue;
-    const table = readIdentifier(sql, skipSpace(sql, match.index + match[0].length));
-    if (table === undefined) continue;
-    let alias: string | undefined;
-    const afterTable = skipSpace(sql, table.end);
-    const asWord = /^as\b/i.exec(sql.slice(afterTable));
-    if (asWord !== null) {
-      alias = readIdentifier(sql, skipSpace(sql, afterTable + asWord[0].length))?.text;
-    } else {
-      const candidate = readIdentifier(sql, afterTable);
-      if (candidate !== undefined && !CLAUSE_WORDS.has(candidate.text.toLowerCase())) alias = candidate.text;
-    }
-    out.push({ table: table.text, alias: alias ?? table.text, joined: (match[1] ?? '').toLowerCase() === 'join' });
-  }
-  return out;
-}
-
-/**
- * Whether the statement defines this name itself, as a CTE.
- *
- * The pattern is a definition, not a mention: `name as (select` is a CTE, and BIRD writes several
- * per statement (`with a as (...), b as (...)`), so anchoring on the `with` would classify only the
- * first. A column alias is not a match — `... end as time_seconds` is followed by no parenthesis —
- * which is exactly the distinction that matters to a caller reading table references: a CTE is a
- * table of the statement's own making and not a table of the database.
- */
-export function definesOwnName(sql: string, name: string): boolean {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(String.raw`(?<![\w"])"?${escaped}"?\s+as\s*\(\s*(?:select|with)\b`, 'i').test(sql);
 }
 
 /** Split a written column reference into its qualifier and its name. */

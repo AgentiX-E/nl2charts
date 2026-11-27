@@ -66,4 +66,8 @@ export { asksForRanking, stripUnfoundedCap } from './unfounded-cap.js';
 export type { UnfoundedCap } from './unfounded-cap.js';
 export { applyGrounding, groundLiterals } from './ground.js';
 export type { ColumnQuery, ColumnValues, Grounding, GroundingMatch, GroundingRefusal, GroundingRefusalReason, GroundingSubstitution } from './ground.js';
+export { createDomainReader, createGroundingReader } from './domain.js';
+export type { DomainReaderOptions, DomainRunner, ReadDomain } from './domain.js';
+export { CLAUSE_WORDS, codeOnly, definesOwnName, enclosedBy, ignoredRegions, readIdentifier, regionAt, skipSpace, tableRefs } from './sql-lex.js';
+export type { Region, RegionKind, TableRef } from './sql-lex.js';
 export type { NullOrderGuard } from './null-order.js';

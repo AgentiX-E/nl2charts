@@ -34,10 +34,13 @@
  * re-executes statements prices both gates on the same 1,532 questions — one as a rewrite that
  * may be adopted, one as a ceiling that says how much the strict gate is leaving behind.
  *
- * The domain reader lives here rather than in the instrument so that both callers read values
- * the same way: one query per column, cached, and a failed read cached as *no values*, which
- * makes the rule refuse to fire rather than guess.
+ * The domain reader is a thin wrapper here. It used to be the implementation, and the reason it
+ * moved into `packages/ai` is the same reason it was written once: both callers have to read values
+ * the same way — one query per column, cached, and a failed read making the rule refuse to fire
+ * rather than guess — and once `ask_question` shipped the rule, "both callers" stopped meaning two
+ * files in `eval/`.
  */
+import { createDomainReader as libraryDomainReader } from '@agentix-e/nl2charts-ai';
 import { literalSites, tableRefs } from './statement.js';
 
 /** One column and the values it is known to contain. */
@@ -219,32 +222,25 @@ export type StatementRunner = (sql: string) => Promise<{ readonly ok: boolean; r
 export type ReadDomain = (table: string, column: string) => Promise<readonly string[]>;
 
 /**
- * One column's stored values, queried once per run.
+ * One column's stored values, queried once per run — the library's reader, with the two differences
+ * this harness needs.
  *
- * A read that fails is cached as no values, which makes the repair refuse to fire on that
- * column. That is the safe direction: the edit's whole licence is knowing what the column
- * stores, and a column whose contents are unknown is one where a substitution would be a
- * guess. A column reaches this function because a statement the engine accepted compares
- * against it, so in practice the read succeeds — the empty list is what happens when it does
- * not, not an alternative outcome that needs its own report.
+ * The read itself moved to `packages/ai` when `ask_question` started using it: the product reads
+ * its customer's database with the same query, the same quoting and the same cache, and a second
+ * implementation of "what does this column store" is a second answer to a question the rewrite's
+ * licence rests on. What stays here is the harness's *signature* — a database name and the cache
+ * map as arguments — so the sixteen call sites in this directory did not have to change, and one
+ * policy: a read that did not finish is reported as an empty list rather than as unknown.
  *
- * The cache is keyed by database as well as by table, because two databases in one split can
- * hold a table of the same name with different contents and a reader that ignored the split
- * would answer one with the other's values.
+ * That collapse is deliberate and it costs nothing in the numbers. The library distinguishes "this
+ * column stores nothing" from "I did not look" because a product owes its caller that difference;
+ * here both mean the same thing to `domainsOf`, which skips a column with no values, and to
+ * `groundLiteralCase`, which refuses a site it has no values for. The refusal *reason* differs
+ * (`absent` against `unknown`), and the refusal is the same decision either way.
  */
 export function createDomainReader(run: StatementRunner, db: string, cache: Map<string, readonly string[]>): ReadDomain {
-  return async (table, column) => {
-    const key = `${db}\u0000${table}\u0000${column}`;
-    const hit = cache.get(key);
-    if (hit !== undefined) return hit;
-    const quotedTable = `"${table.replace(/"/g, '""')}"`;
-    const quotedColumn = `"${column.replace(/"/g, '""')}"`;
-    const result = await run(`select distinct ${quotedColumn} from ${quotedTable}`);
-    if (!result.ok) return [];
-    const values = [...new Set(result.rows.map((row) => String(row[0])))].filter((value) => value !== '');
-    cache.set(key, values);
-    return values;
-  };
+  const read = libraryDomainReader(run, { cache, namespace: db });
+  return async (table, column) => (await read(table, column)) ?? [];
 }
 
 /**

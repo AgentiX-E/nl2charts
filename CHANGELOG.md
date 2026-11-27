@@ -7,6 +7,26 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`ask_question` corrects a literal against the caller's own data, and says how often it did.** The
+  grounding rewrite — the largest free edit this repository has priced (26 fired / 17 won / 0 lost on
+  dev, +1.11pp, p < 0.0001; 11 / 10 / 0 on Mini-Dev when re-priced this round) — was reachable only
+  from the harness. The pipeline had the mechanism and the tool passed no `readColumnValues`; it now
+  passes a reader over its own runner, so `where status = 'banned'` against a column storing `Banned`
+  is rewritten before it runs. The payload gains `grounding: { substitutions, refused }` — the third
+  instance of one defect class in this repository, a result field that existed and reached no caller —
+  and `ask: { readDomains: false }` is the control. Cost is one `select distinct` per compared column
+  and no tokens; a column with more than 1,000 distinct values, or a read the runner capped, is
+  refused rather than narrowed, because the rule's licence is the whole set.
+- **One statement scanner, in `packages/ai`, for the harness and the product.** `tableRefs` and the
+  region machinery it needs moved out of `eval/bird/statement.ts` (593 → 432 lines) into
+  `packages/ai/src/sql-lex.ts`, and the domain read moved with it into `packages/ai/src/domain.ts`.
+  The product cannot import `eval/`, so the alternative was a second scanner over the same
+  statements — two implementations that agree on `t1.status` and disagree on a CTE, a quoted
+  identifier or a `from` inside a literal, with nothing in the repository comparing them. Two bugs
+  the move found in code that had already been priced twice: `String(row[0])` turned the NULL group
+  of a `select distinct` into the four-character spelling `null`, which any nullable column then
+  offered as a value it does not contain; and the harness collapsed "the column stores nothing"
+  into "I could not look", so a fact about the data was reported as a failed read.
 - **A case that answered with a hole in its pool: the candidates a run dropped, kept.** The refusal
   census read a case's `error` and nothing else, so a voting arm's refusals were invisible — one
   candidate refused, the other two vote, the case answers, and the artifact said

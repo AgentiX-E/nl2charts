@@ -378,3 +378,101 @@ describe('the sort key the tool guarded, and the engine that decided it', () => 
     expect(payload.rows).toEqual([{ word: 'goodbye' }]);
   });
 });
+
+describe('the rule the data proves, on the caller\'s own database', () => {
+  /**
+   * `groundLiterals` was priced twice on BIRD before it was shipped — 14 repairs and no losses on
+   * dev, then 7 and none through the gated form — and until this round it was reachable only from
+   * the harness. These tests are the product path: a real engine, a real schema, a scripted model
+   * that spells a stored value in the wrong case, and the row that comes back because the column
+   * was asked what it stores.
+   *
+   * The seed is the fixture, not the answer: `greetings` stores `Hello`, the model writes `'hello'`,
+   * and DuckDB compares those as different strings.
+   */
+  beforeAll(async () => {
+    await engine.run('DROP TABLE IF EXISTS greetings');
+    await engine.run('CREATE TABLE greetings (id INTEGER, word VARCHAR)');
+    await engine.run("INSERT INTO greetings VALUES (1, 'Hello'), (2, 'goodbye')");
+  });
+
+  it('repairs a literal the column spells differently, and says it did', async () => {
+    const payload = (await askQuestion(
+      { runner, ask: { provider: scripted(["SELECT id, word FROM greetings WHERE word = 'hello'"]) } },
+      { question: 'which greeting has id 1', schema },
+    )) as Record<string, unknown>;
+    // The statement that ran is the repaired one, and the rows are the proof that it ran: the
+    // model's spelling matches nothing in this table.
+    expect(payload.sql).toContain("word = 'Hello'");
+    expect(payload.rows).toEqual([{ id: 1, word: 'Hello' }]);
+    expect(payload.grounding).toEqual({ substitutions: 1, refused: 0 });
+  });
+
+  it('reports a literal the column does not contain as refused rather than repairing it', async () => {
+    const payload = (await askQuestion(
+      { runner, ask: { provider: scripted(["SELECT id FROM greetings WHERE word = 'salut'"]) } },
+      { question: 'which greeting is salut', schema },
+    )) as Record<string, unknown>;
+    expect(payload.sql).toContain("word = 'salut'");
+    expect(payload.rows).toEqual([]);
+    expect(payload.grounding).toEqual({ substitutions: 0, refused: 1 });
+  });
+
+  it('runs the statement as written when the rule is switched off, and reports nothing', async () => {
+    // The control, and the reason the switch exists: without it every reading of this tool is a
+    // reading of the rule plus the prompt, and a deployment cannot measure its own corpus.
+    const payload = (await askQuestion(
+      { runner, ask: { provider: scripted(["SELECT id, word FROM greetings WHERE word = 'hello'"]), readDomains: false } },
+      { question: 'which greeting has id 1', schema },
+    )) as Record<string, unknown>;
+    expect(payload.sql).toContain("word = 'hello'");
+    expect(payload.rows).toEqual([]);
+    expect(payload).not.toHaveProperty('grounding');
+  });
+
+  it('refuses a domain too large to be a domain, instead of narrowing it', async () => {
+    // 1,001 distinct codes, and a model that spelled one of them in the wrong case. A reader that
+    // used the first thousand would find `C7`'s spelling and repair — on the strength of a set it
+    // never finished reading. The rule's licence is the set, so an unfinished read is refused and
+    // the statement runs as written.
+    await engine.run('DROP TABLE IF EXISTS codes');
+    await engine.run('CREATE TABLE codes (id INTEGER, code VARCHAR)');
+    await engine.run("INSERT INTO codes SELECT i, 'c' || i FROM range(1, 1002) t(i)");
+    const payload = (await askQuestion(
+      { runner, ask: { provider: scripted(["SELECT id FROM codes WHERE code = 'C7'"]) } },
+      { question: 'which code is C7', schema },
+    )) as Record<string, unknown>;
+    expect(payload.sql).toContain("code = 'C7'");
+    expect(payload.rows).toEqual([]);
+    expect(payload.grounding).toEqual({ substitutions: 0, refused: 1 });
+  });
+
+  it('answers anyway when the domain read itself fails', async () => {
+    // A read is a query, and a query can fail. The rule then has nothing to compare against and
+    // says so; what it must not do is take down a question the runner could still answer.
+    const brittle = {
+      ...runner,
+      sql: (text: string, options?: { readonly limit?: number }) =>
+        text.includes('select distinct') ? Promise.reject(new Error('catalog is locked')) : runner.sql(text, options),
+    };
+    const payload = (await askQuestion(
+      { runner: brittle, ask: { provider: scripted(["SELECT id FROM greetings WHERE word = 'hello'"]) } },
+      { question: 'which greeting has id 1', schema },
+    )) as Record<string, unknown>;
+    expect(payload.sql).toContain("word = 'hello'");
+    expect(payload.rows).toEqual([]);
+    expect(payload.grounding).toEqual({ substitutions: 0, refused: 1 });
+  });
+
+  it('resolves a qualifier written as the table name rather than as an alias', async () => {
+    // `greetings.word` and `g.word` are the same column, and the reader resolves both: a product
+    // that only understood aliases would silently stop repairing every statement that qualifies by
+    // table, which is most of what a model writes when a statement reads one table.
+    const payload = (await askQuestion(
+      { runner, ask: { provider: scripted(["SELECT id FROM greetings WHERE greetings.word = 'hello'"]) } },
+      { question: 'which greeting has id 1', schema },
+    )) as Record<string, unknown>;
+    expect(payload.grounding).toEqual({ substitutions: 1, refused: 0 });
+    expect(payload.rows).toEqual([{ id: 1 }]);
+  });
+});

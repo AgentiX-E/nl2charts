@@ -607,4 +607,40 @@ The cost of a call is the same as the pipeline's: one generation, plus one repai
 refusal (default at most three), plus one execution to verify. Set `maxRepairs: 0` to
 serve a single-shot statement and keep the execution.
 
+## A literal the column spells differently is corrected before the statement runs
+
+SQL compares text case-sensitively, so `where status = 'banned'` against a column that
+stores `Banned` returns nothing — and nothing in a schema card says which case a column
+uses, so no prompt can prevent it. The tool asks the column instead:
+
+```json
+// the model wrote:  select id from orders where status = 'banned'
+// the tool ran:     select id from orders where status = 'Banned'
+{
+  "sql": "select id from orders where status = 'Banned'",
+  "rows": [{ "id": 7 }],
+  "grounding": { "substitutions": 1, "refused": 0 }
+}
+```
+
+Three properties make this safe to leave on by default:
+
+- **Only the data can authorise it.** Exactly one stored value equal to the literal
+  ignoring case is a substitution. Two — `Banned` and `BANNED` in the same column — is a
+  judgement about which rows the question meant, and the rule refuses rather than picks.
+  So does a column that cannot be read, and so does one the server capped: a partial set
+  of values cannot settle a literal, because finding one match in the first thousand
+  rows is how a substitution becomes a guess.
+- **It costs queries, not tokens.** One `select distinct` per compared column, cached for
+  the length of the question. Columns with more than 1,000 distinct values — free text,
+  identifiers — are treated as no answer rather than as a domain.
+- **It reports itself.** `grounding.substitutions` counts the literals it rewrote and
+  `grounding.refused` the sites it could not settle. A rule that fires on nothing because
+  every read failed looks exactly like a database where every spelling was already right,
+  and that is the difference the two numbers keep apart.
+
+Set `ask: { readDomains: false }` to turn it off. That is the control, not a fallback:
+with the rule on, every reading of your own corpus is a reading of the rule plus the
+prompt, and a deployment measuring its accuracy needs both.
+
 Next: [semantic layer](06-semantic-layer.md).

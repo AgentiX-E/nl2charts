@@ -21,8 +21,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createHttpProvider } from '@agentix-e/nl2charts-ai';
-import type { LlmProvider, PromptOptions, PromptTemplate, SchemaTable, SyntheticExample } from '@agentix-e/nl2charts-ai';
+import { createGroundingReader, createHttpProvider } from '@agentix-e/nl2charts-ai';
+import type { ColumnValues, LlmProvider, PromptOptions, PromptTemplate, SchemaTable, SyntheticExample } from '@agentix-e/nl2charts-ai';
 import { applySelection, attachDefinitions, buildAskMessages, buildReconcilePrompt, buildSelectionPrompt, chooseCandidateByRule, chooseCandidatePairwise, buildSqlPrompt, choosePromptProfile, createPipeline, emptyRetryMessages, formatProfile, readStatement, renderDefinitions, renderEvidence, renderSchemaCard, resultGroups, withCallCounter, assertTemplateCarries } from '@agentix-e/nl2charts-ai';
 import { capabilitiesOf, TEMPLATE_SHAPES } from '@agentix-e/nl2charts-ai';
 import type { FormatProfile, ModelCapabilities, PurposeUsage, ReplyShape, SelectionRule, ValueGap } from '@agentix-e/nl2charts-ai';
@@ -46,7 +46,6 @@ import type { CaseOutcome, MatchReason } from '@agentix-e/nl2charts-devkit';
 import { buildSchema, datasetName, describeQuestionSet, distinctQuestions, loadDescriptions, loadQuestions, loadTables, stratifiedSample } from './data.js';
 import type { BirdQuestion, QuestionSet } from './data.js';
 import { createOracle } from './oracle.js';
-import { createDomainReader } from './literal-repair.js';
 import { referencedFields, tableRefs } from './statement.js';
 import { probeValueGaps } from './value-probe.js';
 import type { ProbeColumn } from './value-probe.js';
@@ -4953,6 +4952,12 @@ export function auditFunnel(runs: readonly CaseRun[]): {
 /**
  * The domain reader the grounding arm hands the pipeline, over one question's database.
  *
+ * The implementation is the library's now — `ask_question` reads its customer's database with the
+ * same function — because the two readers were the same reader written twice, and the product is
+ * the caller that makes "the same rule" a claim about shipped behaviour rather than about two files
+ * in this directory. What stays here is the argument order the arms pass around and the reasoning
+ * that made the rule safe to ship:
+ *
  * The pipeline knows no schema, so the reader resolves the statement's own references: an alias to
  * its table, a table name to itself, and an unqualified column to every table the statement reads
  * — the same rule `domainsOf` applies when the harness grounds a literal itself, so the two cannot
@@ -4964,26 +4969,8 @@ export function auditFunnel(runs: readonly CaseRun[]): {
  * different answers — one says "I could not look", the other "nothing is stored there" — and only
  * the second is a fact about the database.
  */
-export function groundingReader(
-  run: (sql: string) => Promise<OracleResult>,
-  db: string,
-): (query: { readonly column: string; readonly qualifier?: string; readonly sql: string }) => Promise<readonly string[] | undefined> {
-  const cache = new Map<string, readonly string[]>();
-  const read = createDomainReader(run, db, cache);
-  return async (query) => {
-    const refs = tableRefs(query.sql);
-    const aliases = new Map(refs.map((ref) => [ref.alias.toLowerCase(), ref.table]));
-    const named =
-      query.qualifier === undefined
-        ? undefined
-        : (aliases.get(query.qualifier.toLowerCase()) ?? refs.find((ref) => ref.table.toLowerCase() === query.qualifier?.toLowerCase())?.table);
-    if (query.qualifier !== undefined && named === undefined) return undefined;
-    const tables = [...new Set(named === undefined ? refs.map((ref) => ref.table) : [named])];
-    if (tables.length === 0) return undefined;
-    const values: string[] = [];
-    for (const table of tables) values.push(...(await read(table, query.column)));
-    return values.length === 0 ? undefined : values;
-  };
+export function groundingReader(run: (sql: string) => Promise<OracleResult>, db: string): ColumnValues {
+  return createGroundingReader(run, { namespace: db });
 }
 
 /**

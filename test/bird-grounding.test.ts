@@ -70,13 +70,23 @@ describe('the domain reader the grounding arm hands the pipeline', () => {
     expect(db.asked).toEqual([]);
   });
 
-  it('answers "could not look" when the column read returns no values', async () => {
-    // The distinction the pipeline depends on: an empty list would be read as "this column holds
-    // nothing", which is a fact, while a failed read is not.
+  it('answers "nothing is stored" when the read succeeds and the column is empty', async () => {
+    // The distinction the pipeline depends on, and it used to be drawn in the wrong place: this
+    // reader collapsed "the column stores nothing" into "I could not look" by returning `undefined`
+    // for both. The library draws it where the fact is — a read that succeeded and found no values
+    // is `[]`, and `ground.ts` reports it as `absent`; a read that did not finish is `undefined` and
+    // is reported as `unknown`. Neither is a substitution, so the priced funnel does not move.
     const db = database({ 'items.missing': [] });
     const read = groundingReader(db.run, 'shop');
-    expect(await read({ column: 'missing', sql: 'select * from items where missing = ' })).toBeUndefined();
+    expect(await read({ column: 'missing', sql: 'select * from items where missing = ' })).toEqual([]);
     expect(db.asked).toEqual(['select distinct "missing" from "items"']);
+  });
+
+  it('answers "could not look" when the read itself failed', async () => {
+    // No key in the fixture is a statement the engine refused, which is the case `undefined` is for.
+    const db = database({});
+    const read = groundingReader(db.run, 'shop');
+    expect(await read({ column: 'missing', sql: 'select * from items where missing = ' })).toBeUndefined();
   });
 
   it('reads a column once, however many times the pipeline asks for it', async () => {

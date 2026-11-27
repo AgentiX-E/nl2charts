@@ -1,4 +1,4 @@
-import { createPipeline, resolveShipment } from '@agentix-e/nl2charts-ai';
+import { createGroundingReader, createPipeline, resolveShipment } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, SchemaColumn, SchemaTable } from '@agentix-e/nl2charts-ai';
 import type { Runner } from '@agentix-e/nl2charts-core';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
@@ -105,6 +105,21 @@ export interface AskOptions {
    * omits it behaves exactly as before.
    */
   readonly linkEvidence?: boolean;
+  /**
+   * Read the domains of the columns a statement compares against, so a literal spelled in the
+   * wrong case is corrected before the statement runs.
+   *
+   * On by default, because it is the shipped rule: on BIRD's dev split the ungated form won 14
+   * cases and lost none, and the gated form — only after an empty result — won 7, so the gate was
+   * the only thing between the rule and its own ceiling. It costs one `select distinct` per
+   * compared column and no tokens.
+   *
+   * The switch exists for the reason `linkEvidence` does: a deployment measuring its own corpus
+   * needs a control, and a tool that could only be tested with the rule on would make every reading
+   * a reading of the rule plus the prompt. Off means the statement the model wrote is the statement
+   * that runs.
+   */
+  readonly readDomains?: boolean;
 }
 
 export interface AskContext {
@@ -184,6 +199,50 @@ export function asSchema(value: unknown): readonly SchemaTable[] | ToolFailure {
   return tables;
 }
 
+/**
+ * How many distinct values a domain read may return before it is treated as no answer.
+ *
+ * The rewrite's licence is the *set* of a column's values: exactly one of them matching the literal
+ * ignoring case is a substitution, two is a judgement it declines. A read that stopped early
+ * therefore cannot be narrowed — it can only be refused — so the cap is not a performance knob but
+ * the boundary between a fact and a guess. A column with more than a thousand distinct values is
+ * not a domain a literal is spelled wrongly against; it is a free-text or identifier column, and
+ * the honest answer is "I did not look".
+ *
+ * The runner wraps the read in `limit + 1` rows and reports `truncated`, so the cost is bounded by
+ * this number rather than by the table: a hundred-million-row table answers in the time it takes to
+ * find a thousand and first distinct value.
+ */
+const DOMAIN_VALUES = 1000;
+
+/**
+ * The domain reader this tool hands the pipeline, over the caller's runner.
+ *
+ * One reader per asked question, because the cache inside it must not outlive the question: a
+ * column's values can change between two questions, and a value cached across them would be a fact
+ * about the past used to decide a statement about now.
+ *
+ * A statement the runner refuses or the engine fails to execute is `ok: false`, which the reader
+ * turns into "unknown" and the rewrite into a refusal. That is the safe direction and it is also
+ * the common one: the read names a column the model wrote, and a column that does not exist is a
+ * statement that was going to fail anyway. It also keeps one failed read from taking down a
+ * question the runner could still answer.
+ */
+function domainReaderFor(runner: Runner): ReturnType<typeof createGroundingReader> {
+  return createGroundingReader(async (sql) => {
+    try {
+      const probe = await runner.sql(sql, { limit: DOMAIN_VALUES });
+      // The read selects exactly one expression, so its rows are records with exactly one value and
+      // the value is the one asked for. Reading it by `Object.values` rather than by the engine's
+      // echo of the column name is deliberate: the name is the caller's guess at how an identifier
+      // survives a round trip through the engine, while the value is not a guess at all.
+      return { ok: true, rows: probe.rows.map((row) => Object.values(row)), truncated: probe.truncated };
+    } catch {
+      return { ok: false, rows: [] };
+    }
+  });
+}
+
 /** The payload the tool encodes as text. */
 export async function askQuestion(
   context: AskContext,
@@ -220,6 +279,9 @@ export async function askQuestion(
       ...(context.ask.topK === undefined ? {} : { topK: context.ask.topK }),
       ...(context.ask.maxRepairs === undefined ? {} : { maxRepairs: context.ask.maxRepairs }),
       ...(context.ask.linkEvidence === undefined ? {} : { linkEvidence: context.ask.linkEvidence }),
+      // The rule the data proves, on the caller's own database — see `domainReaderFor` for why the
+      // reader is built per question rather than per deployment.
+      ...(context.ask.readDomains === false ? {} : { readColumnValues: domainReaderFor(context.runner) }),
       prompt: shipped.options,
       // Part of the recipe, not of the call: the hint lives in the user message, so a pipeline
       // that turned it on would send a prompt the arm that chose this recipe never sent.
@@ -259,6 +321,12 @@ export async function askQuestion(
       // deployments needs to know which of the two edits fired on this question.
       ...(asked.nullOrderGuarded === undefined ? {} : { nullOrderGuarded: asked.nullOrderGuarded }),
       ...(asked.emptyRetry === undefined ? {} : { emptyRetry: asked.emptyRetry }),
+      // What the domain reader changed, and what it could not settle. The second number is what
+      // keeps the first honest: a rule that fires on nothing because every read failed would
+      // otherwise look exactly like a database where every spelling was already right — and until
+      // this line existed the tool reported neither, so a deployment could not tell whether the
+      // priced rule was running at all.
+      ...(asked.grounding === undefined ? {} : { grounding: asked.grounding }),
     };
   } catch (error) {
     return failure(error);
