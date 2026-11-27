@@ -23035,8 +23035,9 @@ execution, no model, no database. For every unpassed case it compares the tables
 reads with the tables the gold reads, and for every table the prediction reads and the gold does
 not, it asks how far that table sits from the gold table it displaced **in the join graph the prompt
 itself is built from** — one declared hop is a `neighbour`, one hop that only a shared column name
-implies is a `sibling`, two declared hops is still a neighbour at distance two, and anything else is
-`distant`.
+implies is a `sibling`, two declared hops is still a neighbour at distance two, and beyond that is
+`distant`. When the statement displaced **no** gold table at all — it read every gold table and one
+more — the distance has no target and the extra table is `redundant`, never `distant`.
 
 ### The reading (`44991167518`, dev 1,532, `macsql-prompt`, 522 wrong)
 
@@ -23046,15 +23047,30 @@ implies is a `sibling`, two declared hops is still a neighbour at distance two, 
 | cases that read at least one table the gold does not | **91** | 5.94pp |
 | — the extra table is one declared hop away (`neighbour`) | 32 | 2.09pp |
 | — one hop only through a shared column (`sibling`) | 21 | 1.37pp |
-| — no path within two hops (`distant`) | **38** | 2.48pp |
+| — no path within two hops (`distant`) | **0** | 0.00pp |
+| — no gold table displaced, extra table only (`redundant`) | **38** | 2.48pp |
 | displaced gold tables the card prints | 148 | — |
 | median position of a displaced gold table in the card | **3 of ~7** | — |
 
-The distribution is the finding: **41.8% of the statements that read a wrong table read one the
-schema offers no path to within two hops.** The model is not confusing `cards` with `card_games`;
-it is reading a table the gold's relation does not touch. A disambiguation hint — "the question
-names the column this table carries, not that one" — has a population of 21 cases at most, and only
-**17 cases (1.11pp)** carry a word the card says lives *only* on a table the statement did not read.
+**This table carried a bug for one publication cycle, and it is the most important line in this
+section.** The first reading reported 38 `distant` cases and concluded that "41.8% of statements
+that read a wrong table read one the schema offers no path to within two hops". Every one of those
+38 had an **empty displaced set**: the statement read all the gold's tables *plus* one more, so the
+distance was measured to an empty set and `hopsTo` returned `undefined`, which the old code filed
+as `distant`. There is no join distance to an empty set, and the conclusion drawn from it was an
+artefact. Re-measured with `redundant` as its own bucket: **zero cases read a table beyond two hops
+of a gold table they displaced.** Of the 91 cases that read an extra table, 53 displaced one (32
+neighbour, 21 sibling) and 38 displaced none.
+
+The 38 `redundant` cases are not a linking failure at all — the gold's tables were all read. They
+are a *route* difference: the statement joined through a longer path to data the gold read directly
+(e.g. joining `schools` to filter by `County` when `satscores` already carries `cname`; joining
+`transactions_1k` + `products` for `Premium` when `gasstations` carries `Segment`). That is the
+rewrite family's territory, and that family is already closed: its oracle ceiling, with the gold
+statement in hand, is 41 cases (+2.68pp), and the cases where the difference is confined to a
+condition or a window number are 70. A hint aimed at "the question names the column this table
+carries, not that one" has a population of 21 cases at most, and only **17 cases (1.11pp)** carry a
+word the card says lives *only* on a table the statement did not read.
 
 ### The lever that costs no tokens, and what it is worth
 
@@ -23070,9 +23086,9 @@ one to price.
 | first five | 107 | 119 | +18 | −6 |
 
 **The median displaced table already sits on line 3 of a seven-table card**, and the reordering
-moves it to line 3. It buys 27 promotions at top-3 and pays 13 demotions for them, and the 38
-`distant` cases — the largest bucket — are exactly the ones a reordering cannot help, because the
-table they should have read is not the one the question names.
+moves it to line 3. It buys 27 promotions at top-3 and pays 13 demotions for them. The 53 cases
+that actually displaced a gold table are the ones a reordering could in principle help, and the
+measurement says it does not; the other 38 had every gold table already on the card.
 
 So this is measured and closed before a dispatch was spent on it: **presentation order is not the
 lever.** The two mechanisms that act on the card's content have populations of 21 and 17 cases, and
@@ -23110,11 +23126,15 @@ model have already failed to take. Reading it as "the next lever is the selector
 paragraph exists to prevent; the numbers above were published two rounds before this one and the
 round that produced them closed the family.
 
-**What is left is generation.** The 38 `distant` cases — the largest bucket in the table at the top of
-this section — read a table the gold's relation does not reach within two hops, and no ordering, no
-hint and no chooser acts on that: the statement that would have answered was never written. That is a
-different instrument and a different dispatch, and pricing it is the next round's job rather than
-this one's.
+**What is left is not "the 38 distant cases".** That sentence was written here one round ago and
+it was wrong: the 38 were `redundant`, not `distant`, the gold's tables were all read, and the route
+difference belongs to a rewrite family already priced at a 41-case oracle ceiling. There is no
+"generation of a never-written table" in this reading — zero cases read a table beyond two hops of
+a displaced gold table. The honest residual is the same one `census` reports: 173 cases differ
+first in the relation, of which 81 read too few, 37 read too many, 55 both; and the rewrite's
+addressable set is 70 cases wide. None of those is a new lever this section can open. The only
+reason to dispatch again would be a mechanism that changes *which table the statement reads*, and
+no instrument in this repository has priced one below the 12.56pp gap to the leader.
 
 ### The gates
 

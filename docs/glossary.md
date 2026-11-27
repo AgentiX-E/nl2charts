@@ -144,10 +144,12 @@ declared hop is a `neighbour`, one hop that only a shared column name implies is
 declared hops is still a neighbour at distance two, and anything further is `distant`. The reading
 also records where the displaced gold table sat in the card, before and after ordering the tables by
 how many of the question's words each one can account for — the only prompt change that cannot move
-the token bill. On the canonical dev run, of 91 cases that read a table the gold does not, **32 are
-neighbours, 21 siblings and 38 distant**, the displaced table's median position is **3 of 7**, and the
-reordering is a wash (27 promoted against 13 demoted at top-3), which is why presentation order was
-closed before a dispatch was spent on it. A difference is not a defect: nothing here executes.
+the token bill. A case that displaced **no** gold table — it read every gold table and one more — is
+`redundant`, not `distant`: a distance to an empty displaced set has no target. After that correction,
+of 91 cases that read a table the gold does not, **32 are neighbours, 21 siblings, 0 distant and 38
+redundant**; the displaced table's median position is **3 of 7**, and the reordering is a wash (27
+promoted against 13 demoted at top-3), which is why presentation order was closed before a dispatch
+was spent on it. A difference is not a defect: nothing here executes.
 
 **Noise floor** — The measured spread of a corpus between two dispatches of the same arm, and the
 only honest scale for a delta. Two runs of `macsql-prompt` over the same 1,532 dev questions changed

@@ -14,12 +14,13 @@ cannot be argued with.
   join graph the prompt is built from** — one declared hop is `neighbour`, one hop that only a shared
   column name implies is `sibling`, two declared hops is a neighbour at distance two, everything else
   is `distant`. On dev `44991167518` (522 wrong of 1,532): **170** cases differ in their table set,
-  **91** read an extra table, of which **32 neighbour / 21 sibling / 38 distant**, over 148 displaced
-  gold tables whose **median position is 3 of ~7**. It also prices the one prompt change that cannot
-  move the token bill — ordering the card's tables by how many of the question's words each accounts
-  for — and finds it a **wash: 27 promoted against 13 demoted at top-3**, with the largest bucket
-  (`distant`, 41.8%) exactly the population a reordering cannot reach. **A difference is not a
-  defect**: nothing here executes.
+  **91** read an extra table, of which **32 neighbour / 21 sibling / 38 redundant** (the first
+  reading of this entry said "38 distant"; that was a bug, corrected in `### Fixed` below — a
+  superset displaced no gold table and has no distance), over 148 displaced gold tables whose
+  **median position is 3 of ~7**. It also prices the one prompt change that cannot move the token
+  bill — ordering the card's tables by how many of the question's words each accounts for — and
+  finds it a **wash: 27 promoted against 13 demoted at top-3**. **A difference is not a defect**:
+  nothing here executes.
 - **`namesTable` is exported, because a second reader measures what it decides.** The rule that a
   question token names a table (prefix, four-character floor) was private to `linking.ts`, and the
   choice instrument counts the words the card says live on a table a statement did not read. A copy of
@@ -83,6 +84,15 @@ cannot be argued with.
   `true` it carried for one round.
 
 ### Fixed
+- **`bench:bird:choice` called a superset `distant` and published a conclusion from it.** When a
+  statement read every gold table and one more, the displaced set was empty; `hopsTo` measured a
+  distance to that empty set, got `undefined`, and the old `swapOf` filed it as `distant`. The
+  previous round read those 38 cases as "41.8% read a table two hops from the gold" and built a
+  generation-side work item on them. Both were artefacts: re-measured with a `redundant` bucket,
+  **distant is 0** and the 38 cases are route differences whose gold tables were all read — rewrite
+  territory, already closed at a 41-case oracle ceiling. Added `CHOICE_REDUNDANT`, split it from the
+  three distances in `kindOf`, the partition gates, the report and the quoted sentence; a name the
+  card does not carry stays `uncarded` even in a superset.
 - **The next step this round first wrote down was the selector, and two instruments had already
   closed it.** The 2.02pp of pool headroom and the 3.98pp of selection loss are real readings, and
   they read like a plan — so the section built on them ended with "the next dispatch has to price the

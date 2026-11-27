@@ -17,9 +17,11 @@
  * 1. **Kind** — for every extra table the statement reads, the distance from that table to the
  *    gold table it displaced, in the join graph. One declared hop is `neighbour`; one hop that
  *    only exists because the two tables carry a column of the same name is `sibling`; two hops is
- *    still `neighbour` at distance 2; anything else is `distant`. The graph is the same one
+ *    still `neighbour` at distance 2; beyond that is `distant`. The graph is the same one
  *    `join-graph.ts` builds for the prompt, at the same two sources, so a table this calls a
- *    neighbour is one the card's own join hints call a neighbour.
+ *    neighbour is one the card's own join hints call a neighbour. When nothing was displaced the
+ *    distance has no target and the extra table is `redundant`, never `distant` — a superset that
+ *    took a longer route to a table the statement did read.
  * 2. **Position** — where the gold table sat in the card the statement was written against, and
  *    where it would sit if the card's tables were ordered by how many of the question's words each
  *    table can account for. A position is a property of the card, not a cause of the error:
@@ -58,15 +60,27 @@ import { goldRefs } from './reach.js';
  *
  * `neighbour` is one hop in the graph the manifest declares; `sibling` is one hop that only the
  * shared-column source adds — a join BIRD's own statements write and several of its manifests fail
- * to describe; `distant` is everything else, including a name the database does not have. The
- * order is the precedence: a table that is both is counted as the stronger relation, because the
- * manifest is evidence and a shared column is a hint.
+ * to describe; `distant` is everything beyond two hops. The order is the precedence: a table that
+ * is both is counted as the stronger relation, because the manifest is evidence and a shared column
+ * is a hint. This ordering is only over distances that had a target: a superset and an unmodelled
+ * name are counted apart, never as a distant join.
  */
 export const CHOICE_KINDS = ['neighbour', 'sibling', 'distant'] as const;
 export type ChoiceKind = (typeof CHOICE_KINDS)[number];
 
+/** Extra table with no displaced gold table: the statement read every gold table and one more. A
+ * join distance has no target then, so this is not `distant` — the statement took a redundant
+ * route, which is a rewrite question rather than a linking one. On the canonical dev run all 38
+ * cases the earlier reading called `distant` were this shape; zero displaced a gold table and sat
+ * beyond two hops.
+ */
+export const CHOICE_REDUNDANT = 'redundant';
+
 /** A swap the schema cannot place: the statement reads a name the database does not carry. */
 export const CHOICE_UNCARDED = 'uncarded';
+
+/** Every bucket a case or a swap can land in: three distances, then the two non-distances. */
+export const CHOICE_CASE_KINDS = [...CHOICE_KINDS, CHOICE_REDUNDANT, CHOICE_UNCARDED] as const;
 
 /** How far a walk may go before a table stops being a neighbour. */
 export const NEIGHBOUR_HOPS = 2;
@@ -149,20 +163,27 @@ export interface ChoiceSwap {
   readonly declared: number | undefined;
   /** The same over the shared-column graph, which is a superset of the declared one. */
   readonly shared: number | undefined;
-  readonly kind: ChoiceKind | typeof CHOICE_UNCARDED;
+  readonly kind: ChoiceKind | typeof CHOICE_REDUNDANT | typeof CHOICE_UNCARDED;
 }
 
 /**
  * The strongest relation between one extra table and the gold tables it displaced.
  *
- * A name the card does not carry is `uncarded` rather than `distant`: the statement read something
- * the schema does not have (a derived-table alias that reached the `from` clause, a table spelled
- * from the humanised labels), and calling that "far from the gold" would fold a schema-reading
- * defect into a join-distance bucket.
+ * A name on the card that displaced no gold table is `redundant`, not `distant`: a distance to an
+ * empty set reads as unreachable, but the statement read every gold table and one more, so there
+ * is no join it failed to find. A name the card does not carry is `uncarded` rather than `distant`:
+ * the statement read something the schema does not have (a derived-table alias that reached the
+ * `from` clause, a table spelled from the humanised labels), and calling that "far from the gold"
+ * would fold a schema-reading defect into a join-distance bucket.
  */
 export function swapOf(extra: string, missing: ReadonlySet<string>, schema: ChoiceSchema): ChoiceSwap {
   if (!schema.order.includes(extra)) {
     return { extra, declared: undefined, shared: undefined, kind: CHOICE_UNCARDED };
+  }
+  // No displaced table: a distance measured to an empty set would read as `distant`, claiming the
+  // statement read a table two hops from gold when in fact it read every gold table and one more.
+  if (missing.size === 0) {
+    return { extra, declared: undefined, shared: undefined, kind: CHOICE_REDUNDANT };
   }
   const declared = hopsTo(schema.declared, extra, missing);
   const shared = hopsTo(schema.shared, extra, missing);
@@ -180,8 +201,8 @@ export function swapOf(extra: string, missing: ReadonlySet<string>, schema: Choi
  * a mechanism addresses. The partition is over cases, so the counts add up; the per-swap counts are
  * reported beside it for the reader who wants the other reading.
  */
-export function kindOf(swaps: readonly ChoiceSwap[]): ChoiceKind | typeof CHOICE_UNCARDED {
-  for (const kind of CHOICE_KINDS) {
+export function kindOf(swaps: readonly ChoiceSwap[]): ChoiceKind | typeof CHOICE_REDUNDANT | typeof CHOICE_UNCARDED {
+  for (const kind of CHOICE_CASE_KINDS) {
     if (swaps.some((swap) => swap.kind === kind)) return kind;
   }
   return CHOICE_UNCARDED;
@@ -311,10 +332,10 @@ export interface ChoiceOutcome {
   /** Cases that read at least one table the gold does not: the population of a swap. */
   readonly casesWithExtra: number;
   /** One kind per such case, by precedence. Sums to `casesWithExtra`. */
-  readonly kinds: Readonly<Record<ChoiceKind | typeof CHOICE_UNCARDED, number>>;
+  readonly kinds: Readonly<Record<ChoiceKind | typeof CHOICE_REDUNDANT | typeof CHOICE_UNCARDED, number>>;
   /** Extra-table records, a case counted once per table it reads and the gold does not. */
   readonly swaps: number;
-  readonly swapKinds: Readonly<Record<ChoiceKind | typeof CHOICE_UNCARDED, number>>;
+  readonly swapKinds: Readonly<Record<ChoiceKind | typeof CHOICE_REDUNDANT | typeof CHOICE_UNCARDED, number>>;
   /** Cases carrying a word the card says lives on a table the statement did not read. */
   readonly namedCases: number;
   readonly namedTokens: number;
@@ -334,10 +355,11 @@ export interface ChoiceOutcome {
   readonly problems: readonly string[];
 }
 
-const emptyKinds = (): Record<ChoiceKind | typeof CHOICE_UNCARDED, number> => ({
+const emptyKinds = (): Record<ChoiceKind | typeof CHOICE_REDUNDANT | typeof CHOICE_UNCARDED, number> => ({
   neighbour: 0,
   sibling: 0,
   distant: 0,
+  redundant: 0,
   uncarded: 0,
 });
 
@@ -492,11 +514,17 @@ export function tallyChoice(input: ChoiceInput, schemas: ReadonlyMap<string, Cho
  */
 export function choiceProblems(outcome: ChoiceOutcome): readonly string[] {
   const problems: string[] = [];
-  const kindSum = CHOICE_KINDS.reduce((total, kind) => total + outcome.kinds[kind], outcome.kinds[CHOICE_UNCARDED]);
+  const kindSum = CHOICE_KINDS.reduce(
+    (total, kind) => total + outcome.kinds[kind],
+    outcome.kinds[CHOICE_REDUNDANT] + outcome.kinds[CHOICE_UNCARDED],
+  );
   if (kindSum !== outcome.casesWithExtra) {
     problems.push(`case kinds sum to ${String(kindSum)} but ${String(outcome.casesWithExtra)} case(s) read an extra table`);
   }
-  const swapSum = CHOICE_KINDS.reduce((total, kind) => total + outcome.swapKinds[kind], outcome.swapKinds[CHOICE_UNCARDED]);
+  const swapSum = CHOICE_KINDS.reduce(
+    (total, kind) => total + outcome.swapKinds[kind],
+    outcome.swapKinds[CHOICE_REDUNDANT] + outcome.swapKinds[CHOICE_UNCARDED],
+  );
   if (swapSum !== outcome.swaps) {
     problems.push(`swap kinds sum to ${String(swapSum)} but the reading counted ${String(outcome.swaps)} extra table(s)`);
   }
@@ -568,11 +596,17 @@ const percent = (count: number, base: number): string => `${((count / base) * 10
 export function choiceLines(outcome: ChoiceOutcome): readonly string[] {
   const lines: string[] = [];
   const base = outcome.casesWithExtra === 0 ? 1 : outcome.casesWithExtra;
-  lines.push(`  the table the statement read instead, one case per row (${CHOICE_KINDS.join(' > ')}):`);
+  lines.push(`  the table the statement read instead, one case per row (${CHOICE_CASE_KINDS.join(' > ')}):`);
   for (const kind of CHOICE_KINDS) {
     lines.push(
       `    ${kind.padEnd(9)} ${String(outcome.kinds[kind]).padStart(4)}  ${percent(outcome.kinds[kind], base).padStart(6)} of ` +
         `${String(outcome.casesWithExtra)}  ${String(outcome.swapKinds[kind]).padStart(4)} extra table(s)`,
+    );
+  }
+  if (outcome.kinds[CHOICE_REDUNDANT] > 0) {
+    lines.push(
+      `    ${CHOICE_REDUNDANT.padEnd(9)} ${String(outcome.kinds[CHOICE_REDUNDANT]).padStart(4)}  ${percent(outcome.kinds[CHOICE_REDUNDANT], base).padStart(6)} of ` +
+        `${String(outcome.casesWithExtra)}  no gold table displaced — not a distance`,
     );
   }
   if (outcome.kinds[CHOICE_UNCARDED] > 0) {
@@ -600,10 +634,17 @@ export function choiceLines(outcome: ChoiceOutcome): readonly string[] {
 /** One sentence a document can quote without re-deriving what a kind means. */
 export function choiceSentence(outcome: ChoiceOutcome): string {
   if (outcome.casesWithExtra === 0) return 'no statement read a table the gold does not, so there is no choice to read';
-  const top = CHOICE_KINDS.reduce((best, kind) => (outcome.kinds[kind] > outcome.kinds[best] ? kind : best), CHOICE_KINDS[0]);
+  const top = CHOICE_CASE_KINDS.reduce(
+    (best, kind) => (outcome.kinds[kind] > outcome.kinds[best] ? kind : best),
+    CHOICE_CASE_KINDS[0],
+  );
+  const relation =
+    top === CHOICE_REDUNDANT || top === CHOICE_UNCARDED
+      ? `held the gold's tables and one more that displaced none (\`${top}\`)`
+      : `read a table \`${top}\` to the one they displaced`;
   return (
     `${String(outcome.casesWithExtra)} statement(s) read a table the gold does not: ` +
-    `${String(outcome.kinds[top])} (${percent(outcome.kinds[top], outcome.casesWithExtra)}) read a table \`${top}\` to the one they displaced; ` +
+    `${String(outcome.kinds[top])} (${percent(outcome.kinds[top], outcome.casesWithExtra)}) ${relation}; ` +
     `a difference is not a defect — nothing here was executed`
   );
 }

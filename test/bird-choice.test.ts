@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CHOICE_KINDS,
+  CHOICE_REDUNDANT,
   CHOICE_UNCARDED,
   CHOICE_WINDOWS,
   DEFAULT_CHOICE_ARM,
@@ -169,10 +170,21 @@ describe('the kind of a swap', () => {
     expect(swapOf('audit_log', new Set(['items']), SCHEMA)).toMatchObject({ kind: 'distant', declared: undefined });
   });
 
+  it('calls an extra table with no displaced gold table redundant, never distant', () => {
+    // With an empty missing set the statement read every gold table and one more. There is no
+    // table it "should have read instead", so a join distance has no target and must not be
+    // reported — the 38 cases this mislabelled on dev were all of this shape.
+    expect(swapOf('orders', new Set(), SCHEMA)).toMatchObject({
+      extra: 'orders', declared: undefined, shared: undefined, kind: CHOICE_REDUNDANT,
+    });
+  });
+
   it('refuses to call a name the card does not carry distant', () => {
     // A derived-table alias that reached the `from` clause is a schema-reading defect, and folding
-    // it into "far from the gold" would report it as a join choice.
+    // it into "far from the gold" would report it as a join choice. The same holds when nothing
+    // was displaced: an unmodelled name stays uncarded even in a superset.
     expect(swapOf('d1', new Set(['items']), SCHEMA)).toMatchObject({ kind: CHOICE_UNCARDED, declared: undefined });
+    expect(swapOf('d1', new Set(), SCHEMA)).toMatchObject({ kind: CHOICE_UNCARDED, declared: undefined });
   });
 });
 
@@ -182,6 +194,7 @@ describe('the one kind a case is counted under', () => {
     const distant = swapOf('audit_log', new Set(['items']), SCHEMA);
     expect(kindOf([distant, neighbour])).toBe('neighbour');
     expect(kindOf([distant])).toBe('distant');
+    expect(kindOf([swapOf('orders', new Set(), SCHEMA)])).toBe(CHOICE_REDUNDANT);
     expect(kindOf([])).toBe(CHOICE_UNCARDED);
   });
 });
@@ -263,8 +276,23 @@ describe('a population counted by hand', () => {
     expect(outcome.compared).toBe(5);
     expect(outcome.sameTables).toBe(2);
     expect(outcome.casesWithExtra).toBe(3);
-    expect(outcome.kinds).toEqual({ neighbour: 1, sibling: 1, distant: 1, uncarded: 0 });
+    expect(outcome.kinds).toEqual({ neighbour: 1, sibling: 1, distant: 1, redundant: 0, uncarded: 0 });
     expect(outcome.swaps).toBe(3);
+    expect(outcome.problems).toEqual([]);
+  });
+
+  it('counts a superset as redundant rather than as a table read far from the gold', () => {
+    // The prediction reads both tables the gold reads and one more; direction is `extra`, the
+    // displaced set is empty, and no join distance exists to report. This is the shape of all 38
+    // cases the previous reading mislabelled `distant`.
+    const outcome = tally(
+      cases({ id: '1', db: 'shop', question: 'how many', sql: 'select count(*) from items join orders on items.id = orders.item_id', gold: from('items') }),
+    );
+    expect(outcome.direction).toMatchObject({ extra: 1 });
+    expect(outcome.casesWithExtra).toBe(1);
+    expect(outcome.kinds).toEqual({ neighbour: 0, sibling: 0, distant: 0, redundant: 1, uncarded: 0 });
+    expect(outcome.swapKinds.redundant).toBe(1);
+    expect(outcome.displaced).toBe(0);
     expect(outcome.problems).toEqual([]);
   });
 
@@ -363,6 +391,14 @@ describe('the gates', () => {
     expect(choiceProblems(broken).join(' ')).toContain('case kinds sum to');
   });
 
+  it('refuses a redundant count left out of the case-kind sum', () => {
+    const outcome = tally(
+      cases({ id: '1', db: 'shop', question: 'q', sql: 'select count(*) from items join orders on items.id = orders.item_id', gold: from('items') }),
+    );
+    const broken = { ...outcome, kinds: { ...outcome.kinds, redundant: 0 } };
+    expect(choiceProblems(broken).some((problem) => problem.includes('case kinds sum'))).toBe(true);
+  });
+
   it('refuses swap kinds that do not sum to the extra tables counted', () => {
     const outcome = base();
     const broken = { ...outcome, swaps: outcome.swaps + 1 };
@@ -458,12 +494,29 @@ describe('the report', () => {
     expect(choiceLines(outcome).join('\n')).toContain(CHOICE_UNCARDED);
   });
 
+  it('prints the redundant line, because a superset is not a join distance', () => {
+    const outcome = tally(
+      cases({ id: '1', db: 'shop', question: 'q', sql: 'select count(*) from items join orders on items.id = orders.item_id', gold: from('items') }),
+    );
+    const report = choiceLines(outcome).join('\n');
+    expect(report).toContain('redundant');
+    expect(report).toContain('no gold table displaced');
+  });
+
   it('quotes one sentence, and says when there was nothing to read', () => {
     const outcome = tally(cases({ id: '1', db: 'shop', question: 'q', sql: from('items'), gold: from('items') }));
     expect(choiceSentence(outcome)).toBe('no statement read a table the gold does not, so there is no choice to read');
     const read = tally(cases({ id: '1', db: 'shop', question: 'q', sql: from('orders'), gold: from('items') }));
     expect(choiceSentence(read)).toContain('read a table the gold does not');
     expect(choiceSentence(read)).toContain('a difference is not a defect');
+  });
+
+  it('does not call a superset a table read at a distance', () => {
+    const outcome = tally(
+      cases({ id: '1', db: 'shop', question: 'q', sql: 'select count(*) from items join orders on items.id = orders.item_id', gold: from('items') }),
+    );
+    expect(choiceSentence(outcome)).toContain('redundant');
+    expect(choiceSentence(outcome)).not.toContain('`distant`');
   });
 
   it('breaks a tie between kinds by the order they are declared in', () => {
