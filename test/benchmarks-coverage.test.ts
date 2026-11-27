@@ -4,14 +4,17 @@ import {
   BENCHMARKS,
   NOISE_FLOORS,
   REQUIRED,
+  RIVAL_AVAILABILITY,
   noiseLines,
   noiseProblems,
+  rivalProblems,
   checkCoverage,
   describeCoverage,
   entryCoverage,
   main,
   resolveReading,
   type Benchmark,
+  type Rival,
   type Reader,
 } from '../eval/benchmarks.js';
 import type { NoiseFloor } from '../eval/benchmarks.js';
@@ -323,6 +326,107 @@ describe('the defaults the workflow relies on', () => {
     const code = await entryCoverage(fileURLToPath(moduleUrl), moduleUrl, (line) => lines.push(line), []);
     expect(code).toBe(0);
     expect(lines.at(-1)).toContain('8 of 9 leaderboards carry a number');
+  });
+});
+
+describe('the rival column', () => {
+  const TODAY = '2026-11-27';
+  const example = (patch: Partial<Rival> = {}): Rival => ({
+    system: 'Example-SQL',
+    score: 70,
+    metric: 'dev EM',
+    split: 'dev',
+    conditions: 'no hints, GPT-4, no training',
+    model: 'GPT-4',
+    availability: 'paper-only',
+    evidence: 'https://example.invalid/paper',
+    checkedAt: '2026-11-20',
+    note: 'A checked reference point.',
+    ...patch,
+  });
+  // One row per required leaderboard so the REQUIRED check is satisfied and only the rival under
+  // test can fail. `patch` is applied to a single row, identified by id.
+  const manifest = (id: string, patch: Partial<Rival>): Benchmark[] =>
+    REQUIRED.map((name) => row({ id: name, rival: example(name === id ? patch : {}) }));
+  const only = (issues: readonly string[]): string => issues.join('\n');
+
+  it('accepts a manifest where every required row names a rival', () => {
+    expect(rivalProblems(manifest('spider-dev', {}), TODAY)).toEqual([]);
+  });
+
+  it('accepts the manifest as it ships, Spider included', () => {
+    expect(rivalProblems(BENCHMARKS, TODAY)).toEqual([]);
+  });
+
+  it('refuses a required row whose comparison is still prose', () => {
+    const rows = REQUIRED.map((name) => row({ id: name, rival: name === 'spider-dev' ? undefined : example() }));
+    expect(only(rivalProblems(rows, TODAY))).toContain('spider-dev: no rival');
+  });
+
+  it('ignores rows outside REQUIRED and duplicate ids, leaving both to the coverage check', () => {
+    // rivalProblems prices only the rows the plan commits to. A non-required row has no promised
+    // comparison, and a duplicate id is a coverage error already reported there — double-counting
+    // either here would make one defect read as two.
+    const rows = [...manifest('spider-dev', {}), row({ id: 'experimental', rival: undefined })];
+    expect(rivalProblems(rows, TODAY)).toEqual([]);
+    const withDuplicate = [...manifest('spider-dev', {}), row({ id: 'spider-dev', rival: example({ score: 66.5 }) })];
+    expect(rivalProblems(withDuplicate, TODAY)).toEqual([]);
+  });
+
+  it('refuses an unrecognised availability', () => {
+    expect(only(rivalProblems(manifest('spider-dev', { availability: 'vibes' as never }), TODAY)))
+      .toContain('availability');
+  });
+
+  it('requires a null score when there is no published rival, and a number otherwise', () => {
+    expect(only(rivalProblems(manifest('text2vis', { availability: 'none', score: 0 }), TODAY)))
+      .toContain('score must be null');
+    expect(only(rivalProblems(manifest('spider-dev', { availability: 'released', score: null }), TODAY)))
+      .toContain('score must be a number');
+  });
+
+  it('accepts a no-rival row with a null score and a reason', () => {
+    expect(rivalProblems(manifest('text2vis', {
+      availability: 'none', score: null, note: 'No external system publishes an accuracy on these rows.',
+    }), TODAY)).toEqual([]);
+  });
+
+  it('refuses a score outside a percentage and a non-finite one', () => {
+    expect(only(rivalProblems(manifest('spider-dev', { score: 140 }), TODAY))).toContain('not a percentage');
+    expect(only(rivalProblems(manifest('spider-dev', { score: Number.NaN }), TODAY))).toContain('not a percentage');
+  });
+
+  it('refuses a rival that names no system, split, metric, conditions or model', () => {
+    expect(only(rivalProblems(manifest('spider-dev', { system: '' }), TODAY))).toContain('no system');
+    expect(only(rivalProblems(manifest('spider-dev', { split: '' }), TODAY))).toContain('no split');
+    expect(only(rivalProblems(manifest('spider-dev', { metric: '' }), TODAY))).toContain('no metric');
+    expect(only(rivalProblems(manifest('spider-dev', { conditions: '' }), TODAY))).toContain('no conditions');
+    expect(only(rivalProblems(manifest('spider-dev', { model: '' }), TODAY))).toContain('no model');
+  });
+
+  it('refuses a rival with no note, a non-URL evidence, or an unread date', () => {
+    expect(only(rivalProblems(manifest('spider-dev', { note: '' }), TODAY))).toContain('no note');
+    expect(only(rivalProblems(manifest('spider-dev', { evidence: 'not a url' }), TODAY))).toContain('evidence');
+    expect(only(rivalProblems(manifest('spider-dev', { checkedAt: 'yesterday' }), TODAY))).toContain('checkedAt');
+    expect(only(rivalProblems(manifest('spider-dev', { checkedAt: '2026-12-01' }), TODAY))).toContain('after');
+  });
+
+  it('refuses a Spider dev entry that quotes the DAIL-SQL test EM', () => {
+    // D58: the 66.5 in the paper's table is TEST EM. dev EM is 70.0. Writing 66.5 under a dev
+    // heading is the same error the leader's 77.14 once was, so the column refuses it.
+    const rows = manifest('spider-dev', { score: 66.5, metric: 'dev EM', split: 'dev' });
+    expect(only(rivalProblems(rows, TODAY))).toContain('test-only');
+  });
+
+  it('accepts the corrected DAIL-SQL dev EM and the Graphix dev EM on Spider', () => {
+    expect(rivalProblems(manifest('spider-dev', { score: 70, system: 'DAIL-SQL + GPT-4', metric: 'dev EM' }), TODAY)).toEqual([]);
+    expect(rivalProblems(manifest('spider-dev', { score: 77.1, system: 'Graphix-T5-3B + PICARD', metric: 'dev EM' }), TODAY)).toEqual([]);
+  });
+
+  it('exports the availability vocabulary', () => {
+    expect(RIVAL_AVAILABILITY).toContain('none');
+    expect(RIVAL_AVAILABILITY).toContain('released');
+    expect(RIVAL_AVAILABILITY).toContain('paper-only');
   });
 });
 

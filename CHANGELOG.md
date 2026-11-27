@@ -7,6 +7,15 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A structured rival on every leaderboard row, closing the last prose comparison column.** The
+  nine-row coverage table in `eval/benchmarks.ts` now carries a `rival` per row with the four facts
+  rule D58 requires — split, conditions, the authors' model, and availability — plus a checked date
+  and a source URL. `rivalProblems` refuses a required row whose comparison is still a sentence, a
+  score outside a percentage, a `none` row carrying a number, and a Spider dev rival filed with a
+  test-only EM. `pnpm bench:coverage` prints `9 of 9 carry a structured rival`, so the plan item
+  that had been re-listed for six rounds (the "last prose column") now has a machine that checks it.
+  `test/benchmarks-coverage.test.ts` grows from 42 to 56 cases; `eval/benchmarks.ts` is
+  100/100/100/99.31 on four dimensions.
 - **`bench:bird:choice`: the table a wrong statement read instead, for ¥0.** `reach` closed the
   retrieval hypothesis with a rendering; this instrument reads the decision from the statements. For
   every unpassed case it compares the base tables of the prediction and the gold, and for every table
@@ -84,6 +93,13 @@ cannot be argued with.
   `true` it carried for one round.
 
 ### Fixed
+- **Spider's rival quoted DAIL-SQL's test EM as a dev EM.** `docs/benchmarks.md` listed
+  "DAIL-SQL + GPT-4 66.5" in the dev-EM band; the authors' own results table is Dev EM 70.0 /
+  Dev EX 83.1 / Test EM 66.5 / Test EX 86.2, so the number was real and the split was wrong — the
+  same error rule D58 records for the 77.14% leader. Corrected to the verified dev EM (Graphix-T5-3B
+  + PICARD 77.1 from two agreeing snapshots; DAIL-SQL dev EM 70.0), and `rivalProblems` now refuses
+  a Spider dev rival carrying 66.5 / 86.2 / 86.6 so it cannot return. The two unsplit older figures
+  in that sentence are no longer asserted as dev EM.
 - **`bench:bird:choice` called a superset `distant` and published a conclusion from it.** When a
   statement read every gold table and one more, the displaced set was empty; `hopsTo` measured a
   distance to that empty set, got `undefined`, and the old `swapOf` filed it as `distant`. The

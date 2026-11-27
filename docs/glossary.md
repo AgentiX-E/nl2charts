@@ -920,6 +920,15 @@ by dialect; `SHIPPED_SQL` is the one the project scored highest per unit of cost
 assembles by hand is a combination nobody measured, which is why the fields exist as an object rather
 than as arguments at each call site.
 
+**Rival (of a leaderboard)** — The competitor a coverage row is measured against, stored as data in
+`eval/benchmarks.ts` rather than quoted in a sentence. Rule D58 says a published accuracy is only a
+claim once four facts are written down: the split it was read on, the conditions that produced it
+(hints, calls, training), the model its authors used, and whether the system can be run. A row with
+no published comparison records `availability: none` and a null score — a finding about the field,
+not an empty cell. `rivalProblems` refuses a row whose rival is still prose, a percentage out of
+range, or a number filed under the wrong split (the DAIL-SQL test EM 66.5 was once printed as a dev
+EM), so a gap can only be quoted with its coordinates attached.
+
 **Shipment gate** — The rule that promotes a recipe, in `packages/ai/src/shipment.ts`. It reads an
 experiment as counts and a price, re-derives the effect and the price ratio, and applies three
 declared numbers (`alpha`, `minDeltaPp`, `tokenTariff`). Its verdict is not advice: CI requires the

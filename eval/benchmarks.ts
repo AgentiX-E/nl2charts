@@ -52,6 +52,47 @@ export interface Reading {
   readonly note: string;
 }
 
+/**
+ * What a reader can do with the system that holds a leaderboard's number.
+ *
+ * Mirrors `INTAKE_STATUS` in `eval/competitors/intake.ts` on purpose: a rival row that says
+ * `released` promises a checkout, and `none` means the corpus has no published comparison at all —
+ * which is a finding about the field, not an absent cell in a table. Reusing four of the five words
+ * keeps the coverage column and the intake table from disagreeing about the same system.
+ */
+export const RIVAL_AVAILABILITY = ['released', 'partial', 'paper-only', 'unreproducible', 'none'] as const;
+export type RivalAvailability = (typeof RIVAL_AVAILABILITY)[number];
+
+/**
+ * The competitor a leaderboard is measured against, as data rather than as a sentence.
+ *
+ * This exists because the comparison column was prose for nine rows and nobody could tell which
+ * rows had one. A published accuracy is only a claim once its four coordinates are written down:
+ * the split it was read on, the conditions that produced it (hints, calls, training), the model the
+ * authors used, and what a reader can do with the system. That is rule D58, and these fields are
+ * where it is enforced rather than quoted. `score` is null only for `none`; a row that claims no
+ * rival but carries a number is the shape that turned DAIL-SQL's test EM into a dev one.
+ */
+export interface Rival {
+  readonly system: string;
+  /** The number, in the metric's own unit. Null only when `availability === 'none'`. */
+  readonly score: number | null;
+  readonly metric: string;
+  /** The split and its size: `dev (1,034)`, `test (2,147)`, `Mini-Dev (498)`. */
+  readonly split: string;
+  /** Conditions that change the number: hints, self-consistency, call count, training. */
+  readonly conditions: string;
+  /** The authors' model, and whether it was trained for this benchmark. */
+  readonly model: string;
+  readonly availability: RivalAvailability;
+  /** The URL a reader opens to check the number. */
+  readonly evidence: string;
+  /** When the evidence was last read, `YYYY-MM-DD`. */
+  readonly checkedAt: string;
+  /** Why this number is the one quoted, or why no rival exists. */
+  readonly note: string;
+}
+
 export interface Benchmark {
   readonly id: string;
   readonly domain: Domain;
@@ -63,6 +104,8 @@ export interface Benchmark {
   readonly reading?: Reading;
   /** Present iff the reading covers fewer questions than the leaderboard's denominator. */
   readonly narrowed?: Narrowed;
+  /** The leaderboard's comparison, as data. Every REQUIRED row carries one. */
+  readonly rival?: Rival;
   /** Why there is no number, and what would produce one. Required unless `measured`/`partial`. */
   readonly gap: string;
 }
@@ -100,6 +143,19 @@ export const BENCHMARKS: readonly Benchmark[] = [
         + 'count (7,183), so the leaderboard\'s ordered comparison costs nothing here; 14 statements '
         + 'did not execute and stay in the denominator',
     },
+    rival: {
+      system: 'SeaD + execution-guided decoding',
+      score: 93,
+      metric: 'test EX',
+      split: 'test (8,421)',
+      conditions: 'fine-tuned, execution-guided decoding',
+      model: 'fine-tuned BERT encoder',
+      availability: 'paper-only',
+      evidence: 'https://github.com/salesforce/WikiSQL',
+      checkedAt: '2026-11-27',
+      note: 'Published test EX. Fine-tuned on train, so it is a capability ceiling this training-free '
+        + 'row is not compared against on equal terms; the honest comparator is the zero-shot band.',
+    },
     gap:
       'The number is dev, a chat-tier model and no training. Every published WikiSQL figure above 90% '
       + 'is a fine-tuned system on test (SeaD+EG 93.0), so this row is comparable to a zero-shot '
@@ -131,6 +187,22 @@ export const BENCHMARKS: readonly Benchmark[] = [
         + '4 `INNER JOIN`, 3 `CAST`, and 6 that no repair can reach — and the 22 of them that were '
         + 'right are why this number is cited rather than the prompt one. Refusals stay in the '
         + 'denominator at both readings, because Spider scores them zero',
+    },
+    rival: {
+      system: 'Graphix-T5-3B + PICARD',
+      score: 77.1,
+      metric: 'dev EM',
+      split: 'dev (1,034)',
+      conditions: 'fine-tuned T5-3B, PICARD constrained decoding, database content used',
+      model: 'fine-tuned T5-3B (no LLM)',
+      availability: 'released',
+      evidence: 'https://www.sota2.com/research/sota/text-to-sql-on-spider-1-0-dev',
+      checkedAt: '2026-11-27',
+      note: 'The top of the published dev-EM band and the number this row is measured against. '
+        + 'A reading from 2026-11-27 found two independent leaderboards agreeing on 77.1 dev EM for '
+        + 'Graphix-3B+PICARD. The same audit corrected a transcription in docs/benchmarks.md that had '
+        + 'filed DAIL-SQL + GPT-4 at 66.5 under dev EM: the authors publish Dev EM 70.0 / Test EM 66.5 '
+        + '/ Dev EX 83.1 / Test EX 86.2, so 66.5 was a TEST number written in a dev column.',
     },
     gap:
       'The corpus is the databases, not the question file — `process_sql.get_sql` resolves every '
@@ -167,6 +239,19 @@ export const BENCHMARKS: readonly Benchmark[] = [
         + 'It exists now (64.31% on 496 questions, run 45846766964, dispatched with one arm and no '
         + 'control), so the number a reader quotes is the one the product would have produced',
     },
+    rival: {
+      system: 'AskData',
+      score: 78.49,
+      metric: 'dev EX',
+      split: 'dev (1,534)',
+      conditions: 'training-free, 8+ calls, GPT-4o, database profile and value retrieval',
+      model: 'GPT-4o',
+      availability: 'paper-only',
+      evidence: 'https://bird-bench.github.io/',
+      checkedAt: '2026-11-27',
+      note: 'The same published corpus, but the number is on dev(1,534), not this 498-question '
+        + 'Mini-Dev split; the field top is cited for direction, not for a paired delta against 64.3.',
+    },
     gap: '',
   },
   {
@@ -192,6 +277,20 @@ export const BENCHMARKS: readonly Benchmark[] = [
         + 'disagreed about which arm this project sends, and nothing failed. `bird.json`\'s '
         + '`shippedBySplit` is that question as a field now, tied by tests to `SHIPPED_SQL`, to the '
         + 'ledger and to the reading here',
+    },
+    rival: {
+      system: 'AskData',
+      score: 78.49,
+      metric: 'dev EX',
+      split: 'dev (1,534)',
+      conditions: 'training-free, 8+ calls, GPT-4o, database profile and value retrieval',
+      model: 'GPT-4o',
+      availability: 'paper-only',
+      evidence: 'https://bird-bench.github.io/',
+      checkedAt: '2026-11-27',
+      note: 'The field top on the split the leaderboard reports: training-free, so this row and the '
+        + 'top differ by procedure and model, not by a training budget. 12.56pp behind. A separate '
+        + 'runnable competitor (MAC-SQL) is 3.92pp behind on a paired 498-question reading.',
     },
     gap: '',
   },
@@ -222,6 +321,21 @@ export const BENCHMARKS: readonly Benchmark[] = [
         + 'row on the leaderboard too, which is why the gap there is 2.92pp and here 6.12pp — a '
         + 'statement-speed difference, not a scoring one. §R-VES in docs/benchmarks.md.',
     },
+    rival: {
+      system: 'none published on this denominator',
+      score: null,
+      metric: 'R-VES',
+      split: 'dev (1,532)',
+      conditions: 'reward-weighted: penalises statement latency, so a rival EX number is not comparable',
+      model: 'n/a',
+      availability: 'none',
+      evidence: 'https://bird-bench.github.io/',
+      checkedAt: '2026-11-27',
+      note: 'R-VES folds the reward table\'s step at tau=1 and statement speed into the score, so no '
+        + 'rival EX on the leaderboard maps to it on one denominator: the 62.21 floor is every '
+        + 'prediction replaced by its own gold, and even a perfect EX of 100 cannot reach 100 here. '
+        + 'Recorded as no-rival rather than quoting an EX number under an R-VES heading.',
+    },
     gap: '',
   },
   {
@@ -239,6 +353,20 @@ export const BENCHMARKS: readonly Benchmark[] = [
       unit: 'count',
       note: 'the shipped rule table; the model arms and the arbitration are recorded beside it',
     },
+    rival: {
+      system: 'none published on these rows',
+      score: null,
+      metric: 'top-1',
+      split: '1,470 scored rows',
+      conditions: 'no external system publishes an accuracy on this corpus',
+      model: 'n/a',
+      availability: 'none',
+      evidence: 'https://github.com/mizanurr/Text2Vis',
+      checkedAt: '2026-11-27',
+      note: 'The corpus publishes no external top-1 accuracy on its 1,470 scored rows; the paper '
+        + 'reports its actor-critic framework on a different split. A finding about the field, not '
+        + 'an empty cell — recorded as no-rival rather than quoting an incomparable number.',
+    },
     gap: '',
   },
   {
@@ -255,6 +383,20 @@ export const BENCHMARKS: readonly Benchmark[] = [
       kind: 'census',
       unit: 'count',
       note: 'a count of figures, floored as (rendered >= this, failed == 0)',
+    },
+    rival: {
+      system: 'none published on these rows',
+      score: null,
+      metric: 'render validity',
+      split: '1,470 scored rows',
+      conditions: 'no external system publishes a render-validity figure on this corpus',
+      model: 'n/a',
+      availability: 'none',
+      evidence: 'https://github.com/mizanurr/Text2Vis',
+      checkedAt: '2026-11-27',
+      note: 'This is a census of figures that reach a PNG (1,418 rendered, 0 failed), not a '
+        + 'leaderboard metric; no rival publishes it. Recorded as no-rival with a count unit so '
+        + '1,418 is never read as 1,418 percent.',
     },
     gap: '',
   },
@@ -283,6 +425,20 @@ export const BENCHMARKS: readonly Benchmark[] = [
         + 'chat arm is 3.84 points above the one the same-rules comparison held fixed, so the tier\'s '
         + 'advantage narrows to 2.71 and its pessimistic end falls under the resolution — which is why '
         + 'the default stays on the chat tier',
+    },
+    rival: {
+      system: 'nvBench 2.0 prompting baseline',
+      score: 58.96,
+      metric: 'F1@3',
+      split: 'dev (750)',
+      conditions: 'the corpus\'s own prompting baseline, before the shipped rule bundle',
+      model: 'not stated by the corpus (prompting, no training)',
+      availability: 'released',
+      evidence: 'https://nvbench2.github.io/',
+      checkedAt: '2026-11-27',
+      note: 'arXiv:2503.12880. The comparable reference: a prompted baseline on the same dev split, above the shipped '
+        + '32.23. The trained leader Step-NL2VIS (81.50 F1@3 with SFT) is a different claim — this '
+        + 'product does not train — so it is cited in the gap, not filed as the rival.',
     },
     gap:
       'Measured, and the number is a prompt arm rather than a trained system. `eval/nvbench2/'
@@ -321,6 +477,20 @@ export const BENCHMARKS: readonly Benchmark[] = [
     corpus: '2,672 samples: GitHub-T2V 843, arXiv-T2V 805, OWID-T2V 1,024',
     metrics: ['execution', 'chart content', 'displayed data similarity', 'accessibility'],
     status: 'absent',
+    rival: {
+      system: 'VisCodeBench leaderboard best',
+      score: 0.81,
+      metric: 'displayed-data similarity (0–1)',
+      split: '2,672 samples (843 / 805 / 1,024)',
+      conditions: 'leaderboard-best submission; 0.69 on the hardest subset, 39–78s per request',
+      model: 'not disclosed by the leaderboard',
+      availability: 'unreproducible',
+      evidence: 'https://github.com/SAIPLL/VisCodeBench',
+      checkedAt: '2026-11-27',
+      note: 'arXiv:2611.02353. A 0–1 similarity, not a percentage: bounded at 1, so it is stored as 0.81 and read with '
+        + 'the metric unit attached. The score engine is public but the references are private and '
+        + 'this row is still absent, so the number is cited, never paired against a product reading.',
+    },
     gap:
       'Not a fetch problem, which is what this row said for two rounds and was wrong about: the sample '
       + 'inputs are downloadable from the leaderboard (Codabench competition 16125) and the scoring '
@@ -518,6 +688,64 @@ export function resolveReading(reading: Reading, read: Reader): number | undefin
   return typeof cursor === 'number' && Number.isFinite(cursor) ? cursor : undefined;
 }
 
+const RIVAL_URL = /^https?:\/\/\S+$/;
+const RIVAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** Today in UTC, the calendar a claim is dated on. Extracted so the gate reads one clock. */
+function TODAY_UTC(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+/**
+ * Numbers that are known to be on a *different* split from the one a Spider dev row would quote.
+ *
+ * DAIL-SQL's paper prints four columns — Dev EM 70.0, Dev EX 83.1, Test EM 66.5, Test EX 86.2 — and
+ * an earlier draft of the comparison column filed 66.5 as a dev EM. The number was real and the
+ * split was wrong, which is the least visible kind of error a leaderboard table can carry. Keeping
+ * the test-only values here means the same transcription is refused rather than re-explained.
+ */
+const TEST_ONLY_SPIDER_EM = new Set([66.5, 86.2, 86.6]);
+
+/** Every problem with the comparison column. An empty array means every row has a checkable rival. */
+export function rivalProblems(rows: readonly Benchmark[], today: string): string[] {
+  const issues: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.id)) continue; // duplicate ids are the coverage check's problem, not this one's
+    seen.add(row.id);
+    if (!REQUIRED.includes(row.id)) continue;
+    const rival = row.rival;
+    if (rival === undefined) {
+      issues.push(`${row.id}: no rival — the comparison is still prose`);
+      continue;
+    }
+    if (!RIVAL_AVAILABILITY.includes(rival.availability)) {
+      issues.push(`${row.id}: availability "${String(rival.availability)}" is not one of ${RIVAL_AVAILABILITY.join(', ')}`);
+    }
+    if (rival.system.trim().length === 0) issues.push(`${row.id}: rival names no system`);
+    if (rival.split.trim().length === 0) issues.push(`${row.id}: rival names no split`);
+    if (rival.metric.trim().length === 0) issues.push(`${row.id}: rival names no metric`);
+    if (rival.conditions.trim().length === 0) issues.push(`${row.id}: rival names no conditions`);
+    if (rival.model.trim().length === 0) issues.push(`${row.id}: rival names no model`);
+    if (rival.note.trim().length === 0) issues.push(`${row.id}: rival gives no note`);
+    if (!RIVAL_URL.test(rival.evidence)) issues.push(`${row.id}: rival evidence "${rival.evidence}" is not a URL`);
+    if (!RIVAL_DATE.test(rival.checkedAt)) {
+      issues.push(`${row.id}: rival checkedAt "${rival.checkedAt}" is not YYYY-MM-DD`);
+    } else if (rival.checkedAt > today) {
+      issues.push(`${row.id}: rival checkedAt ${rival.checkedAt} is after today (${today}), so nothing was read`);
+    }
+    if (rival.availability === 'none') {
+      if (rival.score !== null) issues.push(`${row.id}: none declared but score is ${String(rival.score)} — score must be null`);
+    } else if (rival.score === null || !Number.isFinite(rival.score) || rival.score < 0 || rival.score > 100) {
+      issues.push(`${row.id}: rival score ${String(rival.score)} is not a percentage — score must be a number`);
+    }
+    // The bug this column exists to prevent: a test-split number published under a dev heading.
+    if (row.id === 'spider-dev' && rival.score !== null && TEST_ONLY_SPIDER_EM.has(rival.score)
+        && /dev/i.test(rival.split) && /dev/i.test(rival.metric)) {
+      issues.push(`${row.id}: rival score ${String(rival.score)} is a test-only EM filed under dev — use the dev EM`);
+    }
+  }
+  return issues;
+}
+
 /** Everything wrong with a row set. An empty array is the only passing answer. */
 export function checkCoverage(rows: readonly Benchmark[], read: Reader): string[] {
   const issues: string[] = [];
@@ -611,13 +839,15 @@ export async function main(
   // Printed before the verdict, because it is the scale every delta above is read on: a table of
   // numbers without its resolution is the state this file was written to end.
   if (!quiet) for (const line of noiseLines(NOISE_FLOORS)) log(line);
-  const issues = [...checkCoverage(BENCHMARKS, read), ...noiseProblems(NOISE_FLOORS)];
+  const issues = [...checkCoverage(BENCHMARKS, read), ...rivalProblems(BENCHMARKS, TODAY_UTC()), ...noiseProblems(NOISE_FLOORS)];
   for (const issue of issues) log(`COVERAGE: ${issue}`);
   const measured = BENCHMARKS.filter((row) => row.status === 'measured').length;
   const partial = BENCHMARKS.filter((row) => row.status === 'partial').length;
+  const withRival = BENCHMARKS.filter((row) => row.rival !== undefined).length;
   log(`COVERAGE: ${measured} of ${BENCHMARKS.length} leaderboards carry a number over the leaderboard's `
     + `own denominator, ${partial} more over a narrower one; `
-    + `${REQUIRED.filter((id) => !BENCHMARKS.some((row) => row.id === id)).length} required rows missing`);
+    + `${REQUIRED.filter((id) => !BENCHMARKS.some((row) => row.id === id)).length} required rows missing, `
+    + `${withRival} of ${BENCHMARKS.length} carry a structured rival`);
   return issues.length === 0 ? 0 : 1;
 }
 

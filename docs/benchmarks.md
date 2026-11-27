@@ -18114,18 +18114,24 @@ came to be written as if they were the same sentence.
 refuses: a `measured` row whose number the repository cannot find, an `absent` row with no reason a
 reader can act on, and a missing row for a leaderboard the plan names.
 
-| leaderboard | corpus | metrics | status | number |
-|---|---|---|---|---|
-| WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% (`values` arm) |
-| WikiSQL dev | the same questions, no sample rows | EX | measured | 81.93% (`schema` arm, **−3.37pp**, p<0.0001) |
-| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | **61.90%** (`grammar` + dialect repair, chat; 59.77% as written); 57.35% (`schema`, chat), 54.16% (`grammar`, reasoner), 50.68% (`schema`, reasoner) |
-| BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | **64.3** (floor, `macsql-prompt` — the arm the product sends; 56.0 is `select`'s floor) |
-| BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) |
-| BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) |
-| Text2Vis | 1,470 scored rows | top-1 | measured | 664 |
-| Text2Vis | the same rows | render validity | measured | 1,418 figures |
-| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **32.23** F1@3 (reasoning tier), 26.28 on chat; ceiling 84.96, baseline 58.96, 10 arms |
-| VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — |
+The `rival` column is data, not prose: `eval/benchmarks.ts` carries one structured rival per row and
+`pnpm bench:coverage` refuses a required row whose comparison is still a sentence. This is the last
+row set that had one; a table whose comparisons were quoted from memory is how DAIL-SQL's test EM
+came to be printed as a dev EM (corrected below). Each rival names its split, conditions, model and
+availability — rule D58's four facts — so a gap is only quoted when those four are known.
+
+| leaderboard | corpus | metrics | status | number | rival (structured, D58) |
+|---|---|---|---|---|---|
+| WikiSQL dev | 8,421 questions over 2,630 tables, single-table | EX | **measured** | 85.30% (`values` arm) | SeaD + EG 93.0 test EX — fine-tuned, not a zero-shot comparator |
+| WikiSQL dev | the same questions, no sample rows | EX | measured | 81.93% (`schema` arm, **−3.37pp**, p<0.0001) | same row's rival |
+| Spider 1.0 dev | 1,034 questions, 20 databases, 4.4 MB skeleton corpus | EM, EX | **measured** | **61.90%** (`grammar` + dialect repair, chat; 59.77% as written); 57.35% (`schema`, chat), 54.16% (`grammar`, reasoner), 50.68% (`schema`, reasoner) | Graphix-T5-3B + PICARD **77.1 dev EM** — fine-tuned T5-3B + PICARD; DAIL-SQL GPT-4 dev EM is 70.0 (66.5 is *test*) |
+| BIRD Mini-Dev | 498 questions, 11 databases | EX | measured | **64.3** (floor, `macsql-prompt` — the arm the product sends; 56.0 is `select`'s floor) | AskData 78.49 dev EX — published on dev(1,534), not this 498-question split |
+| BIRD dev | 1,532 scored questions | EX | measured | **65.93** (`macsql-prompt`, 1,010 of 1,532, floor 65.9) | AskData 78.49 dev EX, training-free GPT-4o 8+ calls — 12.56pp behind |
+| BIRD dev | the same questions | R-VES | measured | **59.81** (floor 62.21, the reward table's own step) | none on one denominator — R-VES folds latency; a rival EX is not comparable |
+| Text2Vis | 1,470 scored rows | top-1 | measured | 664 | none published on these rows — a finding about the field |
+| Text2Vis | the same rows | render validity | measured | 1,418 figures | none published — a census, not a leaderboard metric |
+| nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **32.23** F1@3 (reasoning tier), 26.28 on chat; ceiling 84.96, baseline 58.96, 10 arms | corpus prompting baseline 58.96 F1@3; trained Step-NL2VIS 81.50 is a different claim |
+| VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — | leaderboard best 0.81 displayed-data similarity (0–1), 0.69 hardest — private references |
 
 ### nvBench 2.0: nine arms, one prompt question, and where the 36 points still are
 
@@ -19551,9 +19557,20 @@ not `dev.json`**. `process_sql.get_sql` resolves every column through a `Schema`
 SQLite file, so exact match is not a string comparison and cannot be computed from the question file;
 the reference `evaluate()` parses gold and prediction through that same schema. The dev leaderboard
 runs 82.8% EX (DIN-SQL and DAIL-SQL with GPT-4) to 93.52% EX (MA-SToR-SQL V5, as its authors report
-it), with dev EM in the 58–77% band (LGESQL + ELECTRA 58.4, RESDSQL-3B + NatSQL 63.1, DAIL-SQL + GPT-4
-66.5, Graphix-T5-3B + PICARD 77.1). What the corpus costs is the section below, and its answer is that
-four routes to it were tried and none delivered.
+it), with dev EM reaching 77.1 (Graphix-T5-3B + PICARD). Two independent leaderboard snapshots read
+on 2026-11-27 agree on that 77.1 dev EM; it is the number `eval/benchmarks.ts` now records as this
+row's structured rival, with split and conditions attached (rule D58).
+
+**A transcription bug was fixed here this round.** An earlier version of this sentence listed
+"DAIL-SQL + GPT-4 66.5" inside the *dev EM* band. The authors' own results table prints four columns
+— Dev EM 70.0, Dev EX 83.1, Test EM 66.5, Test EX 86.2 — so 66.5 was a **test** number filed under a
+dev heading, the same class of error rule D58 already records for the 77.14% leader. The corrected
+dev EM is 70.0; `rivalProblems` now refuses any Spider dev rival carrying a test-only value
+(66.5 / 86.2 / 86.6), so the mistake cannot be reintroduced by editing the table. The two older
+entries in that sentence (LGESQL + ELECTRA 58.4, RESDSQL-3B + NatSQL 63.1) were quoted without a
+split label and are not re-asserted here as dev EM; only numbers whose split was checked carry a
+rival row. What the corpus costs is the section below, and its answer is that four routes to it were
+tried and none delivered.
 
 `eval/spider/check.ts` is what would receive a checkout: twenty databases, every gold parsed, every
 gold reading exact match against itself. It is tested against a stub, so the day the corpus lands the
