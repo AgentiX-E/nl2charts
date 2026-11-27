@@ -23078,10 +23078,10 @@ So this is measured and closed before a dispatch was spent on it: **presentation
 lever.** The two mechanisms that act on the card's content have populations of 21 and 17 cases, and
 both are upper bounds that assume the model would act on a hint it already has the evidence for.
 
-### Where the headroom actually is
+### The headroom is real, and the selector that would take it is already closed
 
-The same artifact carries the answer, one arm over. `select-mixed-rule` generates three candidates
-per question and keeps one:
+The same artifact carries the tempting answer, one arm over. `select-mixed-rule` generates three
+candidates per question and keeps one:
 
 | reading | `macsql-prompt` (shipped) | `select-mixed-rule` |
 |---|---:|---:|
@@ -23090,14 +23090,31 @@ per question and keeps one:
 | cases the pool had and the selector lost | — | **61** |
 | calls per question | 1 | 3 |
 
-**The pool contains 31 cases the shipped arm does not answer, and the selector throws away 61.** A
-selector that never lost a candidate would score 67.95% on that dispatch; the shipped single-shot arm
-scores 65.93%. Two numbers, deliberately not added: **2.02pp** is what the pool is worth over the
-shipped arm, at three calls a question; **3.98pp** is what the selector costs on top of its own pool,
-at no extra generation. Anything that acts on the card is worth 1.1–1.4pp by comparison, and the
-problem is a different one — *which of these statements answers the question*, not *what does the
-question's schema look like*. The next dispatch has to price the selector's 61 cases against its 3×
-bill rather than against its 67.95% ceiling.
+**The pool contains 31 cases the shipped arm does not answer, and the selector throws away 61.** Two
+numbers, deliberately not added: **2.02pp** is what the pool is worth over the shipped arm, at three
+calls a question; **3.98pp** is what the selector costs on top of its own pool, at no extra
+generation.
+
+That is a decomposition, not a plan, and the difference matters. `bench:bird:rules` replayed **twenty
+deterministic rules** over these retained candidates before this round existed: the best
+(`nonspace`) scores **982** against the shipped rule's 980 at p = 0.5, and the whole twenty span
+64.10% to 60.44%. `bench:bird:decision` measured the expensive version — a model that reads the
+candidates and names one — on 1,200 `select-cross` questions, and it lost to plain modal counting by
+31 cases (22 against 53, p = 4.5e-4). The three-candidate design is worth less than the one call it
+replaces.
+
+So the 3.98pp is **unreachable by selection** and the 2.02pp is not worth three calls: on 74.3% of
+questions all three candidates return the same rows, and on the 387 that disagree the whole gap
+between the shipped rule and a perfect chooser is 77 cases — a population twenty rules and a paid
+model have already failed to take. Reading it as "the next lever is the selector" is the mistake this
+paragraph exists to prevent; the numbers above were published two rounds before this one and the
+round that produced them closed the family.
+
+**What is left is generation.** The 38 `distant` cases — the largest bucket in the table at the top of
+this section — read a table the gold's relation does not reach within two hops, and no ordering, no
+hint and no chooser acts on that: the statement that would have answered was never written. That is a
+different instrument and a different dispatch, and pricing it is the next round's job rather than
+this one's.
 
 ### The gates
 

@@ -83,6 +83,15 @@ cannot be argued with.
   `true` it carried for one round.
 
 ### Fixed
+- **The next step this round first wrote down was the selector, and two instruments had already
+  closed it.** The 2.02pp of pool headroom and the 3.98pp of selection loss are real readings, and
+  they read like a plan — so the section built on them ended with "the next dispatch has to price the
+  selector's 61 cases". `bench:bird:rules` replayed **twenty** deterministic rules over the same
+  retained candidates two rounds earlier (best `nonspace` 982 against the shipped 980, p = 0.5;
+  the twenty span 64.10%–60.44%), and `bench:bird:decision` had the paid chooser lose to modal
+  counting by 31 cases (p = 4.5e-4). The decomposition stays; the plan does not. What is left is
+  generation: the 38 `distant` cases read a table the gold's relation does not reach within two hops,
+  and the statement that would have answered was never written.
 - **The shipped recipe did not carry the card width its reading was taken at, so the product sent a
   card nobody had measured.** `SqlRecipe` had no `schemaLines`, `resolveShipment({ dialect })` — the
   call `docs/guide/05-natural-language.md` documents — reached the builders with none, and both
