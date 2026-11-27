@@ -38,7 +38,7 @@
       "lines": 100,
       "statements": 100,
       "functions": 100,
-      "branches": 98.92
+      "branches": 99.02
     },
     "eval/bill.ts": {
       "lines": 100,
@@ -351,6 +351,12 @@
       "statements": 100,
       "functions": 100,
       "branches": 100
+    },
+    "eval/bird/reach.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 98.75
     },
     "eval/bird/readings.ts": {
       "lines": 99.56,

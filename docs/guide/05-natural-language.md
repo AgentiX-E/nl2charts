@@ -392,6 +392,15 @@ Two consequences worth knowing before you override it:
   fallback is reported, not silent. Ask for a specific recipe with
   `resolvePrompt(findSqlRecipe('shipped-sql'), …)` if you would rather have the
   refusal.
+- The card's **width is part of the recipe**, not a number you are expected to
+  remember. `resolveShipment` hands the builders the width its reading was taken at
+  (400 column lines), and the payload can still override it with `schemaLines` when
+  you have priced another one. This is not cosmetic: the builders' own default is 40,
+  and at 40 column lines the BIRD dev corpus — 75 tables, 798 columns — loses 22 of
+  its tables and 415 of its 798 columns, so **587 of its 1,532 questions would be asked
+  about a schema missing a table their answer reads**. A schema wider than about 400
+  columns is the case to raise it for; `bench:bird:reach` measures what any width
+  hides.
 
 ### What it costs to change what ships
 

@@ -22934,3 +22934,91 @@ Two things follow, and the first is a correction to how this file has been read:
 The A/A pair also costs **¥1.88** for 992 calls (1,804,790 prompt tokens of which 1,711,534 are cache
 hits, 171,788 completion), which is the price of knowing the ruler — cheaper than any lever this file
 has priced, and the only one whose value does not depend on the result.
+
+## The card hid nothing at the width the reading was taken at, and 22 of 75 tables at the width the product shipped
+
+The census above turned the relation into the largest bucket of the dev split's losses: 173 of 522
+wrong statements differ first in the tables they read, and 136 of them never read a table the gold
+reads. The plan priced that population at **¥15–25** for better schema linking. One question has to
+be answered before that money is spent, and it is not a question about models: **was the table on the
+card at all?**
+
+`bench:bird:reach` reads the artifact and the dataset, renders the card at one or more widths, and
+counts the (question, gold table) pairs the card did not print. It executes nothing, calls nothing,
+and costs **¥0**:
+
+```
+BIRD_SPLIT=dev pnpm bench:bird:reach --artifact eval/out/bird-eval-dev-44991167518.json --compare 40
+```
+
+### At 400 lines: nothing
+
+| width | tables | columns | gold table pairs hidden | questions | gold column pairs hidden |
+|---|---:|---:|---:|---:|---:|
+| **400** — every arm, every reading in this file | **75 of 75** | **798 of 798** | **0** | **0 of 1,532** | 0 |
+| **40** — the builders' own default, and what the product shipped | 53 of 75 | 383 of 798 | **695** | **587 (38.32%)** | 372 over 210 (13.71%) |
+
+The run's own control agrees: `tablesInPrompts: 75`, `tablesTotal: 75`, `truncatedPrompts: []`. The
+instrument's second reading, over the 522 unpassed cases only, hides **269 pairs over 228 questions**
+at 40 lines — and cross-checking the failure census, of the 156 (case, table) pairs where a wrong
+statement never read a gold table, **148 were printed on the card** (the other 8 are names the
+statements define as CTEs, which no card can carry).
+
+So the relation bucket is a **decision**, not a retrieval: the model was shown the table and chose
+another one. A linker would have acted on a population already served, and the ¥15–25 line is retired
+as framed rather than deferred.
+
+### At 40 lines: the shipped prompt was not the measured prompt
+
+`SqlRecipe` did not carry a card width. `resolveShipment({ dialect, evidence })` — the call
+`docs/guide/05-natural-language.md` documents — therefore reached the builders with no width, and
+both of them default to **40 column lines**, while every reading in this file was taken at 400. The
+gap is not academic:
+
+| database | tables | at 40 lines | columns | at 40 lines |
+|---|---:|---:|---:|---:|
+| `card_games` | 6 | **1** | 115 | 40 |
+| `european_football_2` | 7 | **1** | 199 | 40 |
+| `formula_1` | 13 | 7 | 94 | 40 |
+| `codebase_community` | 8 | 5 | 71 | 40 |
+| `financial` | 8 | 7 | 55 | 40 |
+| `california_schools` | 3 | 2 | 89 | 40 |
+| the other five | 5+10+3+4+8 | all | 31–64 | all |
+
+A caller following this repository's own guide sent a card missing a table a third of BIRD dev's gold
+statements read. No test compared the two, because the test that would have done it passed
+`schemaLines: 400` by hand — **the workaround was in the assertion** (`packages/ai/test/recipe.test.ts`
+asserted `schemaLines` was `undefined` for a payload that omitted it, which is the defect written down
+as the contract).
+
+The fix is one field: a recipe states the width its reading used (`SHIPPED_SQL.schemaLines = 400`,
+`ASSEMBLED_SQL` the same), `resolvePrompt` uses it when the payload omits one, and the payload keeps
+the override for instruments that price another width. `bench:bird:reach` is the instrument that
+measures the difference rather than arguing it, and `test/bird-reach.test.ts` pins both directions —
+the recipe carries the width, and a payload can still say otherwise.
+
+### The gates
+
+`reachProblems` refuses six things, and the fourth is the one that would have caught this:
+
+1. a width that prints more tables or columns than the schemas hold;
+2. a wider card that hides more than a narrower one, for tables and for columns separately;
+3. a question count that a hidden count cannot come from (both zero, or neither);
+4. **a control that claims completeness while the reading at its own width hides a table** — the
+   artifact saying `75 of 75` about a card that carries 53;
+5. a reading with no question to read;
+6. a control width no reading was taken at, which would compare a run with a card nobody rendered.
+
+The artifact also records **`controls.schemaLines`** now: `tablesInPrompts` and `tablesTotal` are a
+statement about one width, and the artifact used to publish them without saying which.
+
+### What this does not say
+
+- **A hidden table is not automatically a wrong answer.** A statement can answer through another
+  relation; nothing here executes.
+- **A visible table is not automatically used.** The 148 pairs above are the evidence for the opposite
+  claim, and the next lever has to act on the model's choice rather than on the card.
+- **`unmodelledColumns` is a corpus fact, counted apart.** At 400 lines the reading finds exactly one
+  gold column no schema holds: `formula_1`'s case 1016 reuses the alias `T4` in two scopes, so
+  `T4.min_time_in_seconds` resolves to `pitstops.min_time_in_seconds`, which does not exist. Counting
+  it as hidden would blame the card for a statement no card can serve.

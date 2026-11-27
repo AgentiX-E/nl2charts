@@ -151,6 +151,18 @@ a corpus and does not travel in points: Mini-Dev's 496 questions flip 24 of 496 
 `2 × sqrt(24)/496 = 1.98pp`. A pair is either the same arm twice across two dispatches or two copies
 inside one, and a row that claims both is refused.
 
+**Reach** — Whether the card a question was sent printed the table its gold statement reads, and the
+reason the word is not "recall". `bench:bird:reach` renders the card at one or more widths, reads the
+tables and columns back out of the rendering rather than out of the schema, and counts the
+(question, gold table) pairs the card did not print. On BIRD dev at the width every reading in this
+file was taken at, **75 of 75 tables and 798 of 798 columns arrived and no pair was hidden** — so the
+relation bucket of the failure census is a decision the model made with the table in front of it, not
+a retrieval defect. At the builders' own default of 40 column lines the same measurement hides 22 of
+the 75 tables and 695 pairs over 587 of the 1,532 questions, which is what the shipped prompt did
+until `SqlRecipe.schemaLines` existed. A hidden table is not by itself a wrong answer (a statement can
+answer through another relation and nothing here executes), and a visible table is not automatically
+used.
+
 **Normalization (question)** — Mapping synonyms and punctuation before matching
 (`sales` → `revenue`, `per` → `by`). Its effect is measured, not assumed.
 

@@ -94,12 +94,34 @@ describe('resolving a recipe against one question', () => {
     expect(buildSqlPrompt(question, schema, options)).toContain('【Evidence】\nNone');
   });
 
-  it('takes the card width from the payload', () => {
+  it('carries the card width its reading was taken at, and a payload may still override it', () => {
+    // The width is a lever of the combination, so the recipe states it. This assertion used to read
+    // `toBeUndefined()` — the defect, written down as the contract: a caller who passed no payload
+    // reached the builders' own default of 40 column lines while every reading in `docs/benchmarks.md`
+    // was taken at 400, and on BIRD dev that default hides 22 of 75 tables.
+    expect(resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite' }).schemaLines).toBe(400);
+    expect(resolvePrompt(ASSEMBLED_SQL, { dialect: 'postgres' }).schemaLines).toBe(400);
+    // The override survives, because an instrument that prices another width has to be able to say
+    // so and the payload is how it says it.
     expect(resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite', schemaLines: 1 }).schemaLines).toBe(1);
-    expect(resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite' }).schemaLines).toBeUndefined();
     const wide = buildSqlPrompt(question, schema, resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite', schemaLines: 1 }));
     const narrow = buildSqlPrompt(question, schema, resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite', schemaLines: 2 }));
     expect(wide.length).toBeLessThan(narrow.length);
+  });
+
+  it('sends every table of a schema wider than the builders’ own default', () => {
+    // The consequence, stated as the thing a user would notice: no payload, a schema of three tables
+    // and sixty columns, and all three tables on the card. At the builders' default of 40 column
+    // lines the third table is dropped, which is a table the model cannot read and cannot ask for.
+    const wide = [
+      { table: 'alpha', columns: Array.from({ length: 20 }, (_, at) => ({ name: `a${String(at)}`, type: 'BIGINT' })) },
+      { table: 'beta', columns: Array.from({ length: 20 }, (_, at) => ({ name: `b${String(at)}`, type: 'BIGINT' })) },
+      { table: 'gamma', columns: Array.from({ length: 20 }, (_, at) => ({ name: `g${String(at)}`, type: 'BIGINT' })) },
+    ];
+    const prompt = buildSqlPrompt(question, wide, resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite' }));
+    for (const table of ['alpha', 'beta', 'gamma']) expect(prompt).toContain(`# Table: ${table}`);
+    const atDefault = buildSqlPrompt(question, wide, { template: 'macsql-bird', schemaLines: 40 });
+    expect(atDefault).not.toContain('# Table: gamma');
   });
 
   it('leaves the assembled recipe in the caller’s own dialect', () => {
@@ -169,7 +191,10 @@ describe('the recipe against the declaration it was measured as', () => {
       template: 'macsql-bird' as const,
     };
     const fromArm = buildAskMessages({ question, schema, prompt: armPrompt, linking: false });
-    const fromRecipe = buildAskMessages({ question, schema, prompt: resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite', evidence, schemaLines: 400 }), linking: SHIPPED_SQL.linking });
+    // No `schemaLines` in the payload: the recipe has to produce the arm's prompt on its own. Passing
+    // 400 here is what let the two diverge — the workaround was in the assertion, so the assertion
+    // could not fail.
+    const fromRecipe = buildAskMessages({ question, schema, prompt: resolvePrompt(SHIPPED_SQL, { dialect: 'sqlite', evidence }), linking: SHIPPED_SQL.linking });
     expect(fromRecipe.messages).toEqual(fromArm.messages);
     // ...and the hint is absent for the same reason on both sides, which is a different message
     // rather than a different system prompt: `linking: false` writes `Use the schema above.`

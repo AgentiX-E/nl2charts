@@ -6679,6 +6679,15 @@ export interface Controls {
   schemaMissingTotal: number;
   tablesInPrompts: number;
   tablesTotal: number;
+  /**
+   * The card width every prompt in this run was rendered at.
+   *
+   * The two counts beside it are only a statement about *this* width, and the artifact used to record
+   * them without it: "75 of 75 tables reached the prompt" is true at 400 column lines and false at the
+   * builders' own default of 40, where 22 of the 75 never arrive. A control whose subject is not
+   * written down is a number a later reader will apply to the wrong card.
+   */
+  schemaLines: number;
   sampledColumns: number;
   sampledValues: number;
   truncatedPrompts: { db: string; shown: number; total: number }[];
@@ -7638,6 +7647,7 @@ export async function prepareRun(settings: BirdSettings, io: PrepareIo): Promise
     schemaMissingTotal: missingColumns.length,
     tablesInPrompts,
     tablesTotal,
+    schemaLines: BIRD_SCHEMA_LINES,
     // Columns whose stored values reached the card, and how many values that is. An arm
     // that asks for samples and gets none is its parent renamed, so the count is a control
     // and the gate reads it.

@@ -7,6 +7,17 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`bench:bird:reach`: whether the card printed the table the gold reads, for ¥0.** The instrument
+  renders the card at one or more widths from the dataset and the tables manifest, reads the tables
+  and columns back **out of the rendering**, and counts the (question, gold table) pairs that never
+  arrived. On BIRD dev at 400 column lines — the width every arm runs at — **75 of 75 tables and 798 of
+  798 columns arrive and no pair is hidden**, so the 136 cases whose statement never reads a gold table
+  are a decision, not a retrieval: of the 156 (case, table) pairs behind them, 148 were printed on the
+  card and the other 8 are CTE names no card can carry. At 40 lines the same measurement hides **695
+  pairs over 587 of 1,532 questions** (38.32%) and 372 columns over 210. `reachProblems` refuses six
+  arithmetic impossibilities, the fourth of which is a control claiming `75 of 75` while the reading at
+  its own width hides a table. `controls.schemaLines` now records the width the artifact's
+  `tablesInPrompts`/`tablesTotal` are a statement about.
 - **`bench:bird:census`: which clause a wrong statement differs from the gold in first, for ¥0.**
   The instrument reads the two statements an artifact already holds — no engine, no database, no
   model — and compares them part by part with `sql-shape.ts`'s six parts. It prints three readings,
@@ -54,6 +65,19 @@ cannot be argued with.
   `true` it carried for one round.
 
 ### Fixed
+- **The shipped recipe did not carry the card width its reading was taken at, so the product sent a
+  card nobody had measured.** `SqlRecipe` had no `schemaLines`, `resolveShipment({ dialect })` — the
+  call `docs/guide/05-natural-language.md` documents — reached the builders with none, and both
+  default to **40 column lines** while every reading in `docs/benchmarks.md` was taken at 400. On BIRD
+  dev that width hides 22 of 75 tables and 415 of 798 columns, so 587 of 1,532 questions were being
+  asked about a schema missing a table their gold statement reads. The defect was written down as the
+  contract: `packages/ai/test/recipe.test.ts` asserted `schemaLines` was `undefined` for a payload that
+  omitted it, and the test that compared the recipe with the arm passed `schemaLines: 400` by hand, so
+  the workaround sat inside the assertion that could not fail. `SqlRecipe.schemaLines` is now required
+  (both shipped recipes: 400), `resolvePrompt` falls back to it, the payload keeps the override for
+  instruments, and the comparison test no longer passes the width.
+- **The same defect, in the guide.** The example that builds a pipeline from `resolveShipment` produced
+  a 40-line card; it is now the measured one, and the guide says what to raise for a wider schema.
 - **The residual sentence in `docs/benchmarks.md` was read from the replicate, and its bucket was
   read as a statement about SQL.** "Of the 530 wrong statements, 326 (61.5%) have a different shape
   from the gold" is wrong twice: the canonical dev run has **522** wrong statements (530 is

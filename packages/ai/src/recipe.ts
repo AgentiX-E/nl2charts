@@ -9,8 +9,25 @@
  * nothing would have noticed the two diverging.
  *
  * A recipe is what the prompt is made of; a payload is what one question fills it with. The long
- * form — the readings, the refused dialect, why `schemaLines` is payload — is in
- * `docs/benchmarks.md` and `docs/guide/05-natural-language.md`.
+ * form — the readings and the refused dialect — is in `docs/benchmarks.md` and
+ * `docs/guide/05-natural-language.md`.
+ *
+ * ## The card width is part of the combination
+ *
+ * It was not, and that was a defect with a diagnostic shape rather than a cosmetic one. The width
+ * lived only in the payload, so `resolveShipment({ dialect })` — the call this package's own guide
+ * documents — reached the builders with no width, and both of them default to **40 column lines**.
+ * The reading that put `macsql-prompt` here was taken at **400**. On BIRD dev the difference is not
+ * academic: at 40 lines 22 of the 75 tables in the corpus never reach the prompt and 415 of 798
+ * columns are cut, so 587 of the 1,532 questions are asked about a schema missing a table their gold
+ * statement reads. A caller following the documentation therefore sent a prompt nobody had measured,
+ * and no test compared the two because the test that would have done it passed `schemaLines: 400`
+ * by hand — the workaround was in the assertion.
+ *
+ * The fix is that a recipe states the width its reading used, and a payload may still override it
+ * (an instrument that prices a different width has to be able to say so). `bench:bird:reach` is the
+ * instrument that makes the difference measurable rather than argued, and its gate refuses a card
+ * that hides a table a gold statement reads.
  */
 import type { PromptOptions } from './pipeline.js';
 import { assertTemplateCarries } from './template.js';
@@ -36,6 +53,18 @@ export interface SqlRecipe {
   readonly descriptions: boolean;
   readonly foreignKeys: boolean;
   readonly samples: boolean;
+  /**
+   * Every column of every table, in the unit `renderMacSqlCard` counts.
+   *
+   * A recipe is a combination and the width is one of its levers: the same skeleton and the same
+   * evidence produce the measured prompt at 400 lines and an unmeasured one at the builders' own
+   * default of 40, because the card is where every table the model can read is written. 400 is not a
+   * budget anyone tuned — it is the value the reading was taken at, and on BIRD's eleven databases
+   * it truncates nothing (the widest schema in the corpus is 199 columns). Stating it here means the
+   * object that names the prompt also names the prompt's size, so a caller who passes no payload
+   * cannot silently send a smaller card than the reading describes.
+   */
+  readonly schemaLines: number;
   /** Whether a column hint goes in front of the card, in the user message. */
   readonly linking: boolean;
   /** The dialects the prompt can state, spelled as the prompt spells them. Empty means any. */
@@ -61,6 +90,7 @@ export const SHIPPED_SQL: SqlRecipe = {
   descriptions: true,
   foreignKeys: false,
   samples: false,
+  schemaLines: 400,
   linking: false,
   dialects: ['SQLite'],
   reading:
@@ -80,6 +110,7 @@ export const ASSEMBLED_SQL: SqlRecipe = {
   descriptions: false,
   foreignKeys: false,
   samples: false,
+  schemaLines: 400,
   linking: true,
   dialects: [],
   reading: 'the assembled skeleton at the caller\'s dialect, with the dataset hint and the column hint on',
@@ -108,7 +139,13 @@ export interface RecipePayload {
   readonly dialect?: string;
   /** The dataset's hint for this question, verbatim. Absent or blank means no block. */
   readonly evidence?: string;
-  /** Card lines. Omitted keeps `buildSqlPrompt`'s default rather than a recipe's. */
+  /**
+   * Card lines, overriding the recipe's own.
+   *
+   * Omitted keeps the recipe's width, which is the width its reading was taken at. It is an override
+   * rather than the only source of the number: a caller who passes no payload must still send the
+   * card that was measured, and before this field existed they did not.
+   */
   readonly schemaLines?: number;
 }
 
@@ -160,7 +197,10 @@ export function resolvePrompt(recipe: SqlRecipe, payload: RecipePayload = {}): P
     descriptions: recipe.descriptions,
     foreignKeys: recipe.foreignKeys,
     samples: recipe.samples,
-    ...(payload.schemaLines === undefined ? {} : { schemaLines: payload.schemaLines }),
+    // The recipe's width, unless the caller priced another one. The payload keeps the override
+    // because an instrument that measures a different card has to be able to say so, and the shipped
+    // path is the one that must not have to remember a number that lives in the recipe.
+    schemaLines: payload.schemaLines ?? recipe.schemaLines,
     ...(evidence === undefined ? {} : { evidence }),
     ...(recipe.template === undefined ? {} : { template: recipe.template }),
   };
