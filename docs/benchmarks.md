@@ -22704,10 +22704,14 @@ Three things follow, and the first is the one that closes a line of work:
 1. **A perfect rewrite engine — one that reads the answer — reaches 68.6%, and the leader is at
    78.49%.** The gap is 12.56pp; the family's entire remaining headroom is 2.68pp, and 1.24pp of that
    the product already collects. No amount of skill at rewriting closes a gap of this size, because
-   the cases are not about rewriting: of the 530 wrong statements, **326 (61.5%) have a different
-   shape from the gold** and another 109 are a different query over the same shape. Only 24 survive
-   both a matching shape and a matching filter, and those 24 are where the read-set is wrong —
-   that is the entire population a repair can act on.
+   the cases are not about rewriting: of the **522** wrong statements on the canonical run,
+   **327 (62.6%) differ first in what the query reads or computes** — a different relation, grain or
+   aggregate — while the cases whose differences are confined to a condition or a window number
+   **70**, which is the entire population a rewrite can act on.
+   *(This paragraph first read "of the 530 wrong statements, 326 (61.5%) have a different shape from
+   the gold". Both halves were wrong: 530 is the replicate's denominator, and `326` is a bucket about
+   the shape of a **result**, not of a statement. The correction, and the clause census that replaces
+   the claim, are in *What the wrong statements are made of* below.)*
 2. **The union is not the sum, and the subtraction is not either.** On the canonical run the three
    ceilings win 24, 22 and 2 cases — 48 rows — and their union is 41, because seven cases are won by
    two of them. The headroom is 26, not `41 − 19 = 22`: **four** cases the shipped edits repair are
@@ -22804,3 +22808,95 @@ the replicate, and the figure is back to the canonical pair.
 - Closing these two lever families does not say where the next one is. It says where it is not:
   not in rewriting a statement that is already close, and not in choosing among three statements
   that agree 74% of the time.
+
+## What the wrong statements are made of, and the number the last round read from the replica
+
+The section above closed the rewrite family with a sentence about the residual: *"of the 530 wrong
+statements, 326 (61.5%) have a different shape from the gold."* Both halves of that sentence are
+wrong, in two different ways, and the way they are wrong is the reason `eval/bird/census.ts` exists.
+
+**The denominator is the replicate's.** The canonical dev run of `macsql-prompt` is `44991167518`:
+1,010 of 1,532, so **522** statements are wrong. 530 is `45678159001` — 1,002 of 1,532 — and the
+residue reading that produced 530 printed `1002 passed` in its own drop line. The round that
+corrected the two-axis figure to the canonical pair left this sentence on the other artifact, which
+is the same defect one paragraph further down the page.
+
+**The bucket does not mean what the sentence said.** `326` is `residue`'s `otherShape` drop, and
+that drop counts *answers*: cases whose judge reason was `values` and whose result set did not have
+a row-count mismatch. It is a statement about the shape of a **result**, not about the shape of a
+**statement**. Reading it as "the SQL has a different shape" turned a bucket about result dimensions
+into a claim about query structure, and the claim then carried a conclusion ("nothing that edits a
+statement that is already close can reach them") that the number behind it could not support.
+
+The conclusion happens to survive, which is why this is a correction and not a retraction. It
+survives because the question was then asked directly.
+
+### The census: which clause differs first, over the 522 cases
+
+`bench:bird:census` compares the two statements the artifact already holds — the model's and the
+gold's — with the same six parts `sql-shape.ts` uses elsewhere: the base tables (aliases rewritten),
+the `group by`, the aggregate calls, the window, the select list, and the conditions by
+`predicateKey`. Nothing is executed, so the reading costs **¥0** and can be taken on any artifact
+that kept its statements.
+
+One case can differ in several parts, so the report gives three readings and the arithmetic of each
+is checkable: a **union** (a case counted once per part that differs), a **sole** count (the cases
+where exactly one part differs), and a **precedence partition** (`tables > grain > aggregate >
+window > projection > filter`, one bucket per case) whose buckets sum to the population — which
+`censusProblems` refuses to let them not do.
+
+| first differing part | dev `44991167518` (522 wrong) | share of wrong | of the split | dev `45678159001` (530) | Mini-Dev `45846766964` (177) |
+|---|---:|---:|---:|---:|---:|
+| `tables` — a different relation | **173** | 33.1% | 11.29pp | 171 | 59 (33.3%) |
+| `projection` — a different select list | **115** | 22.0% | 7.51pp | 114 | 35 (19.8%) |
+| `aggregate` — a different function | **108** | 20.7% | 7.05pp | 111 | 41 (23.2%) |
+| `filter` — a different condition | 53 | 10.2% | 3.46pp | 55 | 12 (6.8%) |
+| `grain` — a different `group by` | 46 | 8.8% | 3.00pp | 51 | 20 (11.3%) |
+| `window` — a different `order by`/`limit` | 17 | 3.3% | 1.11pp | 19 | 5 (2.8%) |
+| `tie` — the engine was given the same statement | 5 | 1.0% | 0.33pp | 5 | 3 (1.7%) |
+| `unmodelled` — parts agree, text does not | 5 | 1.0% | 0.33pp | 4 | 2 (1.1%) |
+| only one part differs | 110 | 21.1% | 7.18pp | 112 | 25 (14.1%) |
+| …`tables` missing / extra / both | 81 / 37 / 55 | — | 8.88pp missing-or-both | 84 / 37 / 50 | 38 / 8 / 13 |
+
+Three readings follow, and the first is the one the rewrite family needed:
+
+1. **The population a rewrite can address is 70 cases, not 326.** A rewrite edits a condition, a
+   literal or a cap; it cannot change which table a statement reads or which columns it projects.
+   The cases whose differences are confined to a filter or a window number **70** on the canonical
+   run — 53 whose only difference is a condition, plus 17 whose first difference is a window. The
+   gold-reading ceiling of 41 wins 59% of that population (2.68pp of a 4.57pp addressable set), and
+   the three shipped rules collect 19. That is the sharp version of "a perfect rewrite engine
+   reaches 68.6%": it is not that rewriting is unexploited, it is that **the set it can act on is
+   70 cases wide**, and 29 of those 70 are not reachable by any of the three mechanisms priced.
+2. **The largest single class is the relation, and it is the one no rewrite touches.** 173 cases
+   (11.29pp of the split) differ first in the tables they read, and the direction splits: **81 read
+   too few** — the gold's table is missing — **37 read too many**, and **55 read a different
+   relation in both directions**, which is the case a join rewrite genuinely cannot reach. So 136
+   of the 522 (26.1%, 8.88pp of the split) never read a table the gold reads. That is the size of
+   the schema-linking and join-selection population, measured rather than asserted, and it is 1.9×
+   the rewrite family's addressable set.
+3. **The partition is stable across two draws of one arm, and it reproduces on a second corpus.**
+   The two dev columns are the same prompt on the same 1,532 questions, 522 and 530 wrong, and no
+   bucket moves by more than 5 cases (0.33pp of the split). Against a corpus whose *verdicts* move on
+   66 questions between dispatches, the composition of the losses is steady — which is what makes it
+   usable as a target while an accuracy delta of under 1.06pp is not readable at all. Then the
+   third column: Mini-Dev, 496 questions over 11 databases that dev does not fully share, scores
+   35.7% and lands on the **same** partition — 33.3% tables against 33.1%, 23.2% aggregate against
+   20.7%, 19.8% projection against 22.0%. The composition of the losses is a property of the task
+   and this pipeline, not of one sample: **the relation is a third of the losses wherever it is
+   measured**, and the population a rewrite can act on is smaller at Mini-Dev scale (13 of 177,
+   7.3%) than on dev (70 of 522, 13.4%) — which is the number that explains every small rewrite delta
+   this file has reported on the 496-question split.
+
+### What the census does not say
+
+- **A difference is not a defect.** Nothing here executes, so a statement that answers correctly
+  through a different relation — a join the engine eliminates, a subquery flattened — lands in
+  `tables` exactly like a loss. The census sizes a population; it does not score one.
+- **`projection` is not automatically unreachable.** 50 of the 115 projection-first cases differ in
+  *nothing else*, and a select list is a thing a prompt can get wrong. The number says where the
+  mass is, not which mechanism is allowed to move it.
+- **The 326 and the 327 are a coincidence.** 327 is `tables + grain + aggregate` here — the cases
+  whose first difference is in what the statement reads or computes — and 326 was the residue's
+  answer-shape drop. They are within one case of each other and they count different things. Writing
+  the agreement down as corroboration would be the same defect as the sentence being corrected.

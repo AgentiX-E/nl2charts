@@ -7,6 +7,19 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`bench:bird:census`: which clause a wrong statement differs from the gold in first, for ¥0.**
+  The instrument reads the two statements an artifact already holds — no engine, no database, no
+  model — and compares them part by part with `sql-shape.ts`'s six parts. It prints three readings,
+  because a case can differ in several parts: a **union** (a case counted once per differing part),
+  a **sole** count (the cases where exactly one part differs, the population a single mechanism can
+  address alone), and a **precedence partition** (`tables > grain > aggregate > window > projection >
+  filter`) whose buckets `censusProblems` refuses to let not add up to the population. On the
+  canonical dev run (`44991167518`, 522 wrong of 1,532): tables **173** (11.29pp of the split,
+  81 missing / 37 extra / 55 both), projection 115, aggregate 108, filter 53, grain 46, window 17,
+  5 ties, 5 unmodelled; **110** cases differ in exactly one part and **70** in nothing but a filter
+  or a window. The replicate (`45678159001`, 530 wrong) moves no bucket by more than 5 cases, which
+  is what makes the composition of the losses usable as a target while an accuracy delta under
+  1.06pp is not readable at all.
 - **`RewriteReport.ceiling`: what every gold-reading mechanism together would repair, and how much of
   it the product does not.** `bench:bird:rewrite --oracle` priced three ceilings as three rows, and
   the number that decides whether the family is worth another round is their union — 41 cases on the
@@ -33,6 +46,14 @@ cannot be argued with.
   `true` it carried for one round.
 
 ### Fixed
+- **The residual sentence in `docs/benchmarks.md` was read from the replicate, and its bucket was
+  read as a statement about SQL.** "Of the 530 wrong statements, 326 (61.5%) have a different shape
+  from the gold" is wrong twice: the canonical dev run has **522** wrong statements (530 is
+  `45678159001`, whose own drop line printed `1002 passed`), and `326` is `residue`'s `otherShape`
+  drop, which counts **answers** whose result set had no row-count mismatch — a fact about the shape
+  of a result, not of a statement. The conclusion survives because it was then measured directly:
+  327 of 522 (62.6%) differ first in what the query reads or computes, and the population a rewrite
+  can act on is **70**, of which the gold-reading ceiling wins 41.
 - **The previous round's two-axis figure quoted the second draw as the score.** Round 205 repriced
   dev on run `45678159001` (1,002 = 65.40%) and changed the figure from 65.93 / 59.81 to 65.40 /
   59.25, while the table in `docs/benchmarks.md`, `eval/benchmarks.ts` and every gap in this file

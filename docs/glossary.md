@@ -128,6 +128,16 @@ called underpowered rather than significant.
 **Measure** — A quantitative field that is aggregated (revenue, quantity). In a
 semantic model, a metric with an expression and a grain.
 
+**Census (statement)** — The clause a wrong statement differs from the gold in *first*, over an
+artifact's unpassed cases: the base tables, the `group by`, the aggregate calls, the window, the
+select list, or the conditions (`bench:bird:census`). Three readings are reported because a case can
+differ in several parts: a **union** (a case counted once per differing part), a **sole** count (the
+cases where exactly one part differs — the population one mechanism can address alone), and a
+**precedence partition** (`tables > grain > aggregate > window > projection > filter`) that gives
+each case one bucket and sums to the population. Nothing is executed, so a **difference is not a
+defect**: a join the engine eliminates lands in `tables` exactly like a loss. On the canonical dev
+run the partition is 173 / 46 / 108 / 17 / 115 / 53 with 5 ties and 5 unmodelled out of 522.
+
 **Noise floor** — The measured spread of a corpus between two dispatches of the same arm, and the
 only honest scale for a delta. Two runs of `macsql-prompt` over the same 1,532 dev questions changed
 the verdict of **66** of them (4.31%), 37 one way and 29 the other, net 8 at exact McNemar p = 0.389 —
