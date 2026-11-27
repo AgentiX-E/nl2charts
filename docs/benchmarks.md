@@ -22667,3 +22667,140 @@ omission is the 0.13pp this section just corrected.
 No score moved and no edit changed. The pipeline applies the same three edits it applied yesterday;
 what changed is what the document is allowed to say about them — 2.22pp became 1.17pp on the split a
 leaderboard would quote, and five refusals stopped quoting numbers that no longer exist.
+
+## Both levers are closed, and the floor they are read against
+
+The two rounds before this one each closed with a dispatch in the plan: a candidate-level re-run of
+`select-mixed-rule` at ¥8–12 to find out whether the candidate table was empty, and a retry on
+invented joins at ¥15–25. Neither dispatch was needed. Both questions had artifacts, and the
+artifacts answer both of them — in the same direction, and against a corpus that is not as quiet as
+this file has been assuming.
+
+### The rewrite family cannot reach the leader, and that is now measured
+
+`bench:bird:rewrite --oracle` prices every mechanism that reads the gold statement. Run against the
+dev artifact behind this file's published number (`44991167518`, 1,010 of 1,532 = 65.93%), with the
+baseline reconciled case by case first:
+
+```
+baseline 1010 = 65.93%  (artifact 1010, agreement 1532/1532)
+union of wins across adopted rules: 19 (+1.24pp)  — no two rules won the same case
+ceiling union (oracle-transplant + oracle-drop-limit + oracle-predicate, gold in hand):
+  41 case(s) (+2.68pp)  — 26 of them no shipped rule repairs
+```
+
+| reading | run `44991167518` | run `45678159001` |
+|---|---:|---:|
+| baseline | 1,010 = **65.93%** | 1,002 = 65.40% |
+| three shipped edits, union | 19 cases = **+1.24pp** | 18 cases = +1.17pp |
+| `oracle-transplant` (a same-column value from the gold) | 24 won, 0 lost | 25 won, 0 lost |
+| `oracle-predicate` (the gold's own filter, spliced) | 22 won, 0 lost, 4 refused | 24 won, 0 lost, 4 refused |
+| `oracle-drop-limit` (the cap rule with no conditions) | 2 won, 19 lost | 1 won, 16 lost |
+| **every ceiling, unioned** | **41 = +2.68pp** | 42 = +2.74pp |
+| of which no shipped rule repairs | **26** | 29 |
+
+Three things follow, and the first is the one that closes a line of work:
+
+1. **A perfect rewrite engine — one that reads the answer — reaches 68.6%, and the leader is at
+   78.49%.** The gap is 12.56pp; the family's entire remaining headroom is 2.68pp, and 1.24pp of that
+   the product already collects. No amount of skill at rewriting closes a gap of this size, because
+   the cases are not about rewriting: of the 530 wrong statements, **326 (61.5%) have a different
+   shape from the gold** and another 109 are a different query over the same shape. Only 24 survive
+   both a matching shape and a matching filter, and those 24 are where the read-set is wrong —
+   that is the entire population a repair can act on.
+2. **The union is not the sum, and the subtraction is not either.** On the canonical run the three
+   ceilings win 24, 22 and 2 cases — 48 rows — and their union is 41, because seven cases are won by
+   two of them. The headroom is 26, not `41 − 19 = 22`: **four** cases the shipped edits repair are
+   outside every ceiling, because the library reader grounds the *question's* literal in the
+   column's domain while the ceiling transplants a *gold* value, and the two mechanisms are not
+   nested sets. (On the replica the same numbers are 25 / 24 / 1 → 42, and the shipped-only count is
+   five.) The hand subtraction is `41 − 19 = 22` on the canonical run and `42 − 18 = 24` on the
+   replica; the machine says 26 and 29. The first draft of this section printed 23, which subtracted
+   the replica's shipped count from the canonical union — a third error, of exactly the kind this
+   paragraph is about, and the reason the field now exists instead of the sentence.
+3. **The two columns are the same pipeline.** Same arm, same prompt, same 1,532 questions, two
+   dispatches: 1,010 and 1,002, 19 repaired cases and 18. The difference is not a change and must
+   not be reported as one — which is the subject of the next section.
+
+`RewriteReport` now carries `ceiling: { cases, beyondProduct, rules }`, computed from the same
+per-case lists the rows carry. The field exists because the number was computed by hand twice, and
+both times it was wrong: 41 by hand from two ceilings missed a case `oracle-drop-limit` reaches, and
+the 23-case headroom assumed the shipped wins were a subset of the ceiling's when five of them are
+not.
+
+### The candidate route, on the same 1,532 questions, with the selector it actually has
+
+The plan's item was a ¥8–12 dispatch to prove the candidate table at dev scale. Run `44991167518`
+carries it: `select-mixed-rule` ran beside `macsql-prompt` on the same 1,532 questions, and every
+case records its three candidates with the statement each one wrote and a fingerprint of the result
+each one returned.
+
+| reading | value |
+|---|---:|
+| `select-mixed-rule` | 980 = **63.97%** |
+| `macsql-prompt`, same run | 1,010 = 65.93% |
+| paired: won 119, lost 89 | net **−30**, exact McNemar **p = 0.044** |
+| candidate submissions attempted / refused by the engine | 4,596 / 76 |
+| a correct statement among the three (**ceiling of any selector**) | 1,041 = **67.95%** |
+| cases where all three returned the same result set | 1,138 = **74.3%** |
+| cases where they disagree | 387 |
+| …the shipped rule (`shortest`) is right on | 136 = 35.14% |
+| …the best possible is | 213 = 55.04% |
+| 20 free rules, best to worst | 64.10% / 60.44% |
+
+The pool is not empty and it is not the bottleneck. On 74.3% of questions the three prompts return
+the **same set of rows**, so a fourth call buys nothing there; on the 387 that do disagree, the
+whole difference between the shipped rule and a perfect chooser is 77 cases, and `bench:bird:rules`
+prices twenty rules over exactly that population without one of them clearing the multiplicity
+bar (best: `nonspace`, 982 against 980, p = 0.5). Meanwhile `bench:bird:decision` had already
+measured the expensive version of the same idea on 1,200 questions of `select-cross`: the model that
+reads the candidates and names one lost to plain modal counting by 31 cases (22 against 53,
+p = 4.5e-4).
+
+So the ordering of selectors for this pool is: `shortest` (980) > `modal` (967) > `first` (951) >
+the paid model — and all four are below the single call's 1,010. **The three-candidate design is
+worth less than the one call it replaces**, and its ceiling is 67.95%, which is 10.5pp behind the
+leader. This is the second line of work closed by measurement rather than by argument.
+
+### What the corpus actually is: two dispatches, 66 flips
+
+Every delta in this file has been quoted against the binomial resolution of one drawing — 0.3pp on
+1,532 questions — and that number assumed the model is a function. It is not. Two dispatches of
+`macsql-prompt` over the same 1,532 questions, same prompt, same temperature:
+
+| | run `44991167518` | run `45678159001` |
+|---|---:|---:|
+| correct | 1,010 | 1,002 |
+| both right | 973 | |
+| both wrong | 493 | |
+| only the first | **37** | |
+| only the second | | **29** |
+
+66 questions of 1,532 — **4.31%** — changed their verdict, and the net of 8 is what "nothing
+happened" looks like: exact McNemar **p = 0.389**. One standard deviation of a paired net is
+`sqrt(66)/1,532 = 0.53pp`, so **an unpaired delta below 1.06pp is two draws of one arm**. `eval/
+benchmarks.ts` now carries that as a row (`NOISE_FLOORS`), the gate prints it before the table, and
+`noiseProblems` refuses a row whose flips and net cannot be a two-way split of the same cases.
+
+Two readings in this file survive it, and both survive because they were measured pairwise on the
+same artifact: the shipped edits (+19 and +18 cases, all wins, 4.2σ) and `select-mixed-rule`'s loss
+(k = 208, net 30, 2.0σ). Everything quoted as a difference between two dispatches — 65.93 against
+some other arm's 65.40 — is a statement about the corpus and not about the code.
+
+### A correction to the previous round's figure
+
+Round 205 repriced the dev split on the replica artifact and changed the two-axis figure from
+65.93 / 59.81 to 65.40 / 59.25. That was wrong, and the way it was wrong is this section's subject:
+it substituted the second draw for the score. **The canonical dev reading is `44991167518`
+(65.93% EX, 59.81 R-VES)** — the run every pairing in this file is against, the run `benchmarks.ts`
+cites, and the run behind the 12.56pp and 3.37pp gaps. `45678159001` is now recorded as what it is,
+the replicate, and the figure is back to the canonical pair.
+
+### What this round does not claim
+
+- No score moved: no prompt changed, no arm was dispatched, no edit shipped. The spend was **¥0**.
+- The ceiling is a ceiling on the three mechanisms priced, not on the product: five shipped wins are
+  outside it.
+- Closing these two lever families does not say where the next one is. It says where it is not:
+  not in rewriting a statement that is already close, and not in choosing among three statements
+  that agree 74% of the time.

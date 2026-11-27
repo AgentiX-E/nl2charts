@@ -7,6 +7,23 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`RewriteReport.ceiling`: what every gold-reading mechanism together would repair, and how much of
+  it the product does not.** `bench:bird:rewrite --oracle` priced three ceilings as three rows, and
+  the number that decides whether the family is worth another round is their union — 41 cases on the
+  dev artifact behind the published 65.93 (`44991167518`), 42 on the replicate, of which 26 and 29
+  are cases no shipped rule repairs. Both were computed by hand first and both were wrong: the union
+  was taken as 41 from two ceilings that do not include `oracle-drop-limit`'s win, and the headroom
+  was taken as `41 − 19` when four of the shipped wins are *outside* every ceiling. Against a 12.56pp
+  gap to the leader, a perfect rewrite engine reaches 68.6% — so the family cannot close it, and that
+  is now a printed number rather than an argument.
+- **`NOISE_FLOORS`, and the gate that refuses an impossible one.** Two dispatches of `macsql-prompt`
+  over the same 1,532 dev questions changed the verdict of **66** of them (4.31%), 37 one way and 29
+  the other, net 8, exact McNemar p = 0.389. One standard deviation of a paired net is therefore
+  `sqrt(66)/1,532 = 0.53pp`, and **an unpaired delta below 1.06pp is two draws of one arm** — against
+  the 0.3pp binomial resolution every delta in this repository has been quoted at. `bench:coverage`
+  prints the floor before the table, and `noiseProblems` refuses a row whose flips and net are not a
+  two-way split of the same cases (a net larger than the flips, a parity no `won`/`lost` pair can
+  produce, one run named twice).
 - **`SHIPPED_EDITS`: the three edits the pipeline applies, named with their readings.** `recipe.ts`
   closed this seam for the prompt and left it open one step later, where three rewrites happen to a
   statement after the model has written it. `packages/ai/src/edits.ts` now names each one — the rule
@@ -16,6 +33,12 @@ cannot be argued with.
   `true` it carried for one round.
 
 ### Fixed
+- **The previous round's two-axis figure quoted the second draw as the score.** Round 205 repriced
+  dev on run `45678159001` (1,002 = 65.40%) and changed the figure from 65.93 / 59.81 to 65.40 /
+  59.25, while the table in `docs/benchmarks.md`, `eval/benchmarks.ts` and every gap in this file
+  stayed on run `44991167518` (1,010 = 65.93%). Two artifacts for one number is the defect the last
+  four rounds were about; the fix is that the replicate is labelled as one. The figure is back to the
+  canonical pair, and `45678159001` is recorded as the A/A replicate that produced the noise floor.
 - **The dev artifact existed, and pricing it moved the shipped stack from 2.22pp to 1.17pp.** Round
   204's plan was a ¥2–4 dispatch to re-run `macsql-prompt` on dev so that a dev artifact would exist
   to price. It already existed: `bird-dev` run `45678159001` uploaded 1,532 cases with the statement

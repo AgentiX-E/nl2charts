@@ -624,6 +624,25 @@ export interface RewriteReport {
   readonly union: number;
   /** Pairs of shippable rules that won the same case. Empty means the deltas add up. */
   readonly overlap: readonly { readonly left: string; readonly right: string; readonly cases: number }[];
+  /**
+   * What every ceiling together would repair, and how much of that the product does not.
+   *
+   * A ceiling is priced one mechanism at a time, and no single row answers the question that
+   * decides whether the family is worth another round: **with the gold statement in hand, how many
+   * cases of this corpus are about the mechanism at all?** That is the union, and it is the number
+   * a plan compares against the gap to the leader — 41 cases against a 13.09pp gap is a different
+   * sentence from 25 and 24 read separately, because the two mechanisms overlap and the second
+   * number double-counts the cases both reach.
+   *
+   * `beyondProduct` is what the union adds on top of what ships. It is the only headroom a better
+   * rewrite engine could ever collect, so a plan that proposes one has to beat this number and not
+   * the gap.
+   */
+  readonly ceiling: {
+    readonly cases: number;
+    readonly beyondProduct: number;
+    readonly rules: readonly string[];
+  };
   readonly problems: readonly string[];
 }
 
@@ -872,7 +891,36 @@ export async function priceRewrites(
       if (shared > 0) overlap.push({ left, right, cases: shared });
     }
   }
-  return { scored: cases.length, recomputed, declared, agreed, unresolved, unrunnable, readings, union: repaired.size, overlap };
+  // Every ceiling's repairs, unioned, and counted against what ships. Read from `wonCases` for the
+  // same reason the shipped union is: the tallies are per rule, and a case two ceilings both repair
+  // is one case.
+  const ceilingSet = new Set<string>();
+  for (const reading of readings) {
+    if (reading.adoption !== 'ceiling') continue;
+    for (const id of reading.wonCases) ceilingSet.add(id);
+  }
+  let beyondProduct = 0;
+  for (const id of ceilingSet) if (!repaired.has(id)) beyondProduct += 1;
+  return {
+    scored: cases.length,
+    recomputed,
+    declared,
+    agreed,
+    unresolved,
+    unrunnable,
+    readings,
+    union: repaired.size,
+    overlap,
+    // Counted from the same per-case lists the rows carry, never by adding the rows up: the two
+    // ceilings overlap on this corpus, and the sum of two overlapping counts is a number no
+    // mechanism can reach. The subtraction is the reason the field exists — a reader who has to do
+    // it by hand gets it wrong once per document.
+    ceiling: {
+      cases: ceilingSet.size,
+      beyondProduct: beyondProduct,
+      rules: readings.filter((reading) => reading.adoption === 'ceiling').map((reading) => reading.rule),
+    },
+  };
 }
 
 /**
@@ -1022,6 +1070,16 @@ export function rewriteLines(report: RewriteReport): string[] {
     for (const pair of report.overlap) {
       lines.push(`  overlap ${pair.left} & ${pair.right}: ${String(pair.cases)} case(s), so those deltas do not add`);
     }
+  }
+  // The ceiling's union, printed with what it adds on top of the product. Both numbers appear
+  // because the second is the whole headroom a better rewrite engine could collect, and reading
+  // only the first is how 41 cases became a plan for two more rounds of rules that would have
+  // rewritten 18.
+  if (report.ceiling.cases > 0) {
+    lines.push(
+      `  ceiling union (${report.ceiling.rules.join(' + ')}, gold in hand): ${String(report.ceiling.cases)} case(s)` +
+        ` (+${share(report.ceiling.cases)})  — ${String(report.ceiling.beyondProduct)} of them no shipped rule repairs`,
+    );
   }
   for (const problem of report.problems) lines.push(`  FAILED ${problem}`);
   return lines;

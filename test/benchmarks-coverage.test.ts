@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import {
   BENCHMARKS,
+  NOISE_FLOORS,
   REQUIRED,
+  noiseLines,
+  noiseProblems,
   checkCoverage,
   describeCoverage,
   entryCoverage,
@@ -319,5 +322,57 @@ describe('the defaults the workflow relies on', () => {
     const code = await entryCoverage(fileURLToPath(moduleUrl), moduleUrl, (line) => lines.push(line), []);
     expect(code).toBe(0);
     expect(lines.at(-1)).toContain('8 of 9 leaderboards carry a number');
+  });
+});
+
+describe('the noise floor', () => {
+  it('passes on the floors this repository ships, so the row cannot be a transcription', () => {
+    // The check runs on the table itself: 66 flips and a net of 8 are two numbers that have to
+    // satisfy `won + lost = 66` and `won - lost = 8`, and nothing but this test ever re-derives them.
+    expect(noiseProblems(NOISE_FLOORS)).toEqual([]);
+  });
+
+  it('prints a negative net with its sign, which is the direction a treatment can lose in', () => {
+    // A floor is not required to be an improvement, and the sign is the reading: 1 won against 5 lost
+    // is 6 flips and a net of -4, and printing "-4" as "4" would turn a loss into a gain.
+    const [line] = noiseLines([{ corpus: 'x', arm: 'a', runs: ['1', '2'], cases: 100, flipped: 6, net: -4 }]);
+    expect(line).toContain('net -4 (-4.00pp)');
+    expect(noiseProblems([{ corpus: 'x', arm: 'a', runs: ['1', '2'], cases: 100, flipped: 6, net: -4 }])).toEqual([]);
+  });
+
+  it('refuses a net larger than the flips that produced it', () => {
+    const problems = noiseProblems([{ corpus: 'x', arm: 'a', runs: ['1', '2'], cases: 100, flipped: 4, net: 6 }]);
+    expect(problems.join(' ')).toContain('a net cannot exceed the flips');
+  });
+
+  it('refuses a pair of counts no two-way split can produce', () => {
+    // 5 flips and a net of 2 would need won = 3.5.
+    const problems = noiseProblems([{ corpus: 'x', arm: 'a', runs: ['1', '2'], cases: 100, flipped: 5, net: 2 }]);
+    expect(problems.join(' ')).toContain('no pair of counts can satisfy');
+  });
+
+  it('refuses a replicate that compares a dispatch with itself', () => {
+    const problems = noiseProblems([{ corpus: 'x', arm: 'a', runs: ['7', '7'], cases: 100, flipped: 4, net: 0 }]);
+    expect(problems.join(' ')).toContain('compares a dispatch with itself');
+  });
+
+  it('refuses a flip count that is not a count of the corpus', () => {
+    expect(noiseProblems([{ corpus: 'x', arm: 'a', runs: ['1', '2'], cases: 10, flipped: 11, net: 1 }]).join(' ')).toContain(
+      'which is not a count of them',
+    );
+    expect(noiseProblems([{ corpus: 'x', arm: 'a', runs: ['1', '2'], cases: 10, flipped: -1, net: 1 }]).join(' ')).toContain(
+      'which is not a count of them',
+    );
+    expect(noiseProblems([{ corpus: 'x', arm: 'a', runs: ['1', '2'], cases: 0, flipped: 0, net: 0 }]).join(' ')).toContain(
+      'no share can be read from it',
+    );
+  });
+
+  it('prints the share, the sigma and the two-sigma bound, from the counts alone', () => {
+    const [line] = noiseLines(NOISE_FLOORS);
+    expect(line).toContain('66 of 1532 questions');
+    expect(line).toContain('(4.31%)');
+    expect(line).toContain('one sigma 0.53pp');
+    expect(line).toContain('a delta below 1.06pp is two draws of one arm');
   });
 });

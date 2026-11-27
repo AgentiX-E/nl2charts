@@ -353,6 +353,100 @@ export const REQUIRED: readonly string[] = [
   'viscodebench',
 ];
 
+/**
+ * What "nothing changed" looks like when it is measured on a corpus.
+ *
+ * Every delta in this repository is quoted against the split's *binomial* resolution — one draw of
+ * 1,532 questions has a standard error of about 0.3pp — and that number has been wrong in a way
+ * nobody could see, because it assumes the corpus is a single drawing and the model is a function.
+ * It is neither. Two dispatches of the same arm over the same 1,532 questions, with the same prompt
+ * and the same temperature, produced two different corpora: 66 questions changed verdict, 37 one way
+ * and 29 the other, for a net of 8.
+ *
+ * That is the number a delta has to beat. It is also the reason this table carries a noise row
+ * rather than a sentence: `1.17pp` is inside two standard deviations of a treatment that does
+ * nothing, so a reading quoted at 0.3pp resolution would call a null result a win, and the only
+ * thing that has ever caught this class of error here is arithmetic that runs.
+ *
+ * One row per corpus, and it is the *pair* that is the reading: a single run cannot be its own
+ * replicate, and a replicate whose two ids are the same id is a copy.
+ */
+export interface NoiseFloor {
+  readonly corpus: string;
+  readonly arm: string;
+  /** The two dispatches compared, in the order `net` subtracts them. */
+  readonly runs: readonly [string, string];
+  readonly cases: number;
+  /** Questions whose verdict differed between the two runs. */
+  readonly flipped: number;
+  /** First run minus second, in cases. */
+  readonly net: number;
+}
+
+/** The measured floors. One row per corpus, added when a replicate exists — never estimated. */
+export const NOISE_FLOORS: readonly NoiseFloor[] = [
+  {
+    corpus: 'BIRD dev',
+    arm: 'macsql-prompt',
+    runs: ['44991167518', '45678159001'],
+    cases: 1532,
+    flipped: 66,
+    net: 8,
+  },
+];
+
+/**
+ * Why a floor's arithmetic cannot be what it says.
+ *
+ * A flip count and a net are not independent numbers: `won + lost` is the flips and `won - lost` is
+ * the net, so the two must share parity and the flips must bound the net. A row that violates that
+ * is a transcription, and a transcription of a noise floor is worse than no floor at all — it would
+ * be the one number in this file nobody re-derives.
+ */
+export function noiseProblems(floors: readonly NoiseFloor[]): string[] {
+  const problems: string[] = [];
+  for (const floor of floors) {
+    if (floor.cases <= 0) problems.push(`NOISE: ${floor.corpus} has ${String(floor.cases)} questions, so no share can be read from it`);
+    if (floor.runs[0] === floor.runs[1]) {
+      problems.push(`NOISE: ${floor.corpus} names run ${floor.runs[0]} twice, which compares a dispatch with itself`);
+    }
+    if (floor.flipped < 0 || floor.flipped > floor.cases) {
+      problems.push(`NOISE: ${floor.corpus} flips ${String(floor.flipped)} of ${String(floor.cases)} questions, which is not a count of them`);
+    }
+    const bound = Math.abs(floor.net);
+    if (bound > floor.flipped) {
+      problems.push(`NOISE: ${floor.corpus} nets ${String(floor.net)} on ${String(floor.flipped)} flips, and a net cannot exceed the flips that produced it`);
+    } else if ((floor.flipped - bound) % 2 !== 0) {
+      problems.push(
+        `NOISE: ${floor.corpus} flips ${String(floor.flipped)} and nets ${String(floor.net)}, which no pair of counts can satisfy: won + lost is the flips and won - lost is the net`,
+      );
+    }
+  }
+  return problems;
+}
+
+/**
+ * The floor, as the line a document quotes.
+ *
+ * Two numbers, because they answer two questions: the share of the corpus that is not deterministic
+ * (how much of the split is draw), and one standard deviation of a net difference (how large a delta
+ * has to be before it is a reading). The second is `sqrt(flipped)/cases` — the net of a paired count
+ * has that spread under the null, whatever the treatment was.
+ */
+export function noiseLines(floors: readonly NoiseFloor[]): string[] {
+  const lines: string[] = [];
+  for (const floor of floors) {
+    const share = (floor.flipped / floor.cases) * 100;
+    const sd = (Math.sqrt(floor.flipped) / floor.cases) * 100;
+    lines.push(
+      `NOISE ${floor.corpus} · ${floor.arm}: ${String(floor.flipped)} of ${String(floor.cases)} questions changed verdict between ${floor.runs[0]} and ${floor.runs[1]}`
+        + ` (${share.toFixed(2)}%), net ${floor.net >= 0 ? '+' : ''}${String(floor.net)} (${((floor.net / floor.cases) * 100).toFixed(2)}pp)`
+        + `, one sigma ${sd.toFixed(2)}pp — a delta below ${(2 * sd).toFixed(2)}pp is two draws of one arm`,
+    );
+  }
+  return lines;
+}
+
 /** How a `read` function gets a file's text. Injected so the gate is testable without disk. */
 export type Reader = (file: string) => unknown;
 
@@ -480,7 +574,10 @@ export async function main(
 ): Promise<number> {
   const quiet = argv.includes('--quiet');
   if (!quiet) for (const line of describeCoverage(BENCHMARKS, read)) log(line);
-  const issues = checkCoverage(BENCHMARKS, read);
+  // Printed before the verdict, because it is the scale every delta above is read on: a table of
+  // numbers without its resolution is the state this file was written to end.
+  if (!quiet) for (const line of noiseLines(NOISE_FLOORS)) log(line);
+  const issues = [...checkCoverage(BENCHMARKS, read), ...noiseProblems(NOISE_FLOORS)];
   for (const issue of issues) log(`COVERAGE: ${issue}`);
   const measured = BENCHMARKS.filter((row) => row.status === 'measured').length;
   const partial = BENCHMARKS.filter((row) => row.status === 'partial').length;

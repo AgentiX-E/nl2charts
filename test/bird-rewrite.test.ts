@@ -565,6 +565,7 @@ describe('priceRewrites', () => {
       readings: [{ rule: 'r', claim: '', oracle: false, adoption: 'product', fired: 20, won: 1, lost: 19, kept: 0, unchangedWrong: 0, wonCases: [], broken: 0, refused: 0, net: -18, mcnemar: 0.00001, resolutionPp: 1 }],
       union: 1,
       overlap: [],
+      ceiling: { cases: 0, beyondProduct: 0, rules: [] },
       problems: [],
     }).join('\n');
     expect(lines).toContain('p <0.0001');
@@ -642,7 +643,7 @@ describe('priceRewrites', () => {
     expect(priced.readings.map((reading) => reading.won)).toEqual([1, 1]);
     expect(priced.union).toBe(1);
     expect(priced.overlap).toEqual([{ left: 'one', right: 'two', cases: 1 }]);
-    const text = rewriteLines({ split: 'dev', arm: 'a', scored: 1, recomputed: 0, declared: 0, agreed: 1, readings: priced.readings, union: priced.union, overlap: priced.overlap, problems: [] }).join('\n');
+    const text = rewriteLines({ split: 'dev', arm: 'a', scored: 1, recomputed: 0, declared: 0, agreed: 1, readings: priced.readings, union: priced.union, overlap: priced.overlap, ceiling: priced.ceiling, problems: [] }).join('\n');
     expect(text).toContain('overlap one & two: 1 case(s)');
     expect(text).toContain('union of wins across adopted rules: 1');
   });
@@ -854,6 +855,93 @@ describe('rewriteProblems', () => {
   });
 });
 
+describe('the ceiling union', () => {
+  // Two ceilings, one of which repairs everything the other does plus one more case. The union is
+  // the number a plan needs — "with the gold statement in hand, how much of this corpus is even
+  // about the mechanism" — and the sum of the rows is not it: 1 + 2 is a quantity no mechanism can
+  // reach, and reading it as headroom is how a family gets two more rounds after it has closed.
+  const seven: RewriteRule = {
+    name: 'seven',
+    claim: 'the one value',
+    oracle: true,
+    apply: () => "select name from items where score = 7",
+  };
+  const either: RewriteRule = {
+    name: 'either',
+    claim: 'either value',
+    oracle: true,
+    apply: () => ["select name from items where score = 7", "select name from items where score = 9"],
+  };
+  const nine: RewriteRule = {
+    name: 'nine',
+    claim: 'a rule that ships',
+    adoption: 'product',
+    apply: () => "select name from items where score = 9",
+  };
+
+  it('counts a case two ceilings both repair once, and subtracts what ships', async () => {
+    const oracle = createOracle(resolve('eval/bird/oracle.py'), root);
+    try {
+      const cases = [
+        rewriteCase({ id: 'a', question: question({ question_id: 1, SQL: 'select name from items where score = 7' }) }),
+        rewriteCase({ id: 'b', question: question({ question_id: 2, SQL: 'select name from items where score = 9' }) }),
+      ];
+      const priced = await priceRewrites(
+        cases,
+        [seven, either, nine],
+        { execute: (db, sql) => oracle.run(db, sql), judge: judgeOfficial },
+        () => undefined,
+      );
+      // Rows: `seven` wins one, `either` wins two, `nine` ships one.
+      expect(priced.readings.find((row) => row.rule === 'seven')?.won).toBe(1);
+      expect(priced.readings.find((row) => row.rule === 'either')?.won).toBe(2);
+      // The union is two, and so is the product's: `nine` repairs the case `either` also reaches.
+      expect(priced.union).toBe(1);
+      expect(priced.ceiling.cases).toBe(2);
+      expect(priced.ceiling.beyondProduct).toBe(1);
+      expect(priced.ceiling.rules).toEqual(['seven', 'either']);
+    } finally {
+      await oracle.close();
+    }
+  });
+
+  it('is zero when no ceiling was priced, because a rule that reads no gold has no ceiling', async () => {
+    const oracle = createOracle(resolve('eval/bird/oracle.py'), root);
+    try {
+      const priced = await priceRewrites(
+        [rewriteCase()],
+        [nine],
+        { execute: (db, sql) => oracle.run(db, sql), judge: judgeOfficial },
+        () => undefined,
+      );
+      expect(priced.ceiling).toEqual({ cases: 0, beyondProduct: 0, rules: [] });
+    } finally {
+      await oracle.close();
+    }
+  });
+
+  it('prints the union with the subtraction, which is the only headroom a better engine could collect', () => {
+    const text = rewriteLines({
+      split: 'dev',
+      arm: 'a',
+      scored: 1532,
+      recomputed: 1002,
+      declared: 1002,
+      agreed: 1532,
+      readings: [{ rule: 'oracle-transplant', claim: 'a ceiling', oracle: true, adoption: 'ceiling', fired: 89, won: 25, lost: 0, kept: 0, unchangedWrong: 64, wonCases: [], broken: 0, refused: 0, net: 25, mcnemar: 0.0001, resolutionPp: 1 }],
+      union: 18,
+      overlap: [],
+      ceiling: { cases: 41, beyondProduct: 23, rules: ['oracle-transplant', 'oracle-predicate'] },
+      problems: [],
+    }).join('\n');
+    expect(text).toContain('ceiling union (oracle-transplant + oracle-predicate, gold in hand): 41 case(s)');
+    expect(text).toContain('23 of them no shipped rule repairs');
+    // And it is printed after the union it is read against, so the subtraction sits below the
+    // number it subtracts from.
+    expect(text.indexOf('union of wins across adopted rules')).toBeLessThan(text.indexOf('ceiling union'));
+  });
+});
+
 describe('rewriteLines', () => {
   it('prints every rule with its claim and the reconciliation', () => {
     const lines = rewriteLines({
@@ -866,6 +954,7 @@ describe('rewriteLines', () => {
       readings: [{ rule: 'null-order', claim: 'a claim', oracle: false, adoption: 'product', fired: 80, won: 6, lost: 0, kept: 36, unchangedWrong: 38, wonCases: [], broken: 0, refused: 0, net: 6, mcnemar: 0.0313, resolutionPp: 0.4 }],
       union: 6,
       overlap: [],
+      ceiling: { cases: 0, beyondProduct: 0, rules: [] },
       problems: [],
     });
     const text = lines.join('\n');
@@ -889,6 +978,7 @@ describe('rewriteLines', () => {
         readings: [reading({ rule: 'narrow', adoption: 'refused', reason: 'it loses', refusedOn: 'dev', won: 0, lost: 4 })],
         union: 0,
         overlap: [],
+      ceiling: { cases: 0, beyondProduct: 0, rules: [] },
         problems: [],
       }).join('\n');
     expect(render('dev')).toContain('refused on dev, and these are that split\'s counts');
@@ -908,6 +998,7 @@ describe('rewriteLines', () => {
       readings: [{ rule: 'oracle-predicate', claim: 'a ceiling', oracle: true, adoption: 'ceiling', fired: 83, won: 20, lost: 0, kept: 0, unchangedWrong: 60, wonCases: [], broken: 0, refused: 3, net: 20, mcnemar: 0.0001, resolutionPp: 1 }],
       union: 0,
       overlap: [],
+      ceiling: { cases: 0, beyondProduct: 0, rules: [] },
       problems: [],
     }).join('\n');
     expect(withRefusals).toMatch(/oracle-predicate\*\s+fired\s+83/);
@@ -922,6 +1013,7 @@ describe('rewriteLines', () => {
       readings: [{ rule: 'ground', claim: 'a rule', oracle: false, adoption: 'product', fired: 22, won: 14, lost: 0, kept: 0, unchangedWrong: 8, wonCases: [], broken: 0, refused: 0, net: 14, mcnemar: 0.0001, resolutionPp: 1 }],
       union: 14,
       overlap: [],
+      ceiling: { cases: 0, beyondProduct: 0, rules: [] },
       problems: [],
     }).join('\n');
     expect(clean).not.toContain('refused');
@@ -943,6 +1035,7 @@ describe('rewriteLines', () => {
       ],
       union: 3,
       overlap: [],
+      ceiling: { cases: 0, beyondProduct: 0, rules: [] },
       problems: [],
     }).join('\n');
     expect(lines).toContain('-- ceilings: read the gold statement, cannot ship, exist to price a dispatch --');
@@ -965,6 +1058,7 @@ describe('rewriteLines', () => {
       ],
       union: 5,
       overlap: [],
+      ceiling: { cases: 0, beyondProduct: 0, rules: [] },
       problems: [],
     }).join('\n');
     expect(lines).toContain('no two rules won the same case, so the deltas add');
@@ -972,7 +1066,7 @@ describe('rewriteLines', () => {
   });
 
   it('prints a refusal as a failure line', () => {
-    const lines = rewriteLines({ split: 'dev', arm: 'a', scored: 1, recomputed: 0, declared: 1, agreed: 0, readings: [], union: 0, overlap: [], problems: ['REWRITE: no'] });
+    const lines = rewriteLines({ split: 'dev', arm: 'a', scored: 1, recomputed: 0, declared: 1, agreed: 0, readings: [], union: 0, overlap: [], ceiling: { cases: 0, beyondProduct: 0, rules: [] }, problems: ['REWRITE: no'] });
     expect(lines.join('\n')).toContain('FAILED REWRITE: no');
   });
 });

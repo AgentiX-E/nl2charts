@@ -128,6 +128,15 @@ called underpowered rather than significant.
 **Measure** — A quantitative field that is aggregated (revenue, quantity). In a
 semantic model, a metric with an expression and a grain.
 
+**Noise floor** — The measured spread of a corpus between two dispatches of the same arm, and the
+only honest scale for a delta. Two runs of `macsql-prompt` over the same 1,532 dev questions changed
+the verdict of **66** of them (4.31%), 37 one way and 29 the other, net 8 at exact McNemar p = 0.389 —
+so one standard deviation of a paired net is `sqrt(66)/1,532 = 0.53pp` and an unpaired delta below
+1.06pp is two draws of one arm. Every delta in this repository used to be quoted at the binomial
+resolution of a single drawing (0.3pp), which is the noise of a corpus that does not vary; `NOISE_FLOORS`
+in `eval/benchmarks.ts` is where the measured one lives, and the gate refuses a floor whose flips and
+net cannot be a two-way split of the same cases.
+
 **Normalization (question)** — Mapping synonyms and punctuation before matching
 (`sales` → `revenue`, `per` → `by`). Its effect is measured, not assumed.
 
@@ -845,6 +854,14 @@ small, no version of the rule is worth building. `oracle-drop-limit` is the ceil
 repairing 12 and breaking 23. The shipped rule fires 49 times, repairs 11 and breaks none. A ceiling
 that knows more than a rule and does worse is the clearest evidence a rule can have that its
 conditions are doing the work rather than getting in the way.
+
+The ceilings are also the only instrument that can close a line of work, and they do it through their
+**union** rather than through any row: `RewriteReport.ceiling` collects what every gold-reading
+mechanism together repairs, and subtracts what ships. On the dev artifact behind the published
+65.93%, three ceilings win 24, 22 and 2 cases — 48 rows — and their union is 41, with 26 of those
+outside anything the product does. Against a 12.56pp gap to the leader that is the whole argument:
+a perfect rewrite engine reaches 68.6%, and no amount of skill closes the rest.
+
 
 **SQL-Like** — A statement read back into the labelled steps that produced it: `Intent`, `Tables`,
 `Joins`, `Filters`, `Group`, `Having`, `Order`, `Limit`. The name and the idea are OpenSearch-SQL's,
