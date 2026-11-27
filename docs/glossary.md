@@ -200,6 +200,26 @@ answered, and on a voting arm it is the *only* place a refusal can appear.
 `candidateRecord: 'kept'` at the top of the artifact is what separates "no candidate was
 dropped" from "this artifact never looked".
 
+**Shipped edit** — A rewrite the pipeline applies to a statement *after* the model has written
+it, named in `SHIPPED_EDITS` (`packages/ai/src/edits.ts`) with its rule name, what it needs before it
+can fire (`nothing`, `dialect`, `data`) and the reading that put it there. Three ship: the grounding
+edit (`ground-shipped`, needs a column reader), the cap strip (`drop-unordered-limit`, needs nothing)
+and the null-order guard (`null-order`, needs the caller's dialect). The list is the product's side of
+a two-sided claim; the pricer's side is the rule table in `eval/bird/rewrite.ts`, where each row
+carries an **adoption** verdict. `ledgerProblems` fails a run when the two disagree in either
+direction — an edit the product applies and nothing priced is silent by construction, which is why the
+check exists. Contrast **Recipe**, which names the *prompt*; the two files close the same seam one
+step apart.
+
+**Adoption verdict** — What a priced rule decided, as distinct from what it measured: `product` (the
+pipeline applies it, and the ledger must list it), `refused` (priced, not adopted, with the reason —
+the reason is required), `instrument` (not a candidate; it prices an implementation or a gate so
+another row can be read). A ceiling carries `oracle` instead and can neither ship nor be refused. A
+rule with no verdict is `unstated` and the report refuses it: before this field existed, "adopted" was
+derived from `net > 0`, so a rule that won more than it lost counted into the union of what a pipeline
+would recover — `drop-count-distinct` was that rule for two rounds, at 21 cases against the
+pipeline's 11 on Mini-Dev.
+
 **Replay provider** — A first-class LLM provider that returns recorded responses
 by matching the prompt. Used in CI so the real pipeline runs deterministically.
 

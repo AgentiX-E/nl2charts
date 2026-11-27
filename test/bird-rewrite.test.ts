@@ -19,6 +19,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { spawnSync } from 'node:child_process';
 import { afterAll, describe, expect, it } from 'vitest';
 import { judgeOfficial } from '@agentix-e/nl2charts-devkit';
 import type { BirdQuestion } from '../eval/bird/data.js';
@@ -32,12 +33,13 @@ import {
   priceRewrites,
   resolveRewriteSettings,
   rewriteCases,
+  ledgerProblems,
   rewriteLines,
   rewriteProblems,
   statementOf,
   typeLookup,
 } from '../eval/bird/rewrite.js';
-import type { RewriteArtifact, RewriteCase, RewriteRule } from '../eval/bird/rewrite.js';
+import type { RewriteArtifact, RewriteCase, RewriteReading, RewriteRule } from '../eval/bird/rewrite.js';
 
 const root = mkdtempSync(join(tmpdir(), 'nl2charts-rewrite-'));
 mkdirSync(join(root, 'shop'), { recursive: true });
@@ -129,6 +131,15 @@ describe('rewriteCases', () => {
     // are counted apart, because one is a hole in the artifact and the other is the wrong split.
     expect(kept.unretained).toBe(1);
     expect(kept.unknownQuestion).toBe(2);
+  });
+
+  it('prices an artifact that recorded no failures block, because a passing arm writes none', () => {
+    // `failures` is where a failed case keeps its statement; an arm that passed everything has no
+    // key at all, and reading it as "no failures" is the difference between an empty list and a
+    // crash on the best run of the round.
+    const cases = rewriteCases({ cases: [{ id: '1', arm: 'a', passed: true, sql: 'select 1' }] }, 'a', [question({ question_id: 1 })]);
+    expect(cases).toMatchObject({ unretained: 0, unknownQuestion: 0 });
+    expect(cases.cases).toHaveLength(1);
   });
 
   it('reads an artifact that kept no cases at all as empty rather than as an error', () => {
@@ -551,7 +562,7 @@ describe('priceRewrites', () => {
       recomputed: 50,
       declared: 50,
       agreed: 100,
-      readings: [{ rule: 'r', claim: '', oracle: false, fired: 20, won: 1, lost: 19, kept: 0, unchangedWrong: 0, wonCases: [], broken: 0, refused: 0, net: -18, mcnemar: 0.00001, resolutionPp: 1 }],
+      readings: [{ rule: 'r', claim: '', oracle: false, adoption: 'product', fired: 20, won: 1, lost: 19, kept: 0, unchangedWrong: 0, wonCases: [], broken: 0, refused: 0, net: -18, mcnemar: 0.00001, resolutionPp: 1 }],
       union: 1,
       overlap: [],
       problems: [],
@@ -612,8 +623,11 @@ describe('priceRewrites', () => {
   it('counts a case twice when two rules win it, and reports the overlap', async () => {
     // The sum of per-rule deltas is a product claim only if nothing overlapped, so the harness
     // computes the union and names the pairs rather than leaving the addition to the reader.
-    const one: RewriteRule = { name: 'one', claim: '', apply: (input) => `${input.sql} ` };
-    const two: RewriteRule = { name: 'two', claim: '', apply: (input) => `${input.sql}  ` };
+    //
+    // Both rules declare themselves the product's, because the union is a claim about the pipeline
+    // and not about arithmetic: a row that wins and is refused is not part of it.
+    const one: RewriteRule = { name: 'one', claim: '', adoption: 'product', apply: (input) => `${input.sql} ` };
+    const two: RewriteRule = { name: 'two', claim: '', adoption: 'product', apply: (input) => `${input.sql}  ` };
     const base = rewriteCase();
     const priced = await priceRewrites(
       [base],
@@ -719,6 +733,27 @@ describe('priceRewrites', () => {
   });
 });
 
+/** One reading, with the verdict the test is about and nothing else filled in. */
+function reading(overrides: Partial<RewriteReading> & { readonly rule: string }): RewriteReading {
+  return {
+    claim: '',
+    oracle: false,
+    adoption: 'product',
+    fired: 0,
+    won: 0,
+    lost: 0,
+    kept: 0,
+    unchangedWrong: 0,
+    wonCases: [],
+    broken: 0,
+    refused: 0,
+    net: 0,
+    mcnemar: 1,
+    resolutionPp: 1,
+    ...overrides,
+  };
+}
+
 describe('rewriteProblems', () => {
   it('refuses a baseline that does not reproduce the score', () => {
     const problems = rewriteProblems({ recomputed: 979, declared: 980, scored: 1532, readings: [] });
@@ -730,13 +765,43 @@ describe('rewriteProblems', () => {
       recomputed: 1,
       declared: 1,
       scored: 1,
-      readings: [{ rule: 'x', claim: '', oracle: false, fired: 1, won: 0, lost: 0, kept: 0, unchangedWrong: 0, wonCases: [], broken: 2, refused: 0, net: 0, mcnemar: 1, resolutionPp: 1 }],
+      readings: [{ rule: 'x', claim: '', oracle: false, adoption: 'refused', reason: 'a reason', fired: 1, won: 0, lost: 0, kept: 0, unchangedWrong: 0, wonCases: [], broken: 2, refused: 0, net: 0, mcnemar: 1, resolutionPp: 1 }],
     });
     expect(problems.join(' ')).toContain('no longer run');
   });
 
   it('passes a report whose baseline reconciles', () => {
     expect(rewriteProblems({ recomputed: 980, declared: 980, scored: 1532, readings: [] })).toEqual([]);
+  });
+
+  it('refuses a rule that was priced and never decided about', () => {
+    // The state `drop-count-distinct` sat in for two rounds. A reading with no verdict is not a
+    // rejection and it is not an adoption; it is a measurement nobody used, and the union used to
+    // treat it as the pipeline's.
+    const problems = rewriteProblems({
+      recomputed: 1,
+      declared: 1,
+      scored: 1,
+      readings: [reading({ rule: 'undecided', adoption: 'unstated' })],
+    });
+    expect(problems.join(' ')).toContain('carries no verdict');
+  });
+
+  it('refuses a refusal that states no reason', () => {
+    const problems = rewriteProblems({ recomputed: 1, declared: 1, scored: 1, readings: [reading({ rule: 'quiet', adoption: 'refused' })] });
+    expect(problems.join(' ')).toContain('says no reason');
+  });
+
+  it('refuses a shipped rule that still carries a refusal reason', () => {
+    // One of the two is stale, and a report that carries both is a report whose reader cannot tell
+    // which one the code believes.
+    const problems = rewriteProblems({
+      recomputed: 1,
+      declared: 1,
+      scored: 1,
+      readings: [reading({ rule: 'stale', adoption: 'product', reason: 'refused in an earlier round' })],
+    });
+    expect(problems.join(' ')).toContain('one of the two is stale');
   });
 });
 
@@ -749,7 +814,7 @@ describe('rewriteLines', () => {
       recomputed: 980,
       declared: 980,
       agreed: 1532,
-      readings: [{ rule: 'null-order', claim: 'a claim', oracle: false, fired: 80, won: 6, lost: 0, kept: 36, unchangedWrong: 38, wonCases: [], broken: 0, refused: 0, net: 6, mcnemar: 0.0313, resolutionPp: 0.4 }],
+      readings: [{ rule: 'null-order', claim: 'a claim', oracle: false, adoption: 'product', fired: 80, won: 6, lost: 0, kept: 36, unchangedWrong: 38, wonCases: [], broken: 0, refused: 0, net: 6, mcnemar: 0.0313, resolutionPp: 0.4 }],
       union: 6,
       overlap: [],
       problems: [],
@@ -771,7 +836,7 @@ describe('rewriteLines', () => {
       recomputed: 60,
       declared: 60,
       agreed: 100,
-      readings: [{ rule: 'oracle-predicate', claim: 'a ceiling', oracle: true, fired: 83, won: 20, lost: 0, kept: 0, unchangedWrong: 60, wonCases: [], broken: 0, refused: 3, net: 20, mcnemar: 0.0001, resolutionPp: 1 }],
+      readings: [{ rule: 'oracle-predicate', claim: 'a ceiling', oracle: true, adoption: 'ceiling', fired: 83, won: 20, lost: 0, kept: 0, unchangedWrong: 60, wonCases: [], broken: 0, refused: 3, net: 20, mcnemar: 0.0001, resolutionPp: 1 }],
       union: 0,
       overlap: [],
       problems: [],
@@ -785,7 +850,7 @@ describe('rewriteLines', () => {
       recomputed: 60,
       declared: 60,
       agreed: 100,
-      readings: [{ rule: 'ground', claim: 'a rule', oracle: false, fired: 22, won: 14, lost: 0, kept: 0, unchangedWrong: 8, wonCases: [], broken: 0, refused: 0, net: 14, mcnemar: 0.0001, resolutionPp: 1 }],
+      readings: [{ rule: 'ground', claim: 'a rule', oracle: false, adoption: 'product', fired: 22, won: 14, lost: 0, kept: 0, unchangedWrong: 8, wonCases: [], broken: 0, refused: 0, net: 14, mcnemar: 0.0001, resolutionPp: 1 }],
       union: 14,
       overlap: [],
       problems: [],
@@ -804,8 +869,8 @@ describe('rewriteLines', () => {
       declared: 60,
       agreed: 100,
       readings: [
-        { rule: 'ground', claim: 'a rule', oracle: false, fired: 9, won: 3, lost: 0, kept: 0, unchangedWrong: 6, wonCases: [], broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
-        { rule: 'transplant', claim: 'a ceiling', oracle: true, fired: 20, won: 9, lost: 0, kept: 0, unchangedWrong: 11, wonCases: [], broken: 0, refused: 0, net: 9, mcnemar: 0.004, resolutionPp: 1 },
+        { rule: 'ground', claim: 'a rule', oracle: false, adoption: 'product', fired: 9, won: 3, lost: 0, kept: 0, unchangedWrong: 6, wonCases: [], broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
+        { rule: 'transplant', claim: 'a ceiling', oracle: true, adoption: 'ceiling', fired: 20, won: 9, lost: 0, kept: 0, unchangedWrong: 11, wonCases: [], broken: 0, refused: 0, net: 9, mcnemar: 0.004, resolutionPp: 1 },
       ],
       union: 3,
       overlap: [],
@@ -826,8 +891,8 @@ describe('rewriteLines', () => {
       declared: 60,
       agreed: 100,
       readings: [
-        { rule: 'one', claim: '', oracle: false, fired: 4, won: 2, lost: 0, kept: 0, unchangedWrong: 2, wonCases: [], broken: 0, refused: 0, net: 2, mcnemar: 0.5, resolutionPp: 1 },
-        { rule: 'two', claim: '', oracle: false, fired: 4, won: 3, lost: 0, kept: 0, unchangedWrong: 1, wonCases: [], broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
+        { rule: 'one', claim: '', oracle: false, adoption: 'product', fired: 4, won: 2, lost: 0, kept: 0, unchangedWrong: 2, wonCases: [], broken: 0, refused: 0, net: 2, mcnemar: 0.5, resolutionPp: 1 },
+        { rule: 'two', claim: '', oracle: false, adoption: 'product', fired: 4, won: 3, lost: 0, kept: 0, unchangedWrong: 1, wonCases: [], broken: 0, refused: 0, net: 3, mcnemar: 0.25, resolutionPp: 1 },
       ],
       union: 5,
       overlap: [],
@@ -1095,5 +1160,136 @@ describe('the rule the pipeline ships, priced as itself', () => {
 
   it('leaves a statement whose value is already the stored spelling alone', () => {
     expect(ruleOf('ground-shipped').apply(at("select id from items where name = 'Cup'"))).toBeUndefined();
+  });
+});
+
+describe('the entry point', () => {
+  it('is executable as a script, and refuses a dispatch that names no artifact', () => {
+    // The guard is only exercised by a real child process: imported, `import.meta.url` is never the
+    // entry, so every other test in this file leaves that branch dark. A guard that never fires is a
+    // CLI nobody has run, and this one is what `bench:bird:rewrite` invokes.
+    const cwd = resolve(import.meta.dirname, '..');
+    const result = spawnSync(process.execPath, ['--import', 'tsx', join(cwd, 'eval/bird/rewrite.ts')], { cwd, encoding: 'utf8' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('--artifact is required');
+  });
+});
+
+describe('the verdict a rule carries', () => {
+  const rule = (name: string): RewriteRule => {
+    const found = REWRITE_RULES.find((entry) => entry.name === name);
+    if (found === undefined) throw new Error(`no rule ${name}`);
+    return found;
+  };
+
+  it('decides about every rule it prices', () => {
+    // A rule with a reading and no verdict is a measurement nobody used, which is the state
+    // `drop-count-distinct` sat in for two rounds: 33 won against 18 lost, priced every round, and
+    // the report's union counted its repairs as part of what the pipeline would recover.
+    for (const priced of REWRITE_RULES) {
+      expect(priced.adoption, `${priced.name} has no verdict`).toBeDefined();
+      if (priced.adoption === 'product') expect(priced.reason, `${priced.name} ships and refuses`).toBeUndefined();
+      else expect(priced.reason, `${priced.name} is ${String(priced.adoption)} and says no reason`).toBeTruthy();
+    }
+  });
+
+  it('names the counts in the refusal it took two rounds to write', () => {
+    const refused = rule('drop-count-distinct');
+    expect(refused.adoption).toBe('refused');
+    // The numbers are the verdict: 33 won is why it was tempting, 18 lost is why it did not ship.
+    expect(refused.reason).toContain('33');
+    expect(refused.reason).toContain('18');
+  });
+
+  it('agrees with the product about which edits the pipeline applies', () => {
+    // The gate that makes "shipped" a fact about two files rather than a sentence in a commit
+    // message. It is empty on the real table, and each way it can disagree is driven below.
+    expect(ledgerProblems(REWRITE_RULES)).toEqual([]);
+    expect(REWRITE_RULES.filter((entry) => entry.adoption === 'product').map((entry) => entry.name)).toEqual([
+      'null-order',
+      'drop-unordered-limit',
+      'ground-shipped',
+    ]);
+  });
+
+  it('refuses a table whose product row the ledger does not enable', () => {
+    const missing = REWRITE_RULES.filter((entry) => entry.name !== 'null-order');
+    expect(ledgerProblems(missing).join(' ')).toContain('enables drop-unordered-limit, ground-shipped, null-order');
+  });
+
+  it('refuses a table that ships nothing at all, and names both sides', () => {
+    // The empty side is worth a test because it is the one where a message that joined an empty list
+    // would read as a sentence with a hole in it: `marks  as the product's`.
+    expect(ledgerProblems([]).join(' ')).toContain("marks nothing as the product's and the ledger enables drop-unordered-limit, ground-shipped, null-order");
+  });
+
+  it('refuses a table that ships an edit the ledger has never heard of', () => {
+    const extra: RewriteRule = { name: 'invented', claim: '', adoption: 'product', apply: () => undefined };
+    expect(ledgerProblems([...REWRITE_RULES, extra]).join(' ')).toContain('marks drop-unordered-limit, ground-shipped, invented, null-order');
+  });
+});
+
+describe('why a count cannot be conditioned on the data', () => {
+  /**
+   * The premise of `drop-count-distinct`'s refusal, run rather than argued.
+   *
+   * The rule loses 18 of 1,532 dev questions because removing `distinct` can only over-count when a
+   * statement's rows repeat — a join that multiplies a parent row, a column that is not unique. And
+   * it wins 33 for the same reason: the gold counts plain rows over a join the statement invented.
+   * Both readings therefore live in the same place, which is why every condition the database can
+   * express selects the cases where the edit is a no-op.
+   *
+   * Two tables below are the whole proof. `multiplied` repeats its rows, so the two counts differ
+   * and the edit changes the answer — a condition that admits it admits a win and a loss
+   * indistinguishably. `unique` does not repeat them, so the counts agree and the edit changes
+   * nothing at all.
+   */
+  const count = (db: DatabaseSync, sql: string): number => Number((db.prepare(sql).get() as { c: number }).c);
+
+  it('changes the answer exactly when the rows repeat', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('create table multiplied (id integer, kind text)');
+    db.exec("insert into multiplied values (1, 'a'), (1, 'b'), (2, 'b')");
+    expect(count(db, 'select count(distinct id) as c from multiplied')).toBe(2);
+    expect(count(db, 'select count(id) as c from multiplied')).toBe(3);
+    db.close();
+  });
+
+  it('changes nothing when they do not, which is the only condition the data can express', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('create table unique_rows (id integer primary key)');
+    db.exec('insert into unique_rows values (1), (2)');
+    // Equal counts are what "drop the distinct only when it does not change the count" would test
+    // for, and on this table the edit returns the identical number — so the condition is satisfied
+    // precisely where the rule has nothing to give.
+    expect(count(db, 'select count(distinct id) as c from unique_rows')).toBe(
+      count(db, 'select count(id) as c from unique_rows'),
+    );
+    db.close();
+  });
+});
+
+describe('the union is the pipeline, not the arithmetic', () => {
+  it('leaves out a refused rule that won its case', async () => {
+    // The defect this replaced: the union was computed over `net > 0`, so a rule that won and was
+    // refused for breaking others contributed its repairs to the number a product claim quotes.
+    const winner: RewriteRule = { name: 'winner', claim: '', adoption: 'product', apply: (input) => `${input.sql} ` };
+    const refused: RewriteRule = {
+      name: 'refused',
+      claim: '',
+      adoption: 'refused',
+      reason: 'wins and breaks in equal measure',
+      apply: (input) => `${input.sql}  `,
+    };
+    const base = rewriteCase();
+    const priced = await priceRewrites(
+      [base],
+      [winner, refused],
+      { execute: async (_db, sql) => ({ ok: true, rows: sql === base.sql ? [['pen']] : [['cup']] }), judge: judgeOfficial },
+      () => undefined,
+    );
+    expect(priced.readings.map((reading) => reading.won)).toEqual([1, 1]);
+    expect(priced.union).toBe(1);
+    expect(priced.overlap).toEqual([]);
   });
 });

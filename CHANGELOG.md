@@ -7,6 +7,30 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`SHIPPED_EDITS`: the three edits the pipeline applies, named with their readings.** `recipe.ts`
+  closed this seam for the prompt and left it open one step later, where three rewrites happen to a
+  statement after the model has written it. `packages/ai/src/edits.ts` now names each one — the rule
+  the pricer prints, whether it is enabled, what it needs (`nothing` / `dialect` / `data`) and the
+  measurement that put it there — and `test/bird-edit-ledger.test.ts` holds it to the pricer's table
+  in both directions. `ask_question` reads the ledger for its grounding switch instead of the literal
+  `true` it carried for one round.
+
+### Fixed
+- **The rewrite report's union counted edits no product runs.** The union — distinct cases at least
+  one adopted rule repairs, the number a product claim would quote — was computed over `net > 0`, and
+  a sign is not a verdict: `drop-count-distinct` (33 won, 18 lost on dev, refused) contributed its
+  repairs to it for two rounds. Each rule now carries an `adoption` verdict (`product` / `refused` /
+  `instrument`, or `unstated`, which the report refuses) and the union is computed over the rows the
+  pipeline applies. On the same Mini-Dev artifact the number moved from **21 cases (+4.23pp) to 11
+  (+2.22pp)**; the ten that left were repaired by rules no product runs, and `ground-case-any`'s nine
+  wins all sat inside `ground-shipped`'s ten, which is the harness's copy of the edit and the
+  library's copy agreeing case for case.
+- **`drop-count-distinct` is refused with a proof instead of a suspicion.** The round-202 plan left it
+  open as "condition it on something executable — whether deduplicating changes the row count". That
+  condition is empty by construction: the edit changes an answer exactly when the rows repeat, so the
+  only data-expressible gate selects the cases where the rule cannot help. Two tables in
+  `test/bird-rewrite.test.ts` are the proof, and the rule is priced every run so the refusal can be
+  re-examined rather than remembered (Mini-Dev 35 fired / 9 won / 5 lost; dev 119 / 33 / 18).
 - **`ask_question` corrects a literal against the caller's own data, and says how often it did.** The
   grounding rewrite — the largest free edit this repository has priced (26 fired / 17 won / 0 lost on
   dev, +1.11pp, p < 0.0001; 11 / 10 / 0 on Mini-Dev when re-priced this round) — was reachable only

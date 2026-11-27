@@ -22480,3 +22480,99 @@ The tool now returns `{ substitutions, refused }` beside the statement, and `rea
 turns the rule off — the control that makes the product's own corpus measurable rather than assumed.
 The cost is one `select distinct` per compared column and no tokens; the payload is what lets a
 reader of the bill see that.
+
+## The union was counting edits nobody runs
+
+`bench:bird:rewrite` prints three numbers a product claim can rest on: each rule's fired/repaired/broke
+row, the `union` — distinct cases at least one *adopted* rule repairs — and the overlap between them.
+The union exists because per-rule deltas add only when nothing overlapped, and it is the number a
+product sentence would quote.
+
+It was computed over `net > 0`, and that is not adoption. Re-running the same instrument on the same
+Mini-Dev artifact, after the field that made the difference visible:
+
+| reading | rules in it | cases repaired | share of 496 |
+| --- | --- | ---: | ---: |
+| `net > 0` (what the report printed until this round) | 6 | **21** | **4.23pp** |
+| `adoption: 'product'` (what the pipeline applies) | 3 | **11** | **2.22pp** |
+
+Ten of the twenty-one belong to the wider list and to no product: nine are `drop-count-distinct`'s
+and one is `integer-division`'s. The remaining non-shipping rows add nothing new, and that is a
+reading in itself — `ground-case-any`'s nine wins and `ground-case-empty`'s four all sit inside
+`ground-shipped`'s ten, which is the harness's copy of the edit and the library's copy agreeing case
+for case. The overstatement is **2.02pp on a 496-question split**: the number a reader would have been
+invited to quote as "what the rewrites are worth" was nearly twice the truth, and it was wrong in the
+direction that flatters.
+
+### A sign is not a verdict
+
+The defect's cause is small and general: the table had no place to write a decision, so the report
+derived one from the sign of a difference. Every rule that wins more than it loses became "adopted",
+which is a statement about a corpus dressed as a statement about the product — and the two came apart
+exactly where the repository had already decided the opposite. `drop-count-distinct` is the case: 119
+firings, 33 wins, 18 losses on dev, refused in round 202 because *18 is a cost and not noise*, and
+still inside the union in round 203.
+
+Each rule now carries a verdict, and the report refuses to print a reading without one:
+
+| verdict | meaning | where it must also appear |
+| --- | --- | --- |
+| `product` | the pipeline applies it | `SHIPPED_EDITS` in `packages/ai` |
+| `refused` | priced, not adopted, with the reason | nowhere — the reason is the record |
+| `instrument` | not a candidate: prices an implementation or a gate so another row can be read | nowhere |
+| — | a ceiling, labelled `oracle`, cannot ship | nowhere |
+| `unstated` | priced and never decided | **refused** by `rewriteProblems` |
+
+`unstated` is a state rather than a default because the round-203 lesson was exactly this: a default
+is a bet, and the bet here would have been "nobody decided, so nothing happened" — which reads
+identically to "we looked and said no".
+
+### One list, held to the other
+
+The product's edits are now named in `packages/ai/src/edits.ts`: rule name, whether it is enabled,
+what it needs before it can fire (`nothing`, `dialect`, `data`), and the reading that put it there.
+`ledgerProblems` compares that list with the rows marked `product` and fails the run when they differ
+in either direction — an edit the product runs and nothing priced, or a rule the pricer ships and the
+product never wired. `test/bird-edit-ledger.test.ts` exercises the same comparison on the real table,
+plus the one claim neither file can check alone: an edit that says `needs: 'data'` must be the rule
+the pricer marks `needsDomains`.
+
+The immediate consequence is in the tool: `ask_question` used to enable the grounding edit with the
+literal `true`. It reads `SHIPPED_EDITS` now, so the switch and the number behind it are one object.
+That is the same seam `recipe.ts` closed for the prompt, one step later in the pipeline — and the
+reason it is worth closing twice is that both times the failure would have been silent: a prompt that
+stops being the measured one still answers, and so does an edit.
+
+### Why `drop-count-distinct` cannot be conditioned on the data
+
+The round-202 plan left one item open for this round: gate the rule on something executable — whether
+deduplicating changes the row count — instead of on the question's vocabulary, which had already been
+shown not to separate the two readings.
+
+The condition is expressible and it is empty. Both readings live at the same place, because the rule
+can only change an answer where the rows repeat: a count with and without `distinct` differ exactly
+when a join multiplied a parent row or a column is not unique, and that is the same fact that makes
+the edit worth making. `test/bird-rewrite.test.ts` runs the two tables:
+
+| table | `count(distinct id)` | `count(id)` | what the edit does |
+| --- | ---: | ---: | --- |
+| rows repeat (`(1,a),(1,b),(2,b)`) | 2 | 3 | changes the answer — a win if the gold counts rows, a loss if it counts distinct |
+| rows unique (`1`,`2`) | 2 | 2 | nothing: the same number comes back |
+
+So "drop the `distinct` only when it does not change the count" admits exactly the cases where the
+rule cannot help, and the profitable half is the half no fact about the database can adjudicate: the
+difference between "the duplicates are the join the statement invented" and "the duplicates are the
+question" is intent, and the question's wording was already measured at 33 wins against 18 losses.
+Nothing the schema can say closes it either — a primary key or a unique constraint makes the counts
+agree, which is the first row of the table above.
+
+The rule is refused with that reasoning attached, and the instrument prices it every run so the
+refusal can be re-examined rather than remembered: Mini-Dev 35 fired / 9 won / 5 lost, dev 119 / 33 /
+18.
+
+### What this round does not claim
+
+No score moved. The union is smaller because it is now true, not because an edit was removed: the
+three shipping rules are the same three the pipeline already applied. The one number that changed is
+the one a reader was being invited to quote — 4.23pp of Mini-Dev became 2.22pp — and the honest
+reading of that change is that the earlier figure included work no product performs.

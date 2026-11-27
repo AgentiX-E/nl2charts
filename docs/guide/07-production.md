@@ -546,6 +546,43 @@ Three cases where the loop does nothing, which is the point:
 | Guard refuses a `DELETE` | Classified as `guard`, told the read-only rule, never executed |
 | Engine reports a syntax error at a position | The caret line is drawn under that position, not under the first token |
 
+## The three edits the pipeline applies, and where that is written down
+
+After the model writes a statement and before it runs, the pipeline may edit it three times. Each
+edit is licensed by a fact rather than by a prediction, costs no tokens, and is named in
+`SHIPPED_EDITS` (`packages/ai/src/edits.ts`) with the reading that justifies it:
+
+| edit | what it does | needs | cost |
+| --- | --- | --- | --- |
+| `ground-shipped` | rewrites a literal to the spelling the column stores, when exactly one stored value matches ignoring case | a column reader (`ask_question` supplies one) | one `select distinct` per compared column |
+| `drop-unordered-limit` | removes a top-level `limit` from a statement with no top-level `order by`, when the question names no rank | nothing | none |
+| `null-order` | prefixes an ascending sort key with `IS NULL` behind a row cap, so unknown values cannot win a "lowest" question | the caller's dialect — an engine with no row is declined, not guessed | none |
+
+The order in the table is the order they run in, and it matters: the cap strip runs before the
+null-order guard, because a cap the pipeline has just removed makes the sort unobservable, and the
+guard would otherwise prefix a key nothing reads.
+
+Three properties are worth knowing as an operator:
+
+- **`needs` is a real requirement.** The grounding edit is inert without a reader — and an inert
+  edit looks exactly like a database where every spelling was already right. If you build your own
+  pipeline rather than using `ask_question`, pass `readColumnValues` or the edit does nothing.
+- **One is switchable, and off is a control rather than a fallback.** `ask: { readDomains: false }`
+  turns the grounding edit off. With it on, every measurement of your own corpus is a measurement of
+  the edit plus the prompt, and a deployment measuring its accuracy needs both readings.
+- **An edit ships only with a reading.** `drop-count-distinct` — remove `distinct` from a count —
+  wins 33 questions and loses 18 on BIRD's dev split, and it does not ship. It cannot even be gated
+  on the data: the two outcomes live at the same place, because the edit changes an answer exactly
+  when the rows repeat, and which reading is right there is a question about intent rather than a
+  fact about the database. If an edit you add to your own pipeline has that shape, the honest thing
+  is a measurement that includes its losses.
+
+Two things hold the two lists together, and they run on every push: `bench:bird:rewrite` refuses to
+print a report when the rows it marks as shipped are not the rows the ledger enables, and
+`test/bird-edit-ledger.test.ts` makes the same comparison against the real table. An edit the product
+applies and nothing priced, or a rule the pricer marks as shipped and the product never wired, both
+fail the build.
+
 ## Gates you inherit
 
 These run in CI on every commit, and the same commands run locally:

@@ -1,4 +1,4 @@
-import { createGroundingReader, createPipeline, resolveShipment } from '@agentix-e/nl2charts-ai';
+import { createGroundingReader, createPipeline, resolveShipment, shippedEdit } from '@agentix-e/nl2charts-ai';
 import type { LlmProvider, SchemaColumn, SchemaTable } from '@agentix-e/nl2charts-ai';
 import type { Runner } from '@agentix-e/nl2charts-core';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
@@ -281,7 +281,15 @@ export async function askQuestion(
       ...(context.ask.linkEvidence === undefined ? {} : { linkEvidence: context.ask.linkEvidence }),
       // The rule the data proves, on the caller's own database — see `domainReaderFor` for why the
       // reader is built per question rather than per deployment.
-      ...(context.ask.readDomains === false ? {} : { readColumnValues: domainReaderFor(context.runner) }),
+      //
+      // Whether the rule runs is not this file's decision. It was, for one round: the default was
+      // the literal `true` here, and a literal in a tool is a decision with no reading attached and
+      // no gate reading it — so the edit could stop being measured and keep running. The ledger in
+      // `packages/ai/src/edits.ts` holds the decision and the number behind it, and
+      // `test/bird-rules-ledger.test.ts` requires it to agree with the pricer's own verdicts.
+      ...(context.ask.readDomains ?? shippedEdit('ground-shipped').enabled
+        ? { readColumnValues: domainReaderFor(context.runner) }
+        : {}),
       prompt: shipped.options,
       // Part of the recipe, not of the call: the hint lives in the user message, so a pipeline
       // that turned it on would send a prompt the arm that chose this recipe never sent.

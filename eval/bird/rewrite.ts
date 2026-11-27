@@ -71,7 +71,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mcnemarExact, pairedResolution } from '@agentix-e/nl2charts-devkit';
 import type { MatchReason } from '@agentix-e/nl2charts-devkit';
-import { applyGrounding, clauseAt, guardNullOrder, stripUnfoundedCap } from '@agentix-e/nl2charts-ai';
+import { applyGrounding, clauseAt, guardNullOrder, SHIPPED_EDITS, stripUnfoundedCap } from '@agentix-e/nl2charts-ai';
 import { domainsOf, groundLiteralAbsence, groundLiteralCase } from './literal-repair.js';
 import { aliasTable, spliceWhereClause, whereClauseSpan } from './sql-shape.js';
 import type { ColumnDomain, GroundableKind } from './literal-repair.js';
@@ -149,6 +149,29 @@ export interface RewriteRule {
   readonly needsDomains?: boolean;
   /** The rule reads the gold statement, so its reading is a ceiling and not a candidate. */
   readonly oracle?: boolean;
+  /**
+   * What this row decided, which is a different question from what it measured.
+   *
+   * A rule can win more than it loses and still not ship, and until this field existed the
+   * difference was invisible in the report: the union of wins — the number a product claim uses —
+   * was computed over `net > 0`, so a refused rule's repairs were counted into "what a pipeline
+   * would recover". `drop-count-distinct` was that rule for two rounds: 33 won against 18 lost on
+   * dev, refused because 18 is a cost and not noise, and printed inside the union throughout.
+   *
+   *   - `product` — the pipeline applies it. The product's own ledger (`SHIPPED_EDITS` in
+   *     `packages/ai/src/edits.ts`) must list it, and `test/bird-rules-ledger.test.ts` holds the
+   *     two lists to each other in both directions.
+   *   - `refused` — priced and not adopted, for the reason this carries.
+   *   - `instrument` — not a candidate. The row prices an implementation or a gate so that another
+   *     row's number can be read; it is never in the union and never in the ledger.
+   *
+   * Absent on ceilings, which are already labelled by `oracle` and can neither ship nor be
+   * refused. `rewriteProblems` requires it everywhere else, because a rule that is priced and then
+   * forgotten is the state this field exists to make impossible.
+   */
+  readonly adoption?: 'product' | 'refused' | 'instrument';
+  /** Why, for every row that is not the product's. Required by `rewriteProblems`, not by types. */
+  readonly reason?: string;
   /**
    * Whether a proposal the engine refuses is a reading rather than a defect in the rule.
    *
@@ -264,11 +287,16 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     // harness shows it declining more often and the artifact's own field shows why.
     name: 'null-order',
     claim: 'an ascending sort behind a row cap must not let unknown values win',
+    adoption: 'product',
     apply: (input) => guardNullOrder(input.sql, 'sqlite')?.sql,
   },
   {
     name: 'drop-limit-on-count',
     claim: 'a row cap left in a statement whose question asks how many',
+    adoption: 'refused',
+    reason:
+      'fires 35 and loses 19 on dev for one win: the phrase is in questions whose cap is the answer, ' +
+      'so the rule reads a word the question had to contain either way',
     apply: (input) => {
       if (!/\bhow many\b|\bnumber of\b|\btotal\b|\bcount\b/i.test(input.question)) return undefined;
       if (!/\blimit\s+\d+/i.test(input.sql)) return undefined;
@@ -285,23 +313,48 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     // itself rather than as its idea.
     name: 'drop-unordered-limit',
     claim: 'a cap on an unordered statement answering a question that names no rank',
+    adoption: 'product',
     apply: (input) => stripUnfoundedCap(input.sql, input.question)?.sql,
   },
-  { name: 'integer-division', claim: 'a rate divided by an integer column truncates to zero', apply: integerDivision },
+  {
+    name: 'integer-division',
+    claim: 'a rate divided by an integer column truncates to zero',
+    adoption: 'refused',
+    reason:
+      'fires 17 on dev and changes no answer: the statements that divide already carry `* 1.0` or a cast, ' +
+      'because that is the failure their author could see. Nothing to adopt and nothing to remove',
+    apply: integerDivision,
+  },
   {
     name: 'drop-count-distinct',
     claim: 'a count over distinct rows where the question counts rows',
+    adoption: 'refused',
+    reason:
+      '119 fired, 33 won, 18 lost on dev: profitable and not admissible, because a rewrite that pays 15 ' +
+      'and breaks 18 is a cost the split cannot call noise. Not conditionable either — see the proof on ' +
+      '`dropCountDistinct`; every condition the data can express selects the cases where the edit is a no-op',
     apply: dropCountDistinct,
   },
   {
     name: 'ground-case-empty',
     claim: 'a value written in the question\'s case, grounded only when the statement returned nothing',
+    adoption: 'refused',
+    reason:
+      'the gate is what cost the edit its ceiling: 7 repairs behind "returned nothing" against 14 with no ' +
+      'gate, and no loss either way — a wrong-case value in an `in` list or a `like` pattern returns rows ' +
+      'and answers a different question, which the gate cannot see',
     needsDomains: true,
     apply: (input) => (input.empty ? groundCase(input) : undefined),
   },
   {
     name: 'ground-case-any',
     claim: 'the same edit under no gate: what the "returned nothing" condition costs',
+    adoption: 'instrument',
+    reason:
+      'not a candidate but the reference the gate is read against, and the edit itself ships — the product ' +
+      'calls `applyGrounding` over the library reader (`ground-shipped`). This row prices the same edit ' +
+      'through the harness\'s own scanner, which is a second implementation of it and therefore a check ' +
+      'that the two agree rather than a second decision',
     needsDomains: true,
     apply: groundCase,
   },
@@ -312,12 +365,16 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     // bigger than the shipped rule" into a number.
     name: 'ground-padding',
     claim: 'a number written without the leading zeros its column stores',
+    adoption: 'refused',
+    reason: 'one win on each corpus, which no split here resolves: a candidate held for a corpus that has more of it, not a rejection on the merits',
     needsDomains: true,
     apply: (input) => groundAbsence(input, ['padding']),
   },
   {
     name: 'ground-parenthetical',
     claim: 'a label written without the parenthetical the column appends',
+    adoption: 'refused',
+    reason: 'one win on each corpus, which no split here resolves: a candidate held for a corpus that has more of it, not a rejection on the merits',
     needsDomains: true,
     apply: (input) => groundAbsence(input, ['parenthetical']),
   },
@@ -328,6 +385,7 @@ export const REWRITE_RULES: readonly RewriteRule[] = [
     // them is the difference between "what the corpus needs" and "what the product does".
     name: 'ground-shipped',
     claim: 'the rewrite the pipeline runs, on the statements this artifact executed',
+    adoption: 'product',
     needsDomains: true,
     apply: (input) => {
       const byColumn = new Map<string, readonly string[]>();
@@ -477,6 +535,15 @@ export interface RewriteReading {
   readonly claim: string;
   /** The reading is a ceiling: the rule reads the gold statement and cannot ship. */
   readonly oracle: boolean;
+  /**
+   * What the row decided, carried into the report so a printed number cannot be read as a verdict.
+   *
+   * The union below is computed from this and not from the sign of the net, which is the defect
+   * that made a refused rule's repairs part of "what a pipeline would recover".
+   */
+  readonly adoption: 'product' | 'refused' | 'instrument' | 'ceiling' | 'unstated';
+  /** Why, on every row that is not the product's. */
+  readonly reason?: string;
   /** Cases the rule rewrote. */
   readonly fired: number;
   /** Rewrites that turned a wrong answer into a right one. */
@@ -750,6 +817,11 @@ export async function priceRewrites(
       rule: rule.name,
       claim: rule.claim,
       oracle: rule.oracle === true,
+      // An unstated verdict is carried as `unstated` rather than defaulted to a refusal: a rule
+      // nobody decided about is not a rule that was rejected, and the whole point of the field is
+      // that the difference is visible. `rewriteProblems` refuses it.
+      adoption: (rule.oracle === true ? 'ceiling' : (rule.adoption ?? 'unstated')) as RewriteReading['adoption'],
+      ...(rule.reason === undefined ? {} : { reason: rule.reason }),
       ...tally,
       wonCases: [...(wonCases.get(rule.name) ?? [])],
       net,
@@ -759,10 +831,12 @@ export async function priceRewrites(
       resolutionPp: pairedResolution(tally.lost, tally.won, cases.length).mde * 100,
     };
   });
-  // Only rules that win more than they lose are adopted, so only their wins are bankable. A rule
-  // that repairs twenty and breaks thirty is not part of the pipeline, and counting its wins in
-  // the union would price a product nobody would ship.
-  const adopted = readings.filter((reading) => !reading.oracle && reading.net > 0).map((reading) => reading.rule);
+  // The union is the pipeline's claim, so it is computed from what the pipeline applies and not
+  // from the sign of a net. `net > 0` was the first version and it was wrong in the direction that
+  // flatters: `drop-count-distinct` wins 33 and loses 18 on dev, is refused for the 18, and its
+  // repairs were counted here for two rounds — so the number a product claim would quote included
+  // an edit the product does not run.
+  const adopted = readings.filter((reading) => reading.adoption === 'product').map((reading) => reading.rule);
   // `adopted` is exactly the rules that won something, so every name in it has a set: the first
   // version carried a `?? []` fallback here, which was a branch no run could take.
   const repaired = new Set<string>();
@@ -799,8 +873,49 @@ export function rewriteProblems(
   }
   for (const reading of report.readings) {
     if (reading.broken > 0) problems.push(`REWRITE: ${String(reading.broken)} rewrite(s) of ${reading.rule} no longer run, so the rule is wrong about something`);
+    // A reading without a verdict is a measurement nobody decided anything with, which is the
+    // state `drop-count-distinct` sat in for two rounds while the union quoted its repairs.
+    if (reading.adoption === 'unstated') {
+      problems.push(`REWRITE: ${reading.rule} is priced and carries no verdict, so its reading decides nothing`);
+      continue;
+    }
+    if ((reading.adoption === 'refused' || reading.adoption === 'instrument') && reading.reason === undefined) {
+      problems.push(`REWRITE: ${reading.rule} is ${reading.adoption} and says no reason, so the verdict cannot be checked`);
+    }
+    if (reading.adoption === 'product' && reading.reason !== undefined) {
+      problems.push(`REWRITE: ${reading.rule} ships and carries a refusal reason; one of the two is stale`);
+    }
   }
   return problems;
+}
+
+/**
+ * The two lists this repository keeps about the product's edits, held to each other.
+ *
+ * `REWRITE_RULES` is what this harness prices; `SHIPPED_EDITS` is what the product imports and
+ * applies. A disagreement means the product runs an edit nobody priced, or the pricer ships an edit
+ * the product never wired — and the first of those is silent by construction, which is why the
+ * comparison exists at all. It takes the rule table rather than a report because it is a claim about
+ * the code, not about a corpus: a report over four hundred questions and a report over fifteen
+ * hundred cannot disagree about which rules exist.
+ */
+export function ledgerProblems(rules: readonly RewriteRule[]): string[] {
+  const priced = rules
+    .filter((rule) => rule.adoption === 'product')
+    .map((rule) => rule.name)
+    .sort();
+  const ledger = SHIPPED_EDITS.filter((edit) => edit.enabled)
+    .map((edit) => edit.rule)
+    .sort();
+  if (priced.join(',') === ledger.join(',')) return [];
+  // Named through a function rather than an inline `||`: an empty list is the case the message has
+  // to read well in, because "the pricer marks nothing and the ledger enables three" is a real
+  // failure — a product whose whole edit list arrived from somewhere other than this table.
+  const list = (names: readonly string[]): string => (names.length === 0 ? 'nothing' : names.join(', '));
+  return [
+    `REWRITE: the pricer marks ${list(priced)} as the product's and the ledger enables ${list(ledger)}; ` +
+      'an edit with no price and a price with no edit are both refusals',
+  ];
 }
 
 /** Every line the report prints. */
@@ -826,12 +941,21 @@ export function rewriteLines(report: RewriteReport): string[] {
         `  resolves ${reading.resolutionPp.toFixed(1)}pp`,
     );
     lines.push(`  ${' '.repeat(20)} ${reading.claim}`);
+    // A verdict on its own line rather than a column, because it is a sentence and the columns are
+    // numbers: `refused: 119 fired, 33 won, 18 lost` reads as a cost, and the reason is what says
+    // which cost it was.
+    if (reading.adoption === 'ceiling' || reading.adoption === 'unstated') continue;
+    lines.push(
+      `  ${' '.repeat(20)} ${reading.adoption === 'product' ? 'ships' : reading.adoption}${reading.reason === undefined ? '' : `: ${reading.reason}`}`,
+    );
   }
   // The union is what a pipeline would recover; the per-rule deltas add up only when nothing
   // overlapped. Both are printed because the second is a property of the corpus and the first is
   // the number a product claim would use.
-  const adopted = report.readings.filter((reading) => !reading.oracle && reading.net > 0).length;
-  if (adopted > 1) {
+  const adopted = report.readings.filter((reading) => reading.adoption === 'product').length;
+  // Two rules that ship and repaired nothing have no union to print: "0 (+0.00pp) — the deltas add"
+  // is a sentence about an addition that did not happen.
+  if (adopted > 1 && report.union > 0) {
     lines.push(
       `  union of wins across adopted rules: ${String(report.union)} (+${share(report.union)})` +
         (report.overlap.length === 0 ? '  — no two rules won the same case, so the deltas add' : ''),
@@ -971,7 +1095,9 @@ export async function main(
     );
     const { unresolved, unrunnable, ...rest } = priced;
     const report: RewriteReport = { split: layout.split, arm: settings.arm, ...rest, problems: [] };
-    const withProblems = { ...report, problems: rewriteProblems(report) };
+    // The measurement's own refusals, plus the one claim about the code that a report cannot make:
+    // that the product's edit list and this table are the same list.
+    const withProblems = { ...report, problems: [...rewriteProblems(report), ...ledgerProblems(REWRITE_RULES)] };
     if (settings.write !== undefined) writeFileSync(settings.write, `${JSON.stringify(withProblems, null, 2)}\n`);
     for (const line of rewriteLines(withProblems)) console.log(line);
     console.log(

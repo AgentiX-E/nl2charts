@@ -17,6 +17,8 @@ export type { MacSqlPromptInput, PromptTemplate, SyntheticExample } from './temp
 export { buildExamplePrompt, parseExamples } from './examples.js';
 export { ASSEMBLED_SQL, findSqlRecipe, resolvePrompt, resolveShipment, SHIPPED_SQL, SQL_RECIPES } from './recipe.js';
 export type { RecipePayload, ResolvedPrompt, SqlRecipe, SqlRecipeName } from './recipe.js';
+export { shippedEdit, SHIPPED_EDITS } from './edits.js';
+export type { ShippedEdit } from './edits.js';
 export { adjudicateDecision, adjudicateShipment, DEFAULT_SHIPMENT_POLICY, shipmentLines } from './shipment.js';
 export type {
   ArmEvidence,

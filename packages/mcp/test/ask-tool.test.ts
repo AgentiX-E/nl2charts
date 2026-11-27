@@ -418,6 +418,19 @@ describe('the rule the data proves, on the caller\'s own database', () => {
     expect(payload.grounding).toEqual({ substitutions: 0, refused: 1 });
   });
 
+  it('takes the default from the ledger rather than from a literal in this file', async () => {
+    // The switch the caller does not set is the one the product decides, and it is decided in
+    // `SHIPPED_EDITS` — with the reading that put the edit there — rather than by a `true` in the
+    // tool. Asking for it explicitly has to mean the same thing, or the default would be a third
+    // behaviour nobody documented: this call and the one above it pass through the same reader.
+    const payload = (await askQuestion(
+      { runner, ask: { provider: scripted(["SELECT id, word FROM greetings WHERE word = 'hello'"]), readDomains: true } },
+      { question: 'which greeting has id 1', schema },
+    )) as Record<string, unknown>;
+    expect(payload.sql).toContain("word = 'Hello'");
+    expect(payload.grounding).toEqual({ substitutions: 1, refused: 0 });
+  });
+
   it('runs the statement as written when the rule is switched off, and reports nothing', async () => {
     // The control, and the reason the switch exists: without it every reading of this tool is a
     // reading of the rule plus the prompt, and a deployment cannot measure its own corpus.

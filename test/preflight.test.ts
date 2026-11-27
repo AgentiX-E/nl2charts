@@ -70,10 +70,17 @@ describe('preflight', () => {
   });
 
   it('fails an endpoint whose median is more than half the deadline', async () => {
-    // 800 ms per call against a 1,000 ms deadline: every call may pass and the tail still
+    // A call that takes four fifths of its deadline: every call may pass and the tail still
     // exceeds it, which is exactly how a run ends up with a failure column full of timeouts.
-    const baseUrl = await endpoint(800);
-    const run = await preflight({ LLM_BASE_URL: baseUrl, BIRD_LLM_TIMEOUT_MS: '1000', BIRD_PREFLIGHT_SAMPLES: '2' });
+    //
+    // The absolute numbers are large on purpose, and the ratio is the only tight thing about them.
+    // The property under test is "median > half the deadline", and this test used to express it
+    // with 800 ms against 1,000 ms — a 200 ms margin that the full suite consumed: under 247
+    // parallel files the child's own `npx tsx` start and its timer slip past the deadline, so the
+    // run reported "0 answered" and the assertion failed over a harness artefact rather than over
+    // the arithmetic. 3,200 against 4,000 keeps the ratio and buys the margin.
+    const baseUrl = await endpoint(3200);
+    const run = await preflight({ LLM_BASE_URL: baseUrl, BIRD_LLM_TIMEOUT_MS: '4000', BIRD_PREFLIGHT_SAMPLES: '2' });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('median call takes');
     expect(run.stderr).toContain('BIRD_LLM_TIMEOUT_MS');
