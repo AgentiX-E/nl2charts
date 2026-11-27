@@ -476,7 +476,7 @@ export const BENCHMARKS: readonly Benchmark[] = [
     source: 'https://github.com/SAIPLL/VisCodeBench (arXiv:2611.02353)',
     corpus: '2,672 samples: GitHub-T2V 843, arXiv-T2V 805, OWID-T2V 1,024',
     metrics: ['execution', 'chart content', 'displayed data similarity', 'accessibility'],
-    status: 'absent',
+    status: 'instrumented',
     rival: {
       system: 'VisCodeBench leaderboard best',
       score: 0.81,
@@ -488,25 +488,28 @@ export const BENCHMARKS: readonly Benchmark[] = [
       evidence: 'https://github.com/SAIPLL/VisCodeBench',
       checkedAt: '2026-11-27',
       note: 'arXiv:2611.02353. A 0–1 similarity, not a percentage: bounded at 1, so it is stored as 0.81 and read with '
-        + 'the metric unit attached. The score engine is public but the references are private and '
-        + 'this row is still absent, so the number is cited, never paired against a product reading.',
+        + 'the metric unit attached. The score engine is public but the references are private, and this '
+        + 'row is instrumented rather than measured, so the number is cited, never paired against a '
+        + 'product reading.',
     },
     gap:
-      'Not a fetch problem, which is what this row said for two rounds and was wrong about: the sample '
-      + 'inputs are downloadable from the leaderboard (Codabench competition 16125) and the scoring '
-      + 'engine `t2v_eval` is public and LLM-independent — it monkey-patches matplotlib, seaborn, pandas '
-      + 'and geopandas, logs the series each call draws to `series.jsonl`, and compares two log '
-      + 'directories. What is private is the reference solutions, and that is the whole submission path: '
-      + 'log the displayed data locally, upload the zip, let their server score it. So the two real '
-      + 'costs are engineering, not money. (1) A code-emitting mode: the contract is Python written into '
-      + 'a marked region of a notebook, not a chart spec, and this product emits specifications. (2) A '
-      + 'submission path: a Codabench entry, a Docker run of 2,672 generated programs, and retries where '
-      + 'the program raises. The money is generation only — no judge model exists in this metric, which '
-      + 'is why the estimate is a token count rather than a judgement: 2,672 samples at 3–6k prompt and '
-      + '300–800 completion tokens is ¥21–53 at deepseek-chat prices, and a 300-sample stratified pilot '
-      + 'that measures tokens a sample and the execution-failure rate is ¥3–6. `accessibility` is the '
-      + 'one metric that needs no reference at all (`calculate_accessibility_score(image_path)`), so a '
-      + 'pilot can report it locally before any submission exists.',
+      'The harness now exists: `eval/text2vis/viscodebench-score.ts` ports every LLM-independent '
+      + 'comparator in the upstream `t2v_eval` (Hungarian assignment, Mahalanobis scatter/discrete, '
+      + 'arc-length continuous F1, chart-type set inclusion) and pins each to a scipy/numpy oracle in '
+      + '`viscodebench-oracle.json`; `bench:text2vis:viscodebench-score` re-derives all 13 checks '
+      + 'offline at ¥0. What it cannot produce is a number over the leaderboard denominator. The '
+      + 'primary metric compares two log directories against **private** reference series held only '
+      + 'by the Codabench server (competition 16125): a full-split score cannot exist in this '
+      + 'repository, and publishing one would repeat the exact error the rival column was built to '
+      + 'stop. That is why this row is `instrumented`, not `absent` (never built) and not `measured` '
+      + '(a number held here). Two things remain before a reading is possible: (1) a code-emitting '
+      + 'mode — the contract is Python written into a marked notebook region, not the chart spec this '
+      + 'product emits — and a submission path that runs 2,672 generated programs in Docker with '
+      + 'retries; (2) the accessibility metric, the only one reference-free, needs pytesseract OCR '
+      + 'plus KMeans over rendered pixels, neither of which is present here, so it is deliberately '
+      + 'not ported rather than faked. Generation for a 300-sample stratified pilot is ¥3–6 at '
+      + 'deepseek-chat prices (3–6k prompt, 300–800 completion tokens, no judge model); the score '
+      + 'itself is still computed on their server. This is an engineering gap, not a money gap.',
   },
 ];
 

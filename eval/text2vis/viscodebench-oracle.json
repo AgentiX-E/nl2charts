@@ -1,0 +1,33 @@
+{
+  "note": "Authoritative expected values for the VisCodeBench score-engine replica, generated from the upstream t2v_eval implementation using scipy 1.17.0 / numpy 2.3.5 on 2026-11-27. These are fixtures, not product readings: they pin the replica to the reference algorithm so a drift in the port fails a test instead of silently changing a future score.",
+  "source": "https://github.com/SAIPLL/VisCodeBench/tree/main/t2v_eval/evaluation",
+  "generatedBy": "scipy.optimize.linear_sum_assignment (Hungarian/JV) + numpy.cov/inv + arc-length interpolation",
+  "getScore": {
+    "identity": 1.0,
+    "perfect": 1.0,
+    "rect2x3": 0.5666666667,
+    "rect3x2": 0.5666666667,
+    "allMax": 0.0,
+    "mixed": 0.7333333333,
+    "oneZero": 0.0
+  },
+  "scatter": {
+    "identical": 1.0,
+    "shifted": 0.0,
+    "noisy": 0.0,
+    "noisyCostMatrix": [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
+  },
+  "discrete": {
+    "identical": 1.0,
+    "shifted": 0.09999999999999998
+  },
+  "cov2": {
+    "matrix": [[1.00001, 1.0], [1.0, 1.00001]],
+    "inverse": [[50000.2499984451, -49999.7500009451], [-49999.7500009451, 50000.2499984451]]
+  },
+  "continuous": {
+    "identical": { "f1": 1.0, "recall": 1.0, "precision": 1.0 },
+    "shifted": { "f1": 0.19332359653647876, "recall": 0.41590950415329275, "precision": 0.12592905085051473 },
+    "scaled": { "f1": 0.2215966014869473, "recall": 0.5377866612569738, "precision": 0.13954911594807942 }
+  }
+}

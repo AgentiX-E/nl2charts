@@ -7,6 +7,15 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A local VisCodeBench score engine, and an honest `instrumented` row.** `eval/text2vis/
+  viscodebench-score.ts` ports every LLM-independent comparator in upstream `t2v_eval` — Hungarian
+  assignment, Mahalanobis scatter/discrete, arc-length continuous F1, chart-type set inclusion —
+  pinned to scipy/numpy oracle values in `eval/text2vis/viscodebench-oracle.json`; 13/13 checks pass
+  offline at ¥0 via `pnpm bench:text2vis:viscodebench-score`. TDD caught two silent bugs in the port
+  (duplicated assignment columns; discrete comparison against only the first GT slice). The
+  `viscodebench` coverage row moves `absent → instrumented`: the judge exists, but the primary score
+  is computed on the Codabench server against private references, so no locally-held `measured`
+  reading is possible and none is claimed. Accessibility is not ported (needs OCR the repo lacks).
 - **A structured rival on every leaderboard row, closing the last prose comparison column.** The
   nine-row coverage table in `eval/benchmarks.ts` now carries a `rival` per row with the four facts
   rule D58 requires — split, conditions, the authors' model, and availability — plus a checked date

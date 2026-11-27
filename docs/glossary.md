@@ -929,6 +929,15 @@ not an empty cell. `rivalProblems` refuses a row whose rival is still prose, a p
 range, or a number filed under the wrong split (the DAIL-SQL test EM 66.5 was once printed as a dev
 EM), so a gap can only be quoted with its coordinates attached.
 
+**Instrumented (leaderboard row)** — One of the four coverage states in `eval/benchmarks.ts`, meaning
+the metric and its harness exist in the repository but no dispatch has produced a number. It is a
+different absence from `absent` ("never built") and from `measured` ("a number held here over the
+leaderboard's own denominator"). VisCodeBench is instrumented: the LLM-independent half of the score
+engine is ported and pinned to scipy oracle values, but the primary score is computed on the
+Codabench server against private reference logs, so the repository can never hold it. The distinction
+exists so a plan cannot promote a row to `measured` by spending money on a submission that only
+produces a number on somebody else's machine.
+
 **Shipment gate** — The rule that promotes a recipe, in `packages/ai/src/shipment.ts`. It reads an
 experiment as counts and a price, re-derives the effect and the price ratio, and applies three
 declared numbers (`alpha`, `minDeltaPp`, `tokenTariff`). Its verdict is not advice: CI requires the

@@ -117,6 +117,7 @@
     "bench:text2vis:ship": "tsx eval/text2vis/ship.ts",
     "bench:text2vis:route": "tsx eval/text2vis/route.ts",
     "bench:text2vis:prior": "tsx eval/text2vis/prior.ts",
+    "bench:text2vis:viscodebench-score": "tsx eval/text2vis/viscodebench-score.ts",
     "bench:bill": "tsx eval/bill.ts",
     "bench:spend": "tsx eval/bird/spend.ts",
     "bench:coverage": "tsx eval/benchmarks.ts",

@@ -850,6 +850,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/text2vis/viscodebench-score.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 96.52
+    },
     "eval/wikisql/ask.ts": {
       "lines": 100,
       "statements": 100,

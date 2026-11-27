@@ -18131,7 +18131,7 @@ availability — rule D58's four facts — so a gap is only quoted when those fo
 | Text2Vis | 1,470 scored rows | top-1 | measured | 664 | none published on these rows — a finding about the field |
 | Text2Vis | the same rows | render validity | measured | 1,418 figures | none published — a census, not a leaderboard metric |
 | nvBench 2.0 | 750 dev questions / 2,321 golds | F1@1 / F1@3 / F1@5 | measured | **32.23** F1@3 (reasoning tier), 26.28 on chat; ceiling 84.96, baseline 58.96, 10 arms | corpus prompting baseline 58.96 F1@3; trained Step-NL2VIS 81.50 is a different claim |
-| VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **absent** | — | leaderboard best 0.81 displayed-data similarity (0–1), 0.69 hardest — private references |
+| VisCodeBench | 2,672 samples (843 / 805 / 1,024) | seven, incl. displayed-data similarity | **instrumented** | — (score engine ported, 13/13 oracle checks, no dispatch) | leaderboard best 0.81 displayed-data similarity (0–1), 0.69 hardest — private references |
 
 ### nvBench 2.0: nine arms, one prompt question, and where the 36 points still are
 
@@ -22105,6 +22105,35 @@ So the plan's ¥20–30 was approximately right for a *full pass* and wrong abou
 cheapest useful thing is a 300-sample pilot at **¥3–6** that measures two numbers nobody has — tokens a
 sample, and the share of generated programs that raise — exactly as WikiSQL's 40-case pilot (¥0.16)
 measured the reader before 8,421 questions were bought.
+
+#### The judge now exists locally; the row is `instrumented`, not `measured`
+
+The "¥3–6 pilot → absent-to-measured" plan item was carried for twelve rounds and never executed.
+The reason is not laziness and not money: it is that the row's acceptance target did not exist. The
+coverage table's `measured` status means **a number held in this repository over the leaderboard's
+own denominator**. Displayed Data Similarity is computed by the Codabench server against private
+reference logs — the score never passes through this repository, so no honest `measured` reading can
+be written here. A row cannot be promoted to `measured` by spending ¥3–6 on generation; that buys a
+submission, not a locally-held number.
+
+What *can* be built locally is the judge. `eval/text2vis/viscodebench-score.ts` ports every
+LLM-independent comparator in upstream `t2v_eval`: the Hungarian / Jonker-Volgenant assignment from
+`get_score`, Mahalanobis scatter and 1-D discrete comparison, arc-length interpolation F1 for lines,
+nested axis/figure assignment, and chart-type set inclusion. Each is pinned to an authoritative value
+in `eval/text2vis/viscodebench-oracle.json`, generated from the upstream formulas with scipy 1.17 and
+numpy 2.3.5. `pnpm bench:text2vis:viscodebench-score` re-derives all 13 checks offline at **¥0** and
+exits non-zero on any drift. The accessibility metric is deliberately *not* ported: upstream needs
+pytesseract OCR and KMeans over rendered pixels, neither present here, and a stub would be a fake
+reading.
+
+That is exactly the `instrumented` state the coverage table defines — the metric and its harness
+exist, but no dispatch has produced a number — and it is deliberately distinct from `absent` ("never
+built") and `measured` ("a number held here"). TDD caught two real bugs during the port: a duplicated
+column array in the assignment result, and a discrete comparator that compared every prediction
+against only the first ground-truth slice; both would have changed a future score silently. The
+remaining path to a reading is still code emission plus a Codabench submission, and the score stays
+on their server — so this row will stay `instrumented` until the leaderboard itself publishes the
+number or the contract changes.
 
 #### What can run at the same time
 
