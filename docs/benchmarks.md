@@ -23022,3 +23022,116 @@ statement about one width, and the artifact used to publish them without saying 
   gold column no schema holds: `formula_1`'s case 1016 reuses the alias `T4` in two scopes, so
   `T4.min_time_in_seconds` resolves to `pitstops.min_time_in_seconds`, which does not exist. Counting
   it as hidden would blame the card for a statement no card can serve.
+
+## The table a statement read instead, and the lever that turned out to be a wash
+
+`reach` closed the retrieval hypothesis with a rendering: at 400 column lines the card carries every
+table and every column, so the 136 cases whose statement never reads a gold table are a decision.
+This section is the decision read from the other end — from the statements themselves — and it
+retires the cheapest mechanism anyone would reach for first.
+
+`bench:bird:choice` reads the artifact's two statements, the dataset's manifest and nothing else: no
+execution, no model, no database. For every unpassed case it compares the tables the prediction
+reads with the tables the gold reads, and for every table the prediction reads and the gold does
+not, it asks how far that table sits from the gold table it displaced **in the join graph the prompt
+itself is built from** — one declared hop is a `neighbour`, one hop that only a shared column name
+implies is a `sibling`, two declared hops is still a neighbour at distance two, and anything else is
+`distant`.
+
+### The reading (`44991167518`, dev 1,532, `macsql-prompt`, 522 wrong)
+
+| reading | value | share of the split |
+|---|---:|---:|
+| cases whose table set differs from the gold | 170 | 11.10pp |
+| cases that read at least one table the gold does not | **91** | 5.94pp |
+| — the extra table is one declared hop away (`neighbour`) | 32 | 2.09pp |
+| — one hop only through a shared column (`sibling`) | 21 | 1.37pp |
+| — no path within two hops (`distant`) | **38** | 2.48pp |
+| displaced gold tables the card prints | 148 | — |
+| median position of a displaced gold table in the card | **3 of ~7** | — |
+
+The distribution is the finding: **41.8% of the statements that read a wrong table read one the
+schema offers no path to within two hops.** The model is not confusing `cards` with `card_games`;
+it is reading a table the gold's relation does not touch. A disambiguation hint — "the question
+names the column this table carries, not that one" — has a population of 21 cases at most, and only
+**17 cases (1.11pp)** carry a word the card says lives *only* on a table the statement did not read.
+
+### The lever that costs no tokens, and what it is worth
+
+The card prints its tables in the manifest's order. Ordering them by how many of the question's
+words each table can account for changes nothing else: same tables, same columns, same characters,
+one permutation. That is the only prompt change that cannot move the token bill, so it is the first
+one to price.
+
+| window | gold tables inside it, as printed | under the focus order | promoted | demoted |
+|---|---:|---:|---:|---:|
+| first line | 29 | 34 | +19 | −14 |
+| first three | 78 | 92 | +27 | −13 |
+| first five | 107 | 119 | +18 | −6 |
+
+**The median displaced table already sits on line 3 of a seven-table card**, and the reordering
+moves it to line 3. It buys 27 promotions at top-3 and pays 13 demotions for them, and the 38
+`distant` cases — the largest bucket — are exactly the ones a reordering cannot help, because the
+table they should have read is not the one the question names.
+
+So this is measured and closed before a dispatch was spent on it: **presentation order is not the
+lever.** The two mechanisms that act on the card's content have populations of 21 and 17 cases, and
+both are upper bounds that assume the model would act on a hint it already has the evidence for.
+
+### Where the headroom actually is
+
+The same artifact carries the answer, one arm over. `select-mixed-rule` generates three candidates
+per question and keeps one:
+
+| reading | `macsql-prompt` (shipped) | `select-mixed-rule` |
+|---|---:|---:|
+| passed | 1,010 (65.93%) | 980 (63.97%) |
+| cases where the gold is in the candidate pool | — | **1,041 (67.95%)** |
+| cases the pool had and the selector lost | — | **61** |
+| calls per question | 1 | 3 |
+
+**The pool contains 31 cases the shipped arm does not answer, and the selector throws away 61.** A
+selector that never lost a candidate would score 67.95% on that dispatch; the shipped single-shot arm
+scores 65.93%. Two numbers, deliberately not added: **2.02pp** is what the pool is worth over the
+shipped arm, at three calls a question; **3.98pp** is what the selector costs on top of its own pool,
+at no extra generation. Anything that acts on the card is worth 1.1–1.4pp by comparison, and the
+problem is a different one — *which of these statements answers the question*, not *what does the
+question's schema look like*. The next dispatch has to price the selector's 61 cases against its 3×
+bill rather than against its 67.95% ceiling.
+
+### The gates
+
+`choiceProblems` refuses nine arithmetic impossibilities; every one of them has been a published
+number elsewhere in this repository:
+
+1. case kinds that do not sum to the cases that read an extra table;
+2. swap kinds that do not sum to the extra tables counted;
+3. cases with an extra table that the direction split does not account for;
+4. compared plus unretained that do not add up to the population;
+5. same-table, differing and unmodelled cases that do not sum to the compared;
+6. a population that is not the artifact's total minus its passed count;
+7. a position outside the card, before or after the ordering;
+8. a displacement count the recorded positions do not account for;
+9. a window that promotes more tables than sat outside it, loses more than it had, or counts more
+   than were recorded.
+
+A database the manifest does not describe is counted as `unschema` rather than read as a statement
+that touches no table, and a table the card does not print is counted as `uncarded` rather than
+placed at position zero.
+
+### Reproduce it
+
+```
+pnpm bench:bird:choice --artifact eval/out/bird-eval-dev-44991167518.json
+```
+
+Zero calls, zero execution: the artifact holds both statements, and the manifest holds the graph.
+
+### What this does not say
+
+- **A difference is not a defect.** Two statements can answer one question while reading different
+  tables; nothing here executes, so nothing here can tell a loss from a rewrite of the same answer.
+- **A position is not a cause.** The median table sits on line 3 and the model still reads another
+  one; `reach` already showed every table arrived.
+- **The kinds are relations, not explanations.** `distant` says the schema offers no path within two
+  hops, and a join through a subquery's own aggregate might still have been the right answer.

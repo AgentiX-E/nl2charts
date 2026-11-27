@@ -7,6 +7,24 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **`bench:bird:choice`: the table a wrong statement read instead, for ¥0.** `reach` closed the
+  retrieval hypothesis with a rendering; this instrument reads the decision from the statements. For
+  every unpassed case it compares the base tables of the prediction and the gold, and for every table
+  the prediction reads and the gold does not it measures the distance to the displaced table **in the
+  join graph the prompt is built from** — one declared hop is `neighbour`, one hop that only a shared
+  column name implies is `sibling`, two declared hops is a neighbour at distance two, everything else
+  is `distant`. On dev `44991167518` (522 wrong of 1,532): **170** cases differ in their table set,
+  **91** read an extra table, of which **32 neighbour / 21 sibling / 38 distant**, over 148 displaced
+  gold tables whose **median position is 3 of ~7**. It also prices the one prompt change that cannot
+  move the token bill — ordering the card's tables by how many of the question's words each accounts
+  for — and finds it a **wash: 27 promoted against 13 demoted at top-3**, with the largest bucket
+  (`distant`, 41.8%) exactly the population a reordering cannot reach. **A difference is not a
+  defect**: nothing here executes.
+- **`namesTable` is exported, because a second reader measures what it decides.** The rule that a
+  question token names a table (prefix, four-character floor) was private to `linking.ts`, and the
+  choice instrument counts the words the card says live on a table a statement did not read. A copy of
+  the rule there would let the instrument and the linker disagree about what "names" means while both
+  kept working; on dev that population is 17 cases carrying 21 words.
 - **`bench:bird:reach`: whether the card printed the table the gold reads, for ¥0.** The instrument
   renders the card at one or more widths from the dataset and the tables manifest, reads the tables
   and columns back **out of the rendering**, and counts the (question, gold table) pairs that never

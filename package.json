@@ -88,6 +88,7 @@
     "bench:bird:residue": "tsx eval/bird/residue.ts",
     "bench:bird:reach": "tsx eval/bird/reach.ts",
     "bench:bird:census": "tsx eval/bird/census.ts",
+    "bench:bird:choice": "tsx eval/bird/choice.ts",
     "bench:bird:refusals": "tsx eval/bird/refusals.ts",
     "bench:bird:join": "tsx eval/bird/join.ts",
     "bird:stratify": "node tools/stratify-mixed.mjs",

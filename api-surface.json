@@ -256,6 +256,7 @@
     "guardNullOrder",
     "ignoredRegions",
     "linkSchema",
+    "namesTable",
     "parseChartChoice",
     "parseChoiceToken",
     "parseDecomposed",
@@ -387,6 +388,7 @@
   ],
   "ai/linking": [
     "linkSchema",
+    "namesTable",
     "renderName",
     "renderSchemaCard",
     "tokenizeQuestion",

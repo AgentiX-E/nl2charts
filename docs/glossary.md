@@ -138,6 +138,17 @@ each case one bucket and sums to the population. Nothing is executed, so a **dif
 defect**: a join the engine eliminates lands in `tables` exactly like a loss. On the canonical dev
 run the partition is 173 / 46 / 108 / 17 / 115 / 53 with 5 ties and 5 unmodelled out of 522.
 
+**Choice (table)** — The table a wrong statement read *instead of* the one the gold reads, and how far
+apart the two sit in the join graph the prompt itself is built from (`bench:bird:choice`). One
+declared hop is a `neighbour`, one hop that only a shared column name implies is a `sibling`, two
+declared hops is still a neighbour at distance two, and anything further is `distant`. The reading
+also records where the displaced gold table sat in the card, before and after ordering the tables by
+how many of the question's words each one can account for — the only prompt change that cannot move
+the token bill. On the canonical dev run, of 91 cases that read a table the gold does not, **32 are
+neighbours, 21 siblings and 38 distant**, the displaced table's median position is **3 of 7**, and the
+reordering is a wash (27 promoted against 13 demoted at top-3), which is why presentation order was
+closed before a dispatch was spent on it. A difference is not a defect: nothing here executes.
+
 **Noise floor** — The measured spread of a corpus between two dispatches of the same arm, and the
 only honest scale for a delta. Two runs of `macsql-prompt` over the same 1,532 dev questions changed
 the verdict of **66** of them (4.31%), 37 one way and 29 the other, net 8 at exact McNemar p = 0.389 —

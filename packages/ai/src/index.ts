@@ -8,7 +8,7 @@ export { attachDefinitions, buildDefinitionPrompt, classifyColumn, parseDefiniti
 export type { AttachResult, ColumnRole, DefinitionOptions, DefinitionRequest, DefinitionSample } from './definitions.js';
 export { createReplayProvider, recordProvider, transcriptOf } from './replay.js';
 export type { RecordedCall, ReplayFixture } from './replay.js';
-export { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from './linking.js';
+export { linkSchema, namesTable, renderName, renderSchemaCard, tokenizeQuestion } from './linking.js';
 export type { LinkedColumn, Recaller, SchemaCardOptions, SchemaColumn, SchemaTable } from './linking.js';
 export { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, extractSql, readStatement } from './pipeline.js';
 export type { StatementReaderOptions } from './pipeline.js';

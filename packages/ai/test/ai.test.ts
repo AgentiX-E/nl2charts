@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isNl2ChartsError } from '@agentix-e/nl2charts-spec';
 import { buildAskMessages, buildSqlPrompt, choosePromptProfile, createPipeline, extractSql } from '../src/pipeline.js';
-import { linkSchema, renderName, renderSchemaCard, tokenizeQuestion } from '../src/linking.js';
+import { linkSchema, namesTable, renderName, renderSchemaCard, tokenizeQuestion } from '../src/linking.js';
 import type { SchemaTable } from '../src/linking.js';
 import { createReplayProvider, recordProvider } from '../src/replay.js';
 import type { LlmProvider } from '../src/provider.js';
@@ -28,6 +28,19 @@ describe('question tokenization', () => {
 
   it('returns nothing for a pure stopword question', () => {
     expect(tokenizeQuestion('what is the')).toEqual([]);
+  });
+
+  it('reads a table name by prefix, with a floor that keeps `or` from naming `orders`', () => {
+    // Exported because a second reader measures what this rule decides: `eval/bird/choice.ts`
+    // counts the words the card says live on a table a statement did not read, and a copy of this
+    // rule there would let the instrument and the linker disagree about what "names" means.
+    expect(namesTable('customers', 'customers')).toBe(true);
+    expect(namesTable('customer', 'customers')).toBe(true);
+    expect(namesTable('customers', 'customer')).toBe(true);
+    // Four characters, so `or` is a prefix of `orders` and is still not a name.
+    expect(namesTable('or', 'orders')).toBe(false);
+    expect(namesTable('ord', 'orders')).toBe(false);
+    expect(namesTable('revenue', 'orders')).toBe(false);
   });
 });
 

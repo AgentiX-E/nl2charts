@@ -65,7 +65,7 @@ function nameTokens(column: SchemaColumn): string[] {
  * the floor, because `orders` starts with `or` and a two-letter prefix would make every table
  * whose name begins with a stopword look named.
  */
-function namesTable(token: string, table: string): boolean {
+export function namesTable(token: string, table: string): boolean {
   const name = table.toLowerCase();
   if (token === name) return true;
   if (token.length < 4 || name.length < 4) return false;
