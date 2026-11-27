@@ -1,0 +1,258 @@
+{
+  "generator": "python3 eval/text2vis/viscodebench_log_worker.py",
+  "matplotlib": "3.10.8",
+  "numpy": "2.3.5",
+  "note": "Real logs emitted by the local monkey-patch worker. Each record matches upstream series.jsonl shape. 'translate' and 'proportional' are shape-identical controls: min-max normalisation makes them score 1.0 by design.",
+  "samples": {
+    "line-base": {
+      "id": "line-base",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "plot",
+          "data_series": [
+            {
+              "x": [
+                0.0,
+                1.0,
+                2.0,
+                3.0
+              ],
+              "y": [
+                0.0,
+                1.0,
+                4.0,
+                9.0
+              ],
+              "name": "",
+              "linestyle": "-"
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    },
+    "line-parabola-tweak": {
+      "id": "line-parabola-tweak",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "plot",
+          "data_series": [
+            {
+              "x": [
+                0.0,
+                1.0,
+                2.0,
+                3.0
+              ],
+              "y": [
+                0.0,
+                2.0,
+                5.0,
+                9.0
+              ],
+              "name": "",
+              "linestyle": "-"
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    },
+    "line-flat": {
+      "id": "line-flat",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "plot",
+          "data_series": [
+            {
+              "x": [
+                0.0,
+                1.0,
+                2.0,
+                3.0
+              ],
+              "y": [
+                4.0,
+                4.0,
+                4.0,
+                4.0
+              ],
+              "name": "",
+              "linestyle": "-"
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    },
+    "line-translate": {
+      "id": "line-translate",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "plot",
+          "data_series": [
+            {
+              "x": [
+                0.0,
+                1.0,
+                2.0,
+                3.0
+              ],
+              "y": [
+                5.0,
+                6.0,
+                9.0,
+                14.0
+              ],
+              "name": "",
+              "linestyle": "-"
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    },
+    "scatter-base": {
+      "id": "scatter-base",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "scatter",
+          "data_series": [
+            {
+              "x": [
+                1.0,
+                2.0,
+                3.0
+              ],
+              "y": [
+                2.0,
+                4.0,
+                6.0
+              ],
+              "s": [
+                5.0,
+                5.0,
+                5.0
+              ],
+              "name": ""
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    },
+    "scatter-far": {
+      "id": "scatter-far",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "scatter",
+          "data_series": [
+            {
+              "x": [
+                10.0,
+                20.0,
+                30.0
+              ],
+              "y": [
+                30.0,
+                60.0,
+                90.0
+              ],
+              "s": [
+                5.0,
+                5.0,
+                5.0
+              ],
+              "name": ""
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    },
+    "pie-base": {
+      "id": "pie-base",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "pie",
+          "data_series": [
+            {
+              "x": [
+                10.0,
+                20.0,
+                30.0
+              ],
+              "name": ""
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    },
+    "pie-different": {
+      "id": "pie-different",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "pie",
+          "data_series": [
+            {
+              "x": [
+                50.0,
+                25.0,
+                25.0
+              ],
+              "name": ""
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    },
+    "pie-proportional": {
+      "id": "pie-proportional",
+      "ok": true,
+      "series": [
+        {
+          "axis_id": "ax_0",
+          "plot_func_id": "pf_1",
+          "plt_func": "pie",
+          "data_series": [
+            {
+              "x": [
+                100.0,
+                200.0,
+                300.0
+              ],
+              "name": ""
+            }
+          ]
+        }
+      ],
+      "lines": 1
+    }
+  }
+}

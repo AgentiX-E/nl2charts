@@ -1,0 +1,16 @@
+{
+  "note": "Authoritative end-to-end Displayed Data Similarity from upstream t2v_eval.calculate_similarity_score (scipy 1.17.0 / numpy 2.3.5), over logs emitted by viscodebench_log_worker.py. Shape-identical controls (translate/proportional) score 1.0 by the metric's min-max normalisation design \u2014 this is asserted, not treated as a bug.",
+  "source": "https://github.com/SAIPLL/VisCodeBench/tree/main/t2v_eval/evaluation",
+  "command": "python3 /tmp/oracle_e2e2.py (upstream calculate_similarity_score, down_sampling=False)",
+  "pairs": {
+    "line-base|line-base": 1.0,
+    "line-parabola-tweak|line-base": 0.9032795205,
+    "line-flat|line-base": 0.3972988614,
+    "line-translate|line-base": 1.0,
+    "scatter-base|scatter-base": 1.0,
+    "scatter-far|scatter-base": 1.0,
+    "pie-base|pie-base": 1.0,
+    "pie-different|pie-base": 0.6666666667,
+    "pie-proportional|pie-base": 1.0
+  }
+}

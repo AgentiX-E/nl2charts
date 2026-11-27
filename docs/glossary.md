@@ -938,6 +938,20 @@ Codabench server against private reference logs, so the repository can never hol
 exists so a plan cannot promote a row to `measured` by spending money on a submission that only
 produces a number on somebody else's machine.
 
+**Displayed Data Similarity** — The primary VisCodeBench metric. It never compares pixels: a harness
+monkey-patches matplotlib and records the coordinates each plotting call draws into a `series.jsonl`,
+then compares two such logs with an optimal assignment. Before scoring, each axis is min-max
+normalized to [0, 1] and each pie is divided by its total, so the metric is deliberately invariant to
+a pure translation or proportional scaling — a translated line and a proportionally scaled pie both
+score 1.0, and that is correct rather than a bug.
+
+**Series log (`series.jsonl`)** — The compact log format upstream `t2v_eval` consumes: one JSON record
+per plotting call with `axis_id`, `plot_func_id`, `plt_func` and a `data_series` array of coordinate
+arrays. This repository generates real instances offline with `viscodebench_log_worker.py` (which
+executes only the emitted marker region), parses them in `viscodebench-pilot.ts:parseSeriesLog`, and
+pins the whole loop to authority values from upstream `calculate_similarity_score` in
+`viscodebench-pilot-oracle.json` — no model, no network, no leaderboard number.
+
 **Shipment gate** — The rule that promotes a recipe, in `packages/ai/src/shipment.ts`. It reads an
 experiment as counts and a price, re-derives the effect and the price ratio, and applies three
 declared numbers (`alpha`, `minDeltaPp`, `tokenTariff`). Its verdict is not advice: CI requires the

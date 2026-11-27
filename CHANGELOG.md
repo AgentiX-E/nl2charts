@@ -7,6 +7,18 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A closed generate → log → score loop for VisCodeBench, at ¥0.** The r212 comparator had no
+  producer for its input contract, so the loop could not run locally. `eval/text2vis/
+  viscodebench-pilot.ts` now emits a structured chart spec as Python in the upstream marker region,
+  parses `series.jsonl` into figure data (min-max per axis, pie by proportion, same-type group
+  merge), and wraps the r212 comparators in the upstream nested optimal assignment; `eval/text2vis/
+  viscodebench_log_worker.py` executes the marker region under matplotlib `Agg` with plot/scatter/
+  bar/pie monkey-patches and writes real upstream-shaped logs. `pnpm bench:text2vis:viscodebench-pilot`
+  scores nine pairs against `viscodebench-pilot-oracle.json` (upstream `calculate_similarity_score`,
+  scipy 1.17 / numpy 2.3.5) in 58 TDD tests at 99.24/99.24/100/97.98% four-dimension coverage. A
+  translated line and a proportional pie both score 1.0 by the metric's normalization design — pinned
+  as correct, not treated as a bug. Still `instrumented`, zero model calls, no leaderboard number
+  claimed; the value is that a later paid dispatch scores through an already-checked path.
 - **A local VisCodeBench score engine, and an honest `instrumented` row.** `eval/text2vis/
   viscodebench-score.ts` ports every LLM-independent comparator in upstream `t2v_eval` — Hungarian
   assignment, Mahalanobis scatter/discrete, arc-length continuous F1, chart-type set inclusion —
