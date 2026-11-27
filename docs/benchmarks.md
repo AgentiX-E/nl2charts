@@ -22900,3 +22900,37 @@ Three readings follow, and the first is the one the rewrite family needed:
   whose first difference is in what the statement reads or computes — and 326 was the residue's
   answer-shape drop. They are within one case of each other and they count different things. Writing
   the agreement down as corroboration would be the same defect as the sentence being corrected.
+
+### The second floor: Mini-Dev's ruler is not the dev split's
+
+The census above reproduces on Mini-Dev, and its 496 questions had no measured floor — every delta on
+that split was read at the dev split's 1.06pp, which is a count on a corpus three times larger. Run
+`45971584162` (`bird-model`, `deepseek-chat`, split `minidev`) carries an A/A control: `macsql-prompt`
+and `macsql-prompt#2` are two copies of one arm inside one dispatch, over the same 496 questions.
+
+| reading | value |
+|---|---:|
+| `macsql-prompt` | 323 / 496 = **65.12%** |
+| `macsql-prompt#2` | 321 / 496 = 64.72% |
+| both right / both wrong | 310 / 162 |
+| only the first / only the second | **13 / 11** |
+| flips | **24 = 4.84%**, net +2 (0.40pp), exact McNemar **p = 0.839** |
+| one sigma | `sqrt(24)/496 = 0.99pp` → **a delta below 1.98pp is two draws of one arm** |
+
+Two things follow, and the first is a correction to how this file has been read:
+
+1. **Mini-Dev's floor is 1.98pp, not 1.06pp and certainly not the 0.3pp binomial.** The share of
+   questions that change verdict is nearly the same as on dev (4.84% against 4.31%) — what changes is
+   the denominator, and a floor quoted in points does not travel between corpora. `NOISE_FLOORS` now
+   carries both rows and `bench:coverage` prints both, because the ruler is a property of the split
+   and a reader who has one number for every split has the wrong one for all but one of them. This is
+   the arithmetic behind a sentence this file has used too freely: several Mini-Dev mechanisms "landed
+   inside the noise", and on a 1.98pp ruler a great many of them could not have landed anywhere else.
+2. **The same arm on the same 496 questions reads 64.31% and 65.12% in two dispatches.** The published
+   Mini-Dev row stays on run `45846766964` (319 = 64.31%) — one number, one artifact — and this pair
+   is recorded as the replicate that gives the split its floor. The 0.81pp between them is not a
+   change: it is what the corpus does between draws, and it is less than half the floor.
+
+The A/A pair also costs **¥1.88** for 992 calls (1,804,790 prompt tokens of which 1,711,534 are cache
+hits, 171,788 completion), which is the price of knowing the ruler — cheaper than any lever this file
+has priced, and the only one whose value does not depend on the result.

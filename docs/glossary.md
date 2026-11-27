@@ -145,7 +145,11 @@ so one standard deviation of a paired net is `sqrt(66)/1,532 = 0.53pp` and an un
 1.06pp is two draws of one arm. Every delta in this repository used to be quoted at the binomial
 resolution of a single drawing (0.3pp), which is the noise of a corpus that does not vary; `NOISE_FLOORS`
 in `eval/benchmarks.ts` is where the measured one lives, and the gate refuses a floor whose flips and
-net cannot be a two-way split of the same cases.
+net cannot be a two-way split of the same cases. There are **two rows**, because a floor is a count on
+a corpus and does not travel in points: Mini-Dev's 496 questions flip 24 of 496 (`macsql-prompt` and
+`macsql-prompt#2`, two copies inside run `45971584162`), 4.84% and net +2 at p = 0.839, so its floor is
+`2 × sqrt(24)/496 = 1.98pp`. A pair is either the same arm twice across two dispatches or two copies
+inside one, and a row that claims both is refused.
 
 **Normalization (question)** — Mapping synonyms and punctuation before matching
 (`sales` → `revenue`, `per` → `by`). Its effect is measured, not assumed.

@@ -376,6 +376,16 @@ export interface NoiseFloor {
   readonly arm: string;
   /** The two dispatches compared, in the order `net` subtracts them. */
   readonly runs: readonly [string, string];
+  /**
+   * The two arms, when the pair is two draws *inside one dispatch* rather than two dispatches.
+   *
+   * A replicate is one of exactly two things: the same arm run twice, or two copies of one arm in
+   * one run (the runner's A/A control, which writes the copy as `<arm>#2`). Both are pairs and
+   * neither is the other, so the fields are exclusive: `runs` differ and `arms` is absent, or `runs`
+   * are equal and `arms` differ. A row carrying both is a row whose author has not decided what was
+   * compared — and a floor nobody can describe is the one number in this file nobody re-derives.
+   */
+  readonly arms?: readonly [string, string];
   readonly cases: number;
   /** Questions whose verdict differed between the two runs. */
   readonly flipped: number;
@@ -393,6 +403,20 @@ export const NOISE_FLOORS: readonly NoiseFloor[] = [
     flipped: 66,
     net: 8,
   },
+  // The second row exists because the first one's ruler does not transfer: a floor is a count on a
+  // corpus, so a 496-question split has a wider one, and every Mini-Dev delta in this file was being
+  // read at the dev split's 1.06pp. Two copies of the arm inside one dispatch (run `45971584162`,
+  // `macsql-prompt` and `macsql-prompt#2`) flipped 24 questions of 496 — 4.84%, near the dev split's
+  // 4.31% as a *share* and nearly twice it in points, because the denominator is a third the size.
+  {
+    corpus: 'BIRD Mini-Dev',
+    arm: 'macsql-prompt',
+    runs: ['45971584162', '45971584162'],
+    arms: ['macsql-prompt', 'macsql-prompt#2'],
+    cases: 496,
+    flipped: 24,
+    net: 2,
+  },
 ];
 
 /**
@@ -407,8 +431,14 @@ export function noiseProblems(floors: readonly NoiseFloor[]): string[] {
   const problems: string[] = [];
   for (const floor of floors) {
     if (floor.cases <= 0) problems.push(`NOISE: ${floor.corpus} has ${String(floor.cases)} questions, so no share can be read from it`);
-    if (floor.runs[0] === floor.runs[1]) {
+    const sameRun = floor.runs[0] === floor.runs[1];
+    const sameArm = floor.arms === undefined || floor.arms[0] === floor.arms[1];
+    if (sameRun && sameArm) {
       problems.push(`NOISE: ${floor.corpus} names run ${floor.runs[0]} twice, which compares a dispatch with itself`);
+    } else if (!sameRun && floor.arms !== undefined) {
+      problems.push(
+        `NOISE: ${floor.corpus} names two dispatches (${floor.runs[0]}, ${floor.runs[1]}) and two arm ids (${floor.arms[0]}, ${floor.arms[1]}); a pair is one or the other`,
+      );
     }
     if (floor.flipped < 0 || floor.flipped > floor.cases) {
       problems.push(`NOISE: ${floor.corpus} flips ${String(floor.flipped)} of ${String(floor.cases)} questions, which is not a count of them`);
@@ -438,8 +468,12 @@ export function noiseLines(floors: readonly NoiseFloor[]): string[] {
   for (const floor of floors) {
     const share = (floor.flipped / floor.cases) * 100;
     const sd = (Math.sqrt(floor.flipped) / floor.cases) * 100;
+    const pair =
+      floor.arms === undefined
+        ? `between ${floor.runs[0]} and ${floor.runs[1]}`
+        : `between ${floor.arms[0]} and ${floor.arms[1]}, two copies inside run ${floor.runs[0]}`;
     lines.push(
-      `NOISE ${floor.corpus} · ${floor.arm}: ${String(floor.flipped)} of ${String(floor.cases)} questions changed verdict between ${floor.runs[0]} and ${floor.runs[1]}`
+      `NOISE ${floor.corpus} · ${floor.arm}: ${String(floor.flipped)} of ${String(floor.cases)} questions changed verdict ${pair}`
         + ` (${share.toFixed(2)}%), net ${floor.net >= 0 ? '+' : ''}${String(floor.net)} (${((floor.net / floor.cases) * 100).toFixed(2)}pp)`
         + `, one sigma ${sd.toFixed(2)}pp — a delta below ${(2 * sd).toFixed(2)}pp is two draws of one arm`,
     );

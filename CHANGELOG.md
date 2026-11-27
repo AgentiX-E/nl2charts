@@ -37,6 +37,14 @@ cannot be argued with.
   prints the floor before the table, and `noiseProblems` refuses a row whose flips and net are not a
   two-way split of the same cases (a net larger than the flips, a parity no `won`/`lost` pair can
   produce, one run named twice).
+- **A second noise floor, because a floor is a count on a corpus and does not travel in points.**
+  Run `45971584162` carries an in-run A/A control on Mini-Dev — `macsql-prompt` and `macsql-prompt#2`,
+  496 questions, 992 calls, **¥1.88** — and the two copies flip **24** questions (4.84%), 13 one way
+  and 11 the other, net +2 at exact McNemar p = 0.839. One sigma is `sqrt(24)/496 = 0.99pp`, so
+  **Mini-Dev's floor is 1.98pp** against the dev split's 1.06pp: the share that is draw is nearly the
+  same on both corpora (4.84% / 4.31%), and the denominator is a third the size. `NoiseFloor` gains an
+  optional `arms` pair for the in-run form, `noiseProblems` refuses a row that names two dispatches
+  *and* two arm ids (a treatment read as a replicate), and `bench:coverage` prints both rows.
 - **`SHIPPED_EDITS`: the three edits the pipeline applies, named with their readings.** `recipe.ts`
   closed this seam for the prompt and left it open one step later, where three rewrites happen to a
   statement after the model has written it. `packages/ai/src/edits.ts` now names each one — the rule

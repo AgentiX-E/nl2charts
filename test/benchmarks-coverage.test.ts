@@ -354,6 +354,32 @@ describe('the noise floor', () => {
   it('refuses a replicate that compares a dispatch with itself', () => {
     const problems = noiseProblems([{ corpus: 'x', arm: 'a', runs: ['7', '7'], cases: 100, flipped: 4, net: 0 }]);
     expect(problems.join(' ')).toContain('compares a dispatch with itself');
+    // Two copies of a *named* arm in one run is the legitimate A/A control; two copies of the same
+    // arm id is still one arm, whatever the field says.
+    expect(
+      noiseProblems([{ corpus: 'x', arm: 'a', runs: ['7', '7'], arms: ['a', 'a'], cases: 100, flipped: 4, net: 0 }]).join(' '),
+    ).toContain('compares a dispatch with itself');
+  });
+
+  it('accepts the in-run A/A pair, and prints the two copies rather than a run compared with itself', () => {
+    // The Mini-Dev floor is two copies of one arm inside one dispatch: `runs` are equal by
+    // construction, so the refusal above has to be answered by the arms, not by the run ids.
+    const floor = { corpus: 'x', arm: 'a', runs: ['7', '7'], arms: ['a', 'a#2'], cases: 100, flipped: 24, net: 2 };
+    expect(noiseProblems([floor])).toEqual([]);
+    const [line] = noiseLines([floor]);
+    expect(line).toContain('between a and a#2, two copies inside run 7');
+    // The bound is derived from the counts, not stored: 24 flips over 100 questions is one sigma of
+    // 4.90pp, and the same counts over 496 would be 0.99pp.
+    expect(line).toContain('a delta below 9.80pp is two draws of one arm');
+  });
+
+  it('refuses a pair that names both two dispatches and two arms', () => {
+    // Two runs of two different arms is a treatment comparison, not a replicate, and a row that
+    // records it as a floor would price the treatment as noise.
+    const problems = noiseProblems([
+      { corpus: 'x', arm: 'a', runs: ['1', '2'], arms: ['a', 'b'], cases: 100, flipped: 4, net: 0 },
+    ]);
+    expect(problems.join(' ')).toContain('a pair is one or the other');
   });
 
   it('refuses a flip count that is not a count of the corpus', () => {
@@ -374,5 +400,13 @@ describe('the noise floor', () => {
     expect(line).toContain('(4.31%)');
     expect(line).toContain('one sigma 0.53pp');
     expect(line).toContain('a delta below 1.06pp is two draws of one arm');
+  });
+
+  it('prints a floor per corpus, so the smaller split does not inherit the larger one\'s ruler', () => {
+    const lines = noiseLines(NOISE_FLOORS);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('BIRD Mini-Dev');
+    expect(lines[1]).toContain('24 of 496 questions');
+    expect(lines[1]).toContain('a delta below 1.98pp is two draws of one arm');
   });
 });
