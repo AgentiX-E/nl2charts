@@ -37,6 +37,17 @@
  *   it.
  * - **Only the first key is guarded.** A second key is a tie-break the statement chose on
  *   purpose, and the extreme the question names is decided before it is consulted.
+ *
+ * ## Why this was priced for two rounds before it was wired
+ *
+ * Because the pipeline had no way to know the engine, and this module had a default instead. It
+ * named the engines that sort NULL last and read every other dialect as SQLite, which is right for
+ * the two engines this project runs most and wrong for DuckDB — a caller passing `duckdb` would have
+ * been handed the rewrite that *creates* the defect, on the engine whose ascending order already
+ * puts unknown values last. The default is gone: `NULL_ORDER` is a closed map and an engine that is
+ * not on it is declined. The pipeline passes the dialect its caller declared, so a deployment that
+ * declared none gets its statement back unchanged, and a deployment that declared `duckdb` gets the
+ * `desc` form.
  */
 export interface NullOrderGuard {
   /** The statement with the guard in front of its first sort key. */
@@ -47,8 +58,31 @@ export interface NullOrderGuard {
   readonly direction: 'asc' | 'desc';
 }
 
-/** Engines that sort NULL after every value. Everything else sorts it first. */
-const NULLS_LAST_DEFAULT = new Set(['postgres', 'postgresql', 'pg', 'oracle']);
+/**
+ * Where each named engine sorts an unknown value, which is which direction the trap sits in.
+ *
+ * A map rather than a set, and a closed one rather than a default. The set this replaces named the
+ * engines that sort NULL last and read **everything else as SQLite** — so a caller passing
+ * `duckdb`, whose ascending order also puts NULLs last, would have been handed the exact rewrite
+ * this module exists to prevent. That is why the rule stayed priced and unwired for two rounds:
+ * the pipeline passes the dialect its caller declared, and a default here decides an engine fact
+ * on behalf of a caller who may have declared nothing at all.
+ *
+ * An engine that is not on this map is declined. The cost of declining is a repair not made on an
+ * engine nobody has priced; the cost of assuming is an inverted sort on a statement that was right.
+ */
+const NULL_ORDER: ReadonlyMap<string, 'asc' | 'desc'> = new Map<string, 'asc' | 'desc'>([
+  // NULL is smaller than every value: it wins an ascending ORDER BY, so only `asc` is a trap.
+  ['sqlite', 'asc'],
+  ['mysql', 'asc'],
+  ['mariadb', 'asc'],
+  // NULL is larger than every value: it loses an ascending ORDER BY, so only `desc` is a trap.
+  ['postgres', 'desc'],
+  ['postgresql', 'desc'],
+  ['pg', 'desc'],
+  ['duckdb', 'desc'],
+  ['oracle', 'desc'],
+]);
 
 /** Calls whose result is never NULL for a non-empty group, and whose ties are load-bearing. */
 const AGGREGATE = /\b(?:count|sum|avg|max|min|total|group_concat|string_agg|array_agg)\s*\(/i;
@@ -121,11 +155,19 @@ export function splitKeys(clause: string): string[] {
 /**
  * Put the unknown values last in the sort key that decides a `LIMIT`.
  *
- * Returns `undefined` when the statement is not one the rule applies to — which is most
- * statements, and the count of them is the price of the rule: on BIRD's dev split it fires on 86
- * of 1,525 answered questions and wins 6, losing none.
+ * Returns `undefined` when the statement is not one the rule applies to — which is most statements,
+ * and the count of them is the price of the rule. On the dev artifact of run `45866761911` (1,532
+ * questions, the shipped arm) it fires on 61 statements, repairs 3 and breaks none; the artifact
+ * two rounds before it priced the same rule at 86 firings and 6 repairs, which is the same sign at a
+ * different draw.
+ *
+ * `dialect` is required in effect even though it is optional in the signature: a call that names
+ * no engine, or one this module has no row for, is declined rather than read as SQLite. See
+ * `NULL_ORDER` for why the default had to go.
  */
 export function guardNullOrder(sql: string, dialect?: string): NullOrderGuard | undefined {
+  const trap = NULL_ORDER.get((dialect ?? '').trim().toLowerCase());
+  if (trap === undefined) return undefined;
   const orderEnd = clauseAt(sql, 'order by');
   if (orderEnd === undefined) return undefined;
   // The clause runs to the row cap. Without one, the order is unobservable and the rewrite buys
@@ -151,7 +193,8 @@ export function guardNullOrder(sql: string, dialect?: string): NullOrderGuard | 
   const direction: 'asc' | 'desc' = /\bdesc\s*$/i.test(first) ? 'desc' : 'asc';
   const expression = first.replace(/\s+(?:asc|desc)\s*$/i, '').trim();
   if (expression === '') return undefined;
-  const trap: 'asc' | 'desc' = NULLS_LAST_DEFAULT.has((dialect ?? 'sqlite').toLowerCase()) ? 'desc' : 'asc';
+  // `trap` was read from the dialect at the top of this function, before the statement was parsed:
+  // an engine this module has no row for never gets as far as a rewrite.
   if (direction !== trap) return undefined;
   const rest = keys.slice(1);
   // The key is echoed as the statement wrote it, direction included: this module changes where the

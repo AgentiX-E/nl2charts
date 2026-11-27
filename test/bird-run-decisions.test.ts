@@ -1081,6 +1081,22 @@ describe('the per-case rows an artifact carries', () => {
     expect(caseRows(new Map<string, readonly CaseRun[]>([['a', [bare()]]]))[0]).not.toHaveProperty('sql');
   });
 
+  it('publishes both free rewrites per case, because an arm-level sum cannot be paired', () => {
+    // `capStripped` had been in the pipeline's result for two rounds and in no artifact, which is
+    // the same defect a funnel-without-a-row is: the run could say the rule fired and never which
+    // statement it fired on. Both edits are written here now, and both are omitted on a case the
+    // rule declined — an absent field is a decline, not a zero.
+    const rows = caseRows(
+      new Map<string, readonly CaseRun[]>([
+        ['macsql-prompt', [bare({ capStripped: '3', nullOrderGuarded: 'price' }), bare({ id: '2' })]],
+      ]),
+    );
+    expect(rows[0]?.capStripped).toBe('3');
+    expect(rows[0]?.nullOrderGuarded).toBe('price');
+    expect(rows[1]).not.toHaveProperty('capStripped');
+    expect(rows[1]).not.toHaveProperty('nullOrderGuarded');
+  });
+
   it('joins the gold statement, and omits it when the questions are not handed over', () => {
     const questions = [
       { question_id: 1, db_id: 'd', question: 'q', evidence: '', SQL: 'select name from singer', difficulty: 'simple' as const },

@@ -13,12 +13,14 @@
  * 1. **`null-order`** — an ascending sort that carries a row cap puts unknown values first in
  *    SQLite and MySQL, so a question asking for "the lowest score" is answered by the school whose
  *    score is missing. `IS NULL` in front of the sort key is the statement the question meant.
- *    The rule lives in the AI package (`guardNullOrder`) and the pipeline does not call it: it was
- *    priced here and never wired, and wiring it is a change of its own because the null ordering it
- *    guards against is a property of the dialect — `null-order.ts` treats every engine it does not
- *    name as SQLite, and DuckDB sorts the other way, so a caller that passed `duckdb` through would
- *    introduce the defect the rule exists to remove. This harness is how it was priced and how a
- *    future engine-specific variant will be priced.
+ *    The rule lives in the AI package (`guardNullOrder`) and the pipeline calls it, on the statement
+ *    about to execute, after the cap strip. It waited two rounds for a reason this harness stated
+ *    first: where an unknown value sorts is a property of the dialect, `null-order.ts` read every
+ *    engine it did not name as SQLite, and DuckDB sorts the other way — so wiring it before closing
+ *    that default would have handed DuckDB the rewrite that creates the defect. The default is a
+ *    closed map now and an unknown engine is declined, which is what made the wiring a one-line
+ *    change. The `sqlite` argument below is the harness naming the engine it is pricing on rather
+ *    than the module assuming one.
  * 2. **`drop-limit-on-count`** — the reverse suspicion: a row cap left in a statement whose
  *    question asks "how many". It is here because the suspicion is wrong, and a rule that is
  *    wrong at 1,532 questions is worth one line of code that says so: it fires 35 times, wins 1
@@ -254,6 +256,12 @@ function groundAbsence(input: RewriteInput, kinds: readonly GroundableKind[]): s
  */
 export const REWRITE_RULES: readonly RewriteRule[] = [
   {
+    // The rule with the longest gap between pricing and shipping: priced here at 6 wins and 0
+    // losses, then blocked on a dialect default, then wired in round 203 once the default became a
+    // closed map. Its reach on the artifact this harness last read is printed beside every other
+    // rule, and it is the one number in this list that does not change when the rule ships — the
+    // statements it reaches are the statements the pipeline already guarded, so a later run of this
+    // harness shows it declining more often and the artifact's own field shows why.
     name: 'null-order',
     claim: 'an ascending sort behind a row cap must not let unknown values win',
     apply: (input) => guardNullOrder(input.sql, 'sqlite')?.sql,

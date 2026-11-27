@@ -11,6 +11,7 @@ import { emptyRetryMessages } from './empty.js';
 import { groundLiterals } from './ground.js';
 import { SQL_LIKE_RULES } from './sql-like.js';
 import { stripUnfoundedCap } from './unfounded-cap.js';
+import { guardNullOrder } from './null-order.js';
 import type { ColumnValues } from './ground.js';
 import { auditMessages, countNamedConditions } from './audit.js';
 import { replyShape } from './format.js';
@@ -347,6 +348,15 @@ export interface AskResult {
    * them is a mechanism. `cap` is the clause as the model wrote it.
    */
   readonly capStripped?: string;
+  /**
+   * The sort key a null guard was placed in front of, as the statement wrote it.
+   *
+   * Reported for the same reason the stripped cap is: the edit exists to stop an unknown value from
+   * winning an extreme, and a case whose key was already guarded, whose dialect is unknown, or
+   * whose statement carried no row cap looks identical in the result. `key` is the expression the
+   * statement sorted by; `undefined` means the rule declined, not that it failed.
+   */
+  readonly nullOrderGuarded?: string;
   /**
    * How many sub-statements the reply wrote, when the pipeline asked for a decomposition.
    *
@@ -787,12 +797,26 @@ export function createPipeline(options: PipelineOptions): {
           const capped = stripUnfoundedCap(substituted, request.question);
           const stated = capped === undefined ? substituted : capped.sql;
           const cap = capped === undefined ? {} : { capStripped: capped.cap };
-          if (!options.execute) return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...steps, ...shape, ...cut };
+          // The third engine-level rewrite, and the second one that needs no data. It runs after the
+          // cap strip rather than before it, and the order is load-bearing: a cap this pipeline just
+          // decided the statement could not justify is gone by the time the guard looks for one, and
+          // without a cap the sort order is unobservable — so the guard declines instead of prefixing
+          // a key nothing will read. On the statements that keep their cap, `ORDER BY x ASC LIMIT 1`
+          // becomes `ORDER BY x IS NULL, x ASC LIMIT 1`, which is the statement the question meant in
+          // every engine that sorts an unknown value first.
+          //
+          // The dialect is the caller's, not a default. `guardNullOrder` declines an engine it has no
+          // row for, which is why a caller that declared nothing gets the statement it wrote back
+          // unchanged rather than a rewrite made on SQLite's behalf.
+          const guarded = guardNullOrder(stated, options.prompt?.dialect);
+          const final = guarded === undefined ? stated : guarded.sql;
+          const nullOrder = guarded === undefined ? {} : { nullOrderGuarded: guarded.key };
+          if (!options.execute) return { sql: final, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...nullOrder, ...steps, ...shape, ...cut };
           try {
-            const outcome = await options.execute(stated);
+            const outcome = await options.execute(final);
             const rows = rowCountOf(outcome);
             if (rows === 0 && options.emptyRetry !== undefined) {
-              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql: stated, temperature, read: (text: string) => readReply(text).sql });
+              const retried = await retryEmpty({ provider: options.provider, mode: options.emptyRetry, execute: options.execute, messages, previous: response.text, sql: final, temperature, read: (text: string) => readReply(text).sql });
               return {
                 sql: retried.sql,
                 attempts: spent + 1,
@@ -803,14 +827,15 @@ export function createPipeline(options: PipelineOptions): {
                 ...audit,
                 ...grounding,
                 ...cap,
+                ...nullOrder,
                 ...steps,
                 ...shape,
               };
             }
-            return { sql: stated, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...steps, ...shape, ...cut };
+            return { sql: final, attempts: spent, linked, failures, diagnoses, ...audit, ...grounding, ...cap, ...nullOrder, ...steps, ...shape, ...cut };
           } catch (error) {
             const diagnosis = diagnoseFailure({
-              sql: stated,
+              sql: final,
               schema: request.schema,
               ...(options.prompt?.dialect === undefined ? {} : { dialect: options.prompt.dialect }),
               ...(options.repairFeedback === undefined ? {} : { mode: options.repairFeedback }),
@@ -818,7 +843,7 @@ export function createPipeline(options: PipelineOptions): {
             });
             failures.push(diagnosis.failureClass);
             diagnoses.push(diagnosis.summary);
-            if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, stated, failures, diagnoses, firstShape);
+            if (attempts > maxRepairs) throw exhausted(diagnosis, attempts, final, failures, diagnoses, firstShape);
             messages.push({ role: 'assistant', content: response.text });
             messages.push({ role: 'user', content: diagnosis.feedback });
             continue;

@@ -22282,3 +22282,98 @@ It also fixes the resolution of everything above it. The pair's +20 statements i
 gap between two runs of one arm, which is why +26.09pp on 23 questions reads as p = 0.0703 rather
 than as a win: at this corpus and this model, **a 20-statement delta is one run-to-run draw away from
 being nothing**, and only the paired design makes it distinguishable at all.
+
+## The rule that waited two rounds for a default: where an unknown value sorts, and who decides
+
+`guardNullOrder` was priced before it was wired — 6 repairs, 0 losses on dev — and then sat in the
+pipeline's blind spot for two rounds. The blocker was not the rule. It was one line:
+
+```ts
+const trap = NULLS_LAST_DEFAULT.has((dialect ?? 'sqlite').toLowerCase()) ? 'desc' : 'asc';
+```
+
+A **set** of the engines that sort NULL last, with everything else read as SQLite. That is right for
+the two engines this project runs most and wrong for the third it ships an adapter for: DuckDB sorts
+an unknown value *last* ascending, so `ORDER BY x ASC LIMIT 1` is already the statement the question
+meant, and prefixing `x IS NULL` would move the unknown values to the front — the exact defect the
+rule exists to remove, introduced by the rule, on a dialect passed straight through by a caller that
+did nothing wrong. The pipeline forwards `prompt.dialect`, which is `'SQLite'` on every BIRD arm and
+`'duckdb'` on the MCP tool's default runner, so the two spellings the repository actually sends were
+one caller away from opposite answers.
+
+### The default became a closed map, and an unknown engine is declined
+
+```ts
+const NULL_ORDER: ReadonlyMap<string, 'asc' | 'desc'> = new Map([
+  ['sqlite', 'asc'], ['mysql', 'asc'], ['mariadb', 'asc'],
+  ['postgres', 'desc'], ['postgresql', 'desc'], ['pg', 'desc'], ['duckdb', 'desc'], ['oracle', 'desc'],
+]);
+```
+
+An engine the map does not hold is **declined**, not assumed. The cost of declining is a repair not
+made on an engine nobody has priced; the cost of assuming is an inverted sort on a statement that
+was right. That asymmetry is the whole argument, and it is the reason the wiring is one line rather
+than a redesign.
+
+### Where it runs, and the clause that keeps the two free rules apart
+
+On the statement about to execute, after the cap strip, on every turn — the generation's, a repair's
+and the audit turn's, for the same reason the cap strip sits there: they are statements the model
+wrote from the same prompt.
+
+The two free rewrites cannot both fire on one statement, and the reason is syntactic rather than
+empirical. `drop-unordered-limit` removes a cap from a statement whose `order by` is **absent**;
+`null-order` guards a statement whose `order by` is **present**. The clause is the partition, so a
+run's two reaches cannot share a case and their deltas add.
+
+### Two corpora, no model called, and the baseline reconciles
+
+`bench:bird:rewrite` re-executes each case with and without the edit and refuses to print unless the
+re-execution reproduces the arm's published pass count. Both did, exactly: 1,532/1,532 on dev and
+496/496 on Mini-Dev.
+
+| corpus | arm | baseline | fired | repaired | broke | net | exact McNemar | resolves |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dev, 1,532 | `macsql-prompt` | 999 (65.21%) | 61 | **3** | **0** | +0.20pp | p = 0.250 | 0.3pp |
+| Mini-Dev, 496 | `macsql-prompt` | 319 (64.31%) | 23 | **1** | **0** | +0.20pp | p = 1.000 | 0.6pp |
+
+**Eighty-four firings, four repairs, no losses.** The exact sign test on 4 and 0 is p = 0.0625
+one-sided, so the table is not a significance claim and this section does not make one. The adoption
+argument is different in kind from every other lever in this file: the edit is a fact about SQL
+rather than a prediction about a model — an unordered relation has no first row, an unknown value is
+not the minimum of a column — so the rule that licenses it is *"it must not lose"*, and 84 firings
+without a loss is the evidence that rule asks for. A lever that spends a call is adopted on
+significance; a lever that spends nothing is adopted on the absence of harm.
+
+### What the same pass priced and did not adopt
+
+Two numbers came out of the same run and are recorded here because they are the next rounds, not
+because they belong to this one.
+
+| rule | fired | won | lost | net | p | verdict |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `drop-count-distinct` | 119 | 33 | **18** | +0.98pp | 0.0489 | priced, not adopted: a free rule may not lose |
+| `ground-shipped` (the `ground` arm's own edit) | 26 | 17 | 0 | +1.11pp | <0.0001 | already an arm; the product tool calls no domain reader |
+
+The first is the largest free edit this project has priced and it *loses 18*: a question that says
+"how many distinct" is a question whose `distinct` is the answer, and no question-side word list
+separates the two readings well enough. It stays in `REWRITE_RULES` as a priced refusal.
+
+The second is larger than everything in this section combined and is not a new mechanism: it is
+`applyGrounding`, which the `inline+evidence+ground` arm runs and the shipped arm does not. The
+`ask_question` tool has a runner and therefore could read a column's values, and it passes no
+`readColumnValues`; that is a product gap this round measured and did not close, and it is registered
+as the next round's first item rather than folded into this one.
+
+### The artifact can now say which free rewrite fired
+
+`capStripped` had been in the pipeline's result for two rounds and in **no artifact** — the same
+defect as a funnel without a row: a run could report that the rule fired and never on which
+statement. Both edits are now carried per case (`capStripped`, `nullOrderGuarded`), projected through
+`caseRows`' whitelist, and reported by the MCP tool beside the statement it returned.
+
+The pricer's own output is the check that this matters: `drop-unordered-limit` fires **0** times on
+both artifacts, and it is the rule that ships. The reason is not that the rule is dead — it is that
+the artifact records the statement the pipeline *executed*, which is the post-strip statement. An
+instrument reading the model's raw reply instead would have priced the shipped rule at its full
+ceiling for a second time and reported a lever that is already banked.

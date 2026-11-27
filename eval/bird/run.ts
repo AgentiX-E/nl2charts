@@ -2948,6 +2948,24 @@ export interface CaseRun extends CaseOutcome {
    */
   readonly grounding?: { readonly substitutions: number; readonly refused: number };
   /**
+   * The row cap the pipeline removed, as the model wrote it.
+   *
+   * The first free rewrite never had a per-case record, so a reading of "the rule fired" was only
+   * ever available from the arm's own sum — and a sum cannot be paired, cannot be stratified by
+   * difficulty, and cannot be re-read against a second artifact. It is written here beside the
+   * second free rewrite for the same reason the shape and the cut are: one row, one case, no
+   * second definition.
+   */
+  readonly capStripped?: string;
+  /**
+   * The sort key the pipeline placed `IS NULL` in front of, as the statement wrote it.
+   *
+   * Absent means the rule declined — an unknown dialect, no row cap, an already-guarded key or an
+   * aggregate. Those four are the same row and different explanations, which is why the key is
+   * recorded rather than a boolean.
+   */
+  readonly nullOrderGuarded?: string;
+  /**
    * The candidate set, in the order the selector saw it, with the truth for each.
    *
    * `candidateRecall` says whether the set held an answer; it cannot say *which* candidate
@@ -9388,6 +9406,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             ],
             ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
             ...demonstrationsOf(question),
+            ...freeRewrites(asked),
             ...shape,
             ...cut,
             error: `execution: ${predicted.error ?? 'unknown'}`,
@@ -9413,6 +9432,7 @@ export async function runArm(prepared: PreparedRun, name: string, io: ArmIo): Pr
             : { emptyRetried: asked.emptyRetry.fired, emptyRecovered: asked.emptyRetry.recovered }),
           ...(asked.decomposedSteps === undefined ? {} : { decomposition: { candidates: 1, steps: asked.decomposedSteps } }),
           ...demonstrationsOf(question),
+          ...freeRewrites(asked),
           ...shape,
           ...cut,
         };
@@ -10220,6 +10240,29 @@ export function askedField(question: BirdQuestion | undefined): { readonly asked
 }
 
 /** Per-case outcomes, because a per-arm total cannot answer "on which questions did this lever work". */
+/**
+ * The two rewrites the pipeline applies to a statement it is about to execute.
+ *
+ * Neither costs a call, a token or a candidate, so the only place either one can be seen is the case
+ * record: a statement the pipeline repaired is not the statement the model wrote, and an arm-level
+ * sum of "the rule fired 61 times" cannot be paired, stratified, or re-read against a second
+ * artifact. They travel together because a reader who has one without the other cannot tell which
+ * edit earned a case.
+ *
+ * The pair was missing until round 203 in a way the shape and the cut were not: `capStripped` had
+ * been in the pipeline's result for two rounds and in no artifact, which is the same defect as a
+ * funnel without a row and is why `freeRewrites` returns both fields rather than the new one.
+ */
+function freeRewrites(asked: {
+  readonly capStripped?: string;
+  readonly nullOrderGuarded?: string;
+}): Pick<CaseRun, 'capStripped' | 'nullOrderGuarded'> {
+  return {
+    ...(asked.capStripped === undefined ? {} : { capStripped: asked.capStripped }),
+    ...(asked.nullOrderGuarded === undefined ? {} : { nullOrderGuarded: asked.nullOrderGuarded }),
+  };
+}
+
 export function caseRows(
   outcomes: ReadonlyMap<string, readonly CaseRun[]>,
   questions: readonly BirdQuestion[] = [],
@@ -10312,6 +10355,15 @@ export function caseRows(
       // about a run, and "these twelve" is the only form in which it can be paired against a
       // second arm or re-read against a second cap.
       ...(run.truncated === undefined ? {} : { truncated: run.truncated }),
+      // The two free rewrites, on the cases they reached.
+      //
+      // Written at the case level for the reason the cut is: a rule whose reach is "61 statements"
+      // has to become "these 61" before it can be paired against a second arm, and the identity that
+      // makes the two edits checkable — every case either carries the field or did not fire — is
+      // only available in a row. `capStripped` reached no artifact at all until this line, so the
+      // first rule to ship had no per-case record while the second one was being added.
+      ...(run.capStripped === undefined ? {} : { capStripped: run.capStripped }),
+      ...(run.nullOrderGuarded === undefined ? {} : { nullOrderGuarded: run.nullOrderGuarded }),
       // What the zero-row lever did on this case, when the arm declares it.
       //
       // The arm funnel says how many cases triggered; a reading of "the lookup answered this one

@@ -335,3 +335,46 @@ describe('the hint the server sends', () => {
     expect(hintOf(provider.requests[0] as LlmRequest)).toBe('No column matched; use the schema above.');
   });
 });
+
+/**
+ * The free rewrite, as the tool reports it.
+ *
+ * DuckDB is the engine these tests run on and that is the point: it sorts an unknown value *last*
+ * ascending, the opposite of SQLite, so a rewrite written for SQLite applied here would move the
+ * unknown values to the front of a question asking for a minimum — the engine-level bug the rule
+ * exists to remove. Both directions are driven through the real engine, so the statement the rewrite
+ * produces is also shown to parse.
+ */
+describe('the sort key the tool guarded, and the engine that decided it', () => {
+  it('leaves an ascending cap alone on an engine that already sorts unknown values last', async () => {
+    await seed();
+    const provider = scripted(['SELECT word FROM greetings ORDER BY id ASC LIMIT 1']);
+    const server = createMcpServer({ runner, ask: { provider } });
+    const response = await server.handle({
+      jsonrpc: '2.0',
+      id: 40,
+      method: 'tools/call',
+      params: { name: 'ask_question', arguments: { question: 'which greeting comes first by id', schema } },
+    });
+    const payload = JSON.parse((response?.result as { content: { text: string }[] }).content[0]!.text) as Record<string, unknown>;
+    expect(payload.sql).toBe('SELECT word FROM greetings ORDER BY id ASC LIMIT 1');
+    expect(payload.nullOrderGuarded).toBeUndefined();
+  });
+
+  it('guards a descending cap on the same engine, and the guarded statement still runs', async () => {
+    await seed();
+    const provider = scripted(['SELECT word FROM greetings ORDER BY id DESC LIMIT 1']);
+    const server = createMcpServer({ runner, ask: { provider } });
+    const response = await server.handle({
+      jsonrpc: '2.0',
+      id: 41,
+      method: 'tools/call',
+      params: { name: 'ask_question', arguments: { question: 'which greeting comes last by id', schema } },
+    });
+    const payload = JSON.parse((response?.result as { content: { text: string }[] }).content[0]!.text) as Record<string, unknown>;
+    expect(payload.sql).toBe('SELECT word FROM greetings ORDER BY id IS NULL, id DESC LIMIT 1');
+    expect(payload.nullOrderGuarded).toBe('id');
+    // The rewrite is not decoration: the row the question asked for is the one that comes back.
+    expect(payload.rows).toEqual([{ word: 'goodbye' }]);
+  });
+});

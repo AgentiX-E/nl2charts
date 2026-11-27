@@ -82,7 +82,27 @@ cannot be argued with.
   jsDelivr's 20 MB cap answered 49 bytes. `pnpm bench:wikisql:ask`, `wikisql-ask.yml`, and a pilot
   (`--limit 40`) that costs ¥0.04 before a split that costs ¥8.66.
 
+### Changed
+- **The null-order guard ships, and the dialect default that kept it out is gone.** Where an unknown
+  value sorts is a property of the engine, and `NULL_ORDER` read every dialect it did not name as
+  SQLite — so passing `duckdb` through would have handed it the rewrite that *creates* the defect
+  (`ORDER BY x ASC LIMIT 1` is already right there). The set is a closed map now (sqlite/mysql/mariadb
+  asc, postgres/duckdb/oracle desc) and an unnamed or unknown engine is **declined** rather than
+  assumed. The pipeline calls `guardNullOrder` on the statement about to execute, after the cap strip,
+  on every turn, and reports `nullOrderGuarded` beside `capStripped`. The two free rewrites cannot both
+  fire on one statement: one needs the `order by` absent, the other needs it present. Priced by
+  re-execution with the baseline reconciling exactly (1,532/1,532 dev, 496/496 Mini-Dev): **84 firings,
+  4 repairs, 0 losses** (+0.20pp on each corpus). Adopted on *"it must not lose"* rather than on
+  significance — 4-and-0 is p = 0.0625, and a lever that spends nothing is adopted on the absence of
+  harm.
+
 ### Measured
+- **The two free rewrites are per-case fields now, and one of them never was.** `capStripped` had been
+  in the pipeline's result for two rounds and in no artifact, which is a funnel without a row: a run
+  could report that the rule fired and never on which statement. `caseRows` projects both, and the MCP
+  tool reports both beside the statement it returned. The pricer's own output is the check: the shipped
+  `drop-unordered-limit` fires **0** times on both artifacts, because the artifact records the statement
+  the pipeline executed rather than the reply the model wrote.
 - **The refinement turn is worth six cases, and the pairing supplied the other fourteen.** Run
   `45866761911` paired `macsql-prompt` against `macsql-prompt+repair` on dev: **999 → 1,019 of 1,532,
   +1.31pp**, exact McNemar on 72 discordant questions p = 0.0245 (46 won, 26 lost), ¥5.64 against a

@@ -5103,3 +5103,36 @@ describe('the two procedure arms, end to end', () => {
     expect(withBlock[0]?.prompt).toContain('The examples above were written for this database.');
   });
 });
+
+/**
+ * The two free rewrites, through the artifact.
+ *
+ * `capStripped` lived in the pipeline's result for two rounds and in **no artifact**, which is the
+ * same defect as a funnel without a row: a run could report that a rule fired and never on which
+ * statement. A unit test of `caseRows` proves the projection compiles; only this file proves the
+ * three steps that carry the field — endpoint, pipeline, writer — agree on one case.
+ */
+describe('the free rewrites, as the artifact records them', () => {
+  it('carries the sort key the guard placed in front of, on the case it reached', async () => {
+    const result = await run({
+      plan: {
+        // An ordered statement behind a cap on the first question, whose gold counts rows: the case
+        // is judged wrong and that is irrelevant here — the guard runs on the statement about to
+        // execute, so a wrong statement is still one the record can describe.
+        first: (question) => (question === FIRST_QUESTION ? 'select price from items order by price asc limit 1' : undefined),
+      },
+      env: { BIRD_ARMS: 'macsql-prompt' },
+    });
+    const rows = result.report.cases as Record<string, unknown>[];
+    const reached = rows.find((row) => row.id === '1');
+    expect(reached?.nullOrderGuarded).toBe('price');
+    expect(String(reached?.sql)).toContain('price IS NULL');
+    // An absent field is a decline, not a zero: every other case carries neither rewrite.
+    // One arm, pinned in this scenario's env: the count is a statement about this run, not about
+    // whichever arm set the previous scenario left in the process. Twelve arms gave twelve rows when
+    // this test borrowed the suite's env, which is a failure that reads like a guard defect and is
+    // actually an assertion about a different run.
+    expect(rows.filter((row) => row.nullOrderGuarded !== undefined)).toHaveLength(1);
+    expect(rows.filter((row) => row.capStripped !== undefined)).toHaveLength(0);
+  });
+});

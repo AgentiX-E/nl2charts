@@ -789,6 +789,18 @@ which is +0.20 to +0.81pp per arm and 0.00049 by a sign test on the 11-to-0 spli
 a subquery is not a cap — a top-N per group is part of the answer — and neither is `limit 0`, which
 asks for a result's columns and none of its rows.
 
+**Null-order guard** — The rewrite that puts an unknown value last in the sort key which decides a
+`LIMIT`: `ORDER BY price ASC LIMIT 1` becomes `ORDER BY price IS NULL, price ASC LIMIT 1`. An
+extreme over a column that is allowed to be empty is decided by where that emptiness sorts, and the
+engines disagree — SQLite and MySQL sort NULL first ascending, PostgreSQL and DuckDB sort it last —
+so the direction is a property of the dialect and not a constant. It fires only behind a row cap,
+because without one the order changes nothing a judge can see; it declines on an aggregate key,
+whose ties are load-bearing, and on a key the statement already guarded. On the dev artifact of run
+`45866761911` it fires 61 times, repairs 3 and breaks none (Mini-Dev: 23 firings, 1 repair, 0
+breaks). An engine the map does not name is **declined rather than assumed to be SQLite** — the
+default that kept this rule out of the pipeline for two rounds, and the reason the MCP tool's DuckDB
+runner gets the `desc` form and not the `asc` one.
+
 **Ceiling (oracle rule)** — A rule that reads the gold statement. It cannot ship, because a
 deployment does not have the gold, but it bounds what an edit could ever be worth: if the ceiling is
 small, no version of the rule is worth building. `oracle-drop-limit` is the ceiling for the cap edit

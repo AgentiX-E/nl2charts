@@ -254,6 +254,10 @@ export async function askQuestion(
       promptRecipe: shipped.recipe,
       ...(shipped.fellBackFrom === undefined ? {} : { promptFallback: shipped.fellBackFrom }),
       ...(asked.capStripped === undefined ? {} : { capStripped: asked.capStripped }),
+      // The second free rewrite, named for the same reason the first one is: `sql` alone cannot
+      // tell a statement the model wrote from one the pipeline repaired, and a caller comparing two
+      // deployments needs to know which of the two edits fired on this question.
+      ...(asked.nullOrderGuarded === undefined ? {} : { nullOrderGuarded: asked.nullOrderGuarded }),
       ...(asked.emptyRetry === undefined ? {} : { emptyRetry: asked.emptyRetry }),
     };
   } catch (error) {

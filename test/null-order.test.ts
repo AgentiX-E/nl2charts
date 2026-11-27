@@ -121,8 +121,43 @@ describe('guardNullOrder', () => {
     expect(guard?.sql).toContain('"First Date" IS NULL, "First Date" asc');
   });
 
-  it('defaults to SQLite when no dialect is named', () => {
-    expect(guardNullOrder('select a from t order by a asc limit 1')?.direction).toBe('asc');
+  it('declines when no dialect is named, because nothing has been declared', () => {
+    // This test used to assert the opposite — that a missing dialect reads as SQLite — and that
+    // default was the reason the pipeline did not call this function for two rounds: the pipeline
+    // forwards the dialect its caller declared, so a caller who declared none would have been given
+    // a rewrite made on SQLite's behalf. The rewrite is only safe when the engine is known.
+    expect(guardNullOrder('select a from t order by a asc limit 1')).toBeUndefined();
+  });
+
+  it('declines an engine it has no row for, rather than assuming one', () => {
+    // The set this map replaced named the engines that sort NULL last and read everything else as
+    // SQLite, so `sqlserver` and `snowflake` would each have received SQLite's rewrite.
+    expect(guardNullOrder('select a from t order by a asc limit 1', 'sqlserver')).toBeUndefined();
+    expect(guardNullOrder('select a from t order by a desc limit 1', 'sqlserver')).toBeUndefined();
+    expect(guardNullOrder('select a from t order by a asc limit 1', '')).toBeUndefined();
+  });
+
+  it('reads duckdb as an engine that already sorts NULL last, which is the defect the default hid', () => {
+    // DuckDB's ascending order puts NULLs last, so guarding it would move them the other way and
+    // introduce the bug. Its descending order is the trap, and that one fires.
+    expect(guardNullOrder('select a from t order by a asc limit 1', 'duckdb')).toBeUndefined();
+    expect(guardNullOrder('select a from t order by a desc limit 1', 'duckdb')?.sql).toBe(
+      'select a from t order by a IS NULL, a desc limit 1',
+    );
+  });
+
+  it('reads mysql and mariadb as SQLite-shaped, and postgres as the other shape', () => {
+    expect(guardNullOrder('select a from t order by a asc limit 1', 'mysql')?.direction).toBe('asc');
+    expect(guardNullOrder('select a from t order by a asc limit 1', 'mariadb')?.direction).toBe('asc');
+    expect(guardNullOrder('select a from t order by a desc limit 1', 'postgres')?.direction).toBe('desc');
+    expect(guardNullOrder('select a from t order by a desc limit 1', 'PostgreSQL')?.direction).toBe('desc');
+  });
+
+  it('accepts the spelling a prompt uses, which is capitalised', () => {
+    // `PromptOptions.dialect` is documented as `'SQLite'` and every BIRD arm passes it that way.
+    // A lookup that did not fold case would have declined on the only spelling the harness sends.
+    expect(guardNullOrder('select a from t order by a asc limit 1', 'SQLite')?.direction).toBe('asc');
+    expect(guardNullOrder('select a from t order by a asc limit 1', ' SQLite ')?.direction).toBe('asc');
   });
 });
 

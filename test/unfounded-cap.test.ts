@@ -166,3 +166,114 @@ describe('the pipeline runs the rule, and says so', () => {
     expect(result.capStripped).toBeUndefined();
   });
 });
+
+/**
+ * The second free rewrite: the sort key that decides an extreme, and the engine that decides it.
+ *
+ * `guardNullOrder` was priced on dev two rounds before it was wired (6 wins, 0 losses at the time),
+ * and the reason it waited is the first test below: where an unknown value sorts is a property of
+ * the *engine*, so the pipeline may only run the rule when its caller declared one. These tests
+ * drive the pipeline rather than the function because the claim being made is about what executes.
+ */
+describe('the null-order guard, as the pipeline runs it', () => {
+  it('guards an ascending cap in SQLite and reports the key it guarded', async () => {
+    const seen: string[] = [];
+    const pipeline = createPipeline({
+      provider: provider('SELECT id FROM items ORDER BY price ASC LIMIT 1'),
+      prompt: { dialect: 'SQLite' },
+      execute: async (sql: string) => {
+        seen.push(sql);
+        return { rows: 1 };
+      },
+    });
+    const result = await pipeline.ask({ question: 'which item is the cheapest', schema });
+    // The statement that executes is the one the question meant: a row whose price is unknown is
+    // not the cheapest item, and in SQLite it wins `ORDER BY price ASC` by default.
+    expect(seen).toEqual(['SELECT id FROM items ORDER BY price IS NULL, price ASC LIMIT 1']);
+    expect(result.sql).toBe('SELECT id FROM items ORDER BY price IS NULL, price ASC LIMIT 1');
+    expect(result.nullOrderGuarded).toBe('price');
+    // The ranked cap survives, because the question asked for a ranking and the guard needs the cap
+    // to be observable at all — the two rules are opposite sides of the same clause.
+    expect(result.capStripped).toBeUndefined();
+  });
+
+  it('declines when the caller declared no dialect, and executes what the model wrote', async () => {
+    const seen: string[] = [];
+    const pipeline = createPipeline({
+      provider: provider('SELECT id FROM items ORDER BY price ASC LIMIT 1'),
+      execute: async (sql: string) => {
+        seen.push(sql);
+        return { rows: 1 };
+      },
+    });
+    const result = await pipeline.ask({ question: 'which item is the cheapest', schema });
+    expect(seen).toEqual(['SELECT id FROM items ORDER BY price ASC LIMIT 1']);
+    expect(result.nullOrderGuarded).toBeUndefined();
+  });
+
+  it('declines on an engine that already sorts unknown values last, and fires on its descending cap', async () => {
+    const asc = await createPipeline({
+      provider: provider('SELECT id FROM items ORDER BY price ASC LIMIT 1'),
+      prompt: { dialect: 'duckdb' },
+    }).ask({ question: 'which item is the cheapest', schema });
+    expect(asc.sql).toBe('SELECT id FROM items ORDER BY price ASC LIMIT 1');
+    expect(asc.nullOrderGuarded).toBeUndefined();
+
+    const desc = await createPipeline({
+      provider: provider('SELECT id FROM items ORDER BY price DESC LIMIT 1'),
+      prompt: { dialect: 'duckdb' },
+    }).ask({ question: 'which item is the most expensive', schema });
+    expect(desc.sql).toBe('SELECT id FROM items ORDER BY price IS NULL, price DESC LIMIT 1');
+    expect(desc.nullOrderGuarded).toBe('price');
+  });
+
+  it('cannot both fire on one statement: one rule needs the order by, the other needs it gone', async () => {
+    // This is why the two free rewrites add up without an overlap check. `drop-unordered-limit`
+    // removes a cap from a statement that has *no* `order by`; `null-order` guards a statement that
+    // has one. The partition is the clause itself, so a run's two reaches cannot share a case.
+    const unordered = await createPipeline({ provider: provider('SELECT id FROM items LIMIT 3'), prompt: { dialect: 'SQLite' } }).ask({
+      question: 'which items are there',
+      schema,
+    });
+    expect(unordered.capStripped).toBe('3');
+    expect(unordered.nullOrderGuarded).toBeUndefined();
+
+    const ordered = await createPipeline({
+      provider: provider('SELECT id FROM items ORDER BY price ASC LIMIT 3'),
+      prompt: { dialect: 'SQLite' },
+    }).ask({ question: 'which items are there', schema });
+    expect(ordered.capStripped).toBeUndefined();
+    expect(ordered.nullOrderGuarded).toBe('price');
+  });
+
+  it('guards the statement a repair wrote, not only the first one', async () => {
+    // The rewrite sits on the statement about to execute for the reason the cap strip does: a
+    // repair's statement is a statement the model wrote from the same prompt, and a rule wired to
+    // the first attempt only would be priced on the turns it never saw.
+    const replies = ['SELECT id FROM items ORDER BY nope ASC LIMIT 1', 'SELECT id FROM items ORDER BY price ASC LIMIT 1'];
+    let index = 0;
+    const seen: string[] = [];
+    const pipeline = createPipeline({
+      provider: {
+        id: 'scripted',
+        model: 'scripted-1',
+        async complete() {
+          const text = replies[Math.min(index, replies.length - 1)] as string;
+          index += 1;
+          return { text, model: 'scripted-1' };
+        },
+      },
+      prompt: { dialect: 'SQLite' },
+      maxRepairs: 1,
+      execute: async (sql: string) => {
+        seen.push(sql);
+        if (seen.length === 1) throw new Error('no such column: nope');
+        return { rows: 1 };
+      },
+    });
+    const result = await pipeline.ask({ question: 'which item is the cheapest', schema });
+    expect(seen[1]).toBe('SELECT id FROM items ORDER BY price IS NULL, price ASC LIMIT 1');
+    expect(result.nullOrderGuarded).toBe('price');
+    expect(result.attempts).toBe(2);
+  });
+});
