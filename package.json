@@ -71,6 +71,7 @@
     "bench:bird:gap": "tsx eval/bird/gap.ts",
     "bench:bird:condition-gate": "tsx eval/bird/condition-gate.ts",
     "bench:bird:gap:values": "tsx eval/bird/values-gap.ts",
+    "bench:bird:price": "tsx eval/bird/value-pricing.ts",
     "bench:bird:width": "tsx eval/bird/width.ts",
     "bench:bird:conditions": "tsx eval/bird/conditions.ts",
     "bench:bird:repair": "tsx eval/bird/repair.ts",

@@ -523,6 +523,19 @@ which is exactly why approximate gold was not trustworthy. It is deterministic, 
 and is not a priced signal; pricing still needs a real paired dispatch through the Org-secret
 workflow. See the [gold fields guide](guide/16-gold-fields.md).
 
+The entry point that actually dispatches that paired reading is
+`eval/bird/value-pricing.ts`. It runs the four instruments above together: gold from
+`goldKeys`, the lexical `values` arm, the fused arm through an injected `EmbeddingProvider`, and
+the audit trail from `classifyCase`. Its unit is the **question**: an arm either grounded every
+field the gold SQL needed or it did not, giving the four cells of a paired design. The two-sided
+exact McNemar (`mcnemarExact`, shared with the rest of the harness) runs on the discordant pair
+only; field coverage and confirmed gain are reported as evidence, never as the price. Questions
+whose gold names no resolvable field are excluded. Reader, logger and provider are injected, so
+the same code path is a **harness proof** with the hash provider and a **priced grounding reading**
+with a hosted provider from the Org-secret workflow. The emitted note forbids quoting either as
+execution accuracy, and no product package, default arm or shipped SQL recipe changes here.
+See the [paired value-grounding pricing guide](guide/18-value-pricing.md).
+
 ## Error model
 
 One class, closed code list, data payload:

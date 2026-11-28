@@ -992,6 +992,16 @@ a paired, priced candidate, not a shipped accuracy claim: `pairValueRetrieval` r
 one retriever found and the other missed, which is the input a McNemar test needs before the arm is
 promoted.
 
+**Paired value-grounding pricing** — The question-level verdict on whether the fused value arm is
+worth promoting into the shipped SQL recipe. `eval/bird/value-pricing.ts` runs the four value
+instruments together: an arm either grounded every `table.column` the gold SQL needed on a question
+or it did not, giving a 2×2 paired design whose discordant cells feed the audited two-sided
+`mcnemarExact`. The **question** is the unit of the decision — field coverage and confirmed gain are
+evidence for why the pair moved, never the price itself — and a question whose gold names no
+resolvable field is excluded. A hash-provider run is a **harness proof**, NOT an accuracy claim; a
+hosted-provider run prices prompt grounding, not execution accuracy. Promotion to `SHIPPED_SQL`
+still requires a pre-registered threshold met in a real dispatch.
+
 **Pairing evidence** — The field-level reading that turns a difference between two retrievers into
 something auditable. `pairValueRetrieval` says which `table.column` fields one arm found and the
 other missed; `classifyPair` crosses that pair with the gold fields the question's SQL actually

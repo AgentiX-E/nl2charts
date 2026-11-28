@@ -7,6 +7,23 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A dispatchable price for value grounding, closing the gap between the instruments and a number.** Round 219
+  adds `eval/bird/value-pricing.ts`, the entry point rounds 215–218 never had. The semantic retriever,
+  paired bucketing, SQL-derived gold and fused block were each consumed only by tests; nothing ran the
+  four together on real dev questions with a provider injected. `buildPricedCase` reads canonical gold
+  from the question's own SQL via `goldKeys`, builds the lexical arm from exact value matches and the
+  fused arm through an injected `EmbeddingProvider`, and reduces both to one `table.column` space.
+  `priceArms` keeps the **question** as the unit of the decision: it counts the four cells of the paired
+  design (both / fused-only / lexical-only / neither), excludes questions whose gold names no resolvable
+  field, and runs the audited two-sided `mcnemarExact` on the discordant pair only. Field coverage and
+  confirmed gain are reported as evidence, never substituted for the price — a single coverage ratio is
+  the reading that proved an artefact of approximate gold in an earlier round. A pinned note marks a
+  hash-provider run as a HARNESS PROOF, NOT an accuracy claim, and a hosted-provider run as a grounding
+  price, not execution accuracy; promotion to `SHIPPED_SQL` still needs a pre-registered threshold in a
+  real dispatch. Reader, logger and provider are injected so the CLI runs where `eval/.cache` is absent.
+  19 TDD tests, red first, no mocks — a real deterministic hash provider drives the end-to-end cases.
+  Four-dimension coverage 98.65/95.45/100/98.65; eval ledger 152→153. No product package, default arm or
+  shipped SQL recipe changed.
 - **A wire from semantic value retrieval to the prompt seam the generator already reads.** Round 218
   adds `eval/bird/fused-values.ts`. The semantic retriever built in r215 had only ever been called by
   tests — nothing turned its hits into a string a SQL prompt could consume, so three rounds of work

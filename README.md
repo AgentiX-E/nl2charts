@@ -194,6 +194,7 @@ Every push runs the same gates locally and in CI:
 - [Pairing evidence: turn a difference into an auditable reading](docs/guide/15-pairing-evidence.md)
 - [Gold fields from the reference SQL](docs/guide/16-gold-fields.md)
 - [Fused value grounding: feed both value arms to one prompt seam](docs/guide/17-fused-value-grounding.md)
+- [Paired value-grounding pricing: McNemar on the question, not the field](docs/guide/18-value-pricing.md)
 - [Runbooks: six failures and their drills](docs/runbooks/README.md)
 - [Changelog](CHANGELOG.md)
 - [Production checklist](docs/guide/07-production.md)
