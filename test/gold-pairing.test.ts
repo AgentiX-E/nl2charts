@@ -5,9 +5,11 @@ import {
   harnessArms,
   harnessOutput,
   HARNESS_NOTE,
+  fsReader,
   isEntryPoint,
   main,
   renderGoldPairRows,
+  stdoutLogger,
   runHarness,
   toSummary,
   type DevQuestion,
@@ -240,9 +242,25 @@ describe('CLI entry', () => {
     expect(isEntryPoint('/some/other/test.ts')).toBe(false);
   });
 
-  it('runs the real cached harness through the CLI entry', () => {
-    // Real filesystem read of the cached dev split; console.log is captured by the test runner.
-    expect(() => main()).not.toThrow();
+  it('runs the CLI entry with an in-memory reader so it works where the cache is absent', () => {
+    // eval/.cache is gitignored and absent in CI; the entry takes injected I/O so this test uses
+    // real in-memory strings. A test that read the real cache would pass locally and fail on CI.
+    const devJson = JSON.stringify([
+      { question_id: 9, question: 'banned status', db_id: 'frpm', SQL: 'SELECT `Status` FROM frpm' },
+    ]);
+    const read = (path: string) => path.includes('dev.json') ? devJson : JSON.stringify(profile);
+    let emitted = '';
+    main(read, (text) => { emitted = text; });
+    expect(JSON.parse(emitted).summary.questions).toBe(1);
+  });
+
+  it('uses the real filesystem reader on a file that exists in every checkout', () => {
+    // package.json is tracked, so this proves fsReader without depending on the gitignored cache.
+    expect(fsReader('package.json')).toContain('"scripts"');
+  });
+
+  it('uses the real stdout logger', () => {
+    expect(() => stdoutLogger('gold-pairing: smoke')).not.toThrow();
   });
 });
 

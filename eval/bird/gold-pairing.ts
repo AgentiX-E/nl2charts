@@ -197,10 +197,30 @@ export function runHarness(
   log(JSON.stringify(output, null, 2));
 }
 
-/** CLI entry: real filesystem reader and stdout logger; every decision lives in the pure functions. */
-export function main(): void {
+/** The real filesystem reader the CLI uses; exported so its behaviour is testable without the cache. */
+export function fsReader(path: string): string {
+  return readFileSync(join(process.cwd(), path), 'utf8');
+}
+
+/** The real stdout logger the CLI uses. */
+export function stdoutLogger(text: string): void {
+  console.log(text);
+}
+
+/**
+ * CLI entry with injectable reader and logger.
+ *
+ * The defaults are the real filesystem and stdout. They are parameters so the entry can be tested
+ * with in-memory data: `eval/.cache` is gitignored and absent in CI, so a test that read the real
+ * cache would pass locally and fail on the runner — the exact local-pass/CI-fail drift the gates
+ * exist to prevent. Every decision still lives in the pure functions above.
+ */
+export function main(
+  read: (path: string) => string = fsReader,
+  log: (text: string) => void = stdoutLogger,
+): void {
   const limit = Number(process.env.GOLD_PAIR_LIMIT ?? '60');
-  runHarness((path) => readFileSync(join(process.cwd(), path), 'utf8'), (text) => console.log(text), limit);
+  runHarness(read, log, limit);
 }
 
 /** Whether this module is being run as the CLI rather than imported. */
