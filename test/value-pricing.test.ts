@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHashEmbeddingProvider, type DatabaseProfile } from '@agentix-e/nl2charts-ai';
-import type { ValueMatch } from '../eval/bird/values.js';
+import { buildValueIndex, findValues, type ValueMatch } from '../eval/bird/values.js';
 import {
   armCoversGold,
   buildPricedCase,
@@ -8,8 +8,10 @@ import {
   isEntryPoint,
   main,
   priceArms,
+  providerFromEnv,
   renderPricing,
   runPricing,
+  shippedLexicalArm,
   stdoutLogger,
   type PricedCase,
 } from '../eval/bird/value-pricing.js';
@@ -218,6 +220,95 @@ describe('renderPricing', () => {
     expect(text).toContain('discordant');
     expect(text).toContain('McNemar');
     expect(text).toContain('NOT an accuracy claim');
+  });
+});
+
+describe('shippedLexicalArm (TDD red: baseline must equal the product arm)', () => {
+  // The school profile mirrors the real dev fixture that exposed the straw-man baseline:
+  // a question names the value "active" but never the column "StatusType".
+  const schoolProfile: DatabaseProfile = {
+    db: 'california_schools',
+    columns: [
+      { table: 'schools', column: 'StatusType', kind: 'categorical', values: ['Active', 'Merged', 'Closed'] },
+      { table: 'schools', column: 'District', kind: 'categorical', values: ['Alameda', 'Hickman'] },
+    ],
+  };
+
+  it('finds a value the old handwritten arm missed (question names a value, not a column)', () => {
+    const question = 'Which active district has the highest score in Reading?';
+    const arm = shippedLexicalArm(schoolProfile, question);
+    expect(arm).toContainEqual(lex('schools', 'StatusType', 'Active'));
+  });
+
+  it('is exactly the product findValues over buildValueIndex — no parallel implementation', () => {
+    const question = 'Give me the merged schools in Alameda';
+    expect(shippedLexicalArm(schoolProfile, question)).toEqual(
+      findValues(buildValueIndex(schoolProfile), question),
+    );
+  });
+
+  it('honours ambiguity and stopword guards because it delegates, not reimplements', () => {
+    // "the" is a stopword and must not be treated as a value; a token matching two columns is dropped.
+    const ambiguous: DatabaseProfile = {
+      db: 'x',
+      columns: [
+        { table: 'a', column: 'v', kind: 'categorical', values: ['Merged'] },
+        { table: 'b', column: 'v', kind: 'categorical', values: ['Merged'] },
+      ],
+    };
+    expect(shippedLexicalArm(ambiguous, 'the merged')).toEqual([]);
+  });
+});
+
+describe('runPricing uses the product arm (TDD red: the price must not use a straw man)', () => {
+  it('lexicalCoverage reflects values the shipped arm grounds, not the handwritten subset', async () => {
+    const logs: string[] = [];
+    const schoolProfile: DatabaseProfile = {
+      db: 'california_schools',
+      columns: [
+        { table: 'schools', column: 'StatusType', kind: 'categorical', values: ['Active'] },
+      ],
+    };
+    const dev = [{
+      question_id: 15,
+      question: 'Which active school has the highest score?',
+      db_id: 'california_schools',
+      // gold names schools.StatusType; the question never says "StatusType".
+      SQL: "SELECT name FROM schools WHERE StatusType = 'Active'",
+    }];
+    await runPricing(
+      (path) => (path.endsWith('dev.json') ? JSON.stringify(dev) : JSON.stringify(schoolProfile)),
+      (text) => logs.push(text),
+      createHashEmbeddingProvider(),
+      10,
+    );
+    const report = JSON.parse(logs[0] as string) as { lexicalCoverage: number; gold: never };
+    // The product arm resolves "active" -> schools.StatusType, so lexicalCoverage must be > 0.
+    // The old handwritten arm required "StatusType" in the question and returned 0 here.
+    expect(report.lexicalCoverage).toBeGreaterThan(0);
+  });
+});
+
+describe('providerFromEnv (TDD red: the hosted dispatch seam)', () => {
+  it('returns the deterministic hash provider when no hosted config is present', () => {
+    const provider = providerFromEnv({});
+    expect(provider.id).toBe('hash-local');
+    expect(provider.model).toBe('fnv1a-bag-of-words');
+  });
+
+  it('builds an http provider from explicit hosted config (no key is sent by this call)', () => {
+    const provider = providerFromEnv({
+      PRICING_EMBEDDING_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4',
+      PRICING_EMBEDDING_MODEL: 'embedding-3',
+      PRICING_EMBEDDING_API_KEY: 'not-a-real-key',
+    });
+    expect(provider.id).toBe('http:https://open.bigmodel.cn/api/paas/v4');
+    expect(provider.model).toBe('embedding-3');
+  });
+
+  it('refuses a hosted config missing the base URL or model rather than silently using hash', () => {
+    expect(() => providerFromEnv({ PRICING_EMBEDDING_API_KEY: 'k' })).toThrow(/PRICING_EMBEDDING/);
+    expect(() => providerFromEnv({ PRICING_EMBEDDING_BASE_URL: 'https://x' })).toThrow(/PRICING_EMBEDDING/);
   });
 });
 

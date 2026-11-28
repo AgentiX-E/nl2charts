@@ -532,9 +532,14 @@ exact McNemar (`mcnemarExact`, shared with the rest of the harness) runs on the 
 only; field coverage and confirmed gain are reported as evidence, never as the price. Questions
 whose gold names no resolvable field are excluded. Reader, logger and provider are injected, so
 the same code path is a **harness proof** with the hash provider and a **priced grounding reading**
-with a hosted provider from the Org-secret workflow. The emitted note forbids quoting either as
-execution accuracy, and no product package, default arm or shipped SQL recipe changes here.
-See the [paired value-grounding pricing guide](guide/18-value-pricing.md).
+with a hosted provider from the Org-secret workflow. The lexical baseline is not a second
+implementation: `shippedLexicalArm` delegates to the product's own `findValues(buildValueIndex(...))`,
+so the priced arm and the shipped prompt cannot disagree (an earlier hand-written baseline missed
+228 of 253 grounded questions and inflated the fused gain). `providerFromEnv` is the injection seam:
+no hosted variables means the deterministic hash provider, a complete base-URL/model set builds the
+HTTP provider, and a partial set throws rather than silently downgrading. The emitted note forbids
+quoting either as execution accuracy, and no product package, default arm or shipped SQL recipe
+changes here. See the [paired value-grounding pricing guide](guide/18-value-pricing.md).
 
 ## Error model
 

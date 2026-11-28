@@ -1002,6 +1002,19 @@ resolvable field is excluded. A hash-provider run is a **harness proof**, NOT an
 hosted-provider run prices prompt grounding, not execution accuracy. Promotion to `SHIPPED_SQL`
 still requires a pre-registered threshold met in a real dispatch.
 
+**Shipped lexical baseline** — The arm a paired reading must compare against. `shippedLexicalArm`
+delegates to the product's own `findValues(buildValueIndex(profile), question)` — the same function
+that builds the `values` block in the shipped prompt — so the price cannot be taken against a weaker
+stand-in. A hand-written baseline that required the question to name both the column and the value
+missed 228 of 253 grounded questions and inflated the fused arm's apparent gain.
+
+**Hosted dispatch seam** — `providerFromEnv`, the one place a paired pricing run chooses its
+embedding provider. With no `PRICING_EMBEDDING_*` variables it returns the deterministic hash
+provider (a harness proof, no key); with a complete base URL and model it builds the OpenAI-compatible
+HTTP provider from the Org-secret environment; with a partial configuration it throws rather than
+silently downgrading to hash. The rule prevents a dispatch that lost one variable from quietly
+pricing a straw man and reading it as a real price.
+
 **Pairing evidence** — The field-level reading that turns a difference between two retrievers into
 something auditable. `pairValueRetrieval` says which `table.column` fields one arm found and the
 other missed; `classifyPair` crosses that pair with the gold fields the question's SQL actually

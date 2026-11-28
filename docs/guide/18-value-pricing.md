@@ -73,8 +73,13 @@ product package, no default arm and no shipped SQL recipe.
 # Local harness proof (no key, no network): the hash provider stands in.
 pnpm bench:bird:price
 
-# A priced reading is a workflow dispatch: the Org-secret workflow imports
-# runPricing and injects a hosted EmbeddingProvider instead of the hash one.
+# A priced reading is a workflow dispatch. Set the hosted variables from the
+# Org secret and the CLI builds an OpenAI-compatible HTTP provider instead:
+#   PRICING_EMBEDDING_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+#   PRICING_EMBEDDING_MODEL=embedding-3
+#   PRICING_EMBEDDING_API_KEY=<from the Org secret>
+# A partial configuration (only some of these) is refused, not downgraded to
+# hash — a dispatch that lost a variable must fail rather than price a straw man.
 ```
 
 The CLI reads the cached dev split and profiles through injected reader/logger
@@ -97,3 +102,31 @@ the number of questions.
 The note travels with the number so a result can never be quoted out of
 context. `mcnemarP` is `1` when there are no discordant pairs, not `NaN` — an
 empty price is a clean zero, not a hidden failure.
+
+## 6. Two corrections found while auditing the baseline
+
+The pricing instrument was correct in shape but wrong in baseline. Two defects were
+found by comparing it against the code that actually builds the shipped prompt.
+
+**The lexical baseline was a straw man.** The tool originally constructed the
+lexical arm with a hand-written rule: a value counted only if the question named
+both the column *and* the value (`"status"` and `"Banned"`). The product's `values`
+arm does not work that way — `findValues(buildValueIndex(profile), question)`
+resolves a question token to a stored value without requiring the column name.
+On the real dev split the hand-written rule missed **228 of the 253 questions**
+the product arm grounds. Pricing the fused arm against that weaker arm inflated
+its apparent gain — the exact class of artefact this tool was built to reject.
+`shippedLexicalArm` now delegates directly to the product function, so the
+baseline and the shipped prompt cannot drift into two implementations.
+
+**The hosted seam was a promise with no code.** The module's contract said an
+Org-secret workflow injects a hosted `EmbeddingProvider`, but nothing constructed
+one. `providerFromEnv` now closes that seam: no hosted variables yields the
+deterministic hash provider (a harness proof, no key needed); a complete
+base-URL/model configuration builds the HTTP provider; a partial configuration
+throws. There is no state in which a dispatch believes it priced a real model
+while silently using a hash stand-in.
+
+Neither correction changes a published reading: both were made while the tool
+was still a harness proof, before any hosted dispatch. The note on every report
+still says the hash run is not an accuracy claim.

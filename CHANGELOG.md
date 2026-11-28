@@ -6,6 +6,20 @@ cannot be argued with.
 
 ## Unreleased
 
+### Fixed
+- **The value-pricing baseline now uses the product's real lexical arm, not a straw man.** Round 220
+  found that `runPricing` constructed its lexical baseline with a hand-written rule requiring the
+  question to name both the column and the value, while the shipped `values` arm uses
+  `findValues(buildValueIndex(profile), question)` and needs only the value token. On the real dev
+  split the stand-in missed 228 of the 253 questions the product arm grounds — a weaker opponent that
+  inflated the fused arm's apparent gain. `shippedLexicalArm` now delegates directly to the product
+  function, so baseline and shipped prompt cannot drift into two implementations.
+- **The hosted-provider injection seam is real code, not a comment.** `providerFromEnv` builds an
+  OpenAI-compatible HTTP provider from `PRICING_EMBEDDING_BASE_URL` / `PRICING_EMBEDDING_MODEL` /
+  `PRICING_EMBEDDING_API_KEY`; no configuration yields the deterministic hash provider; a partial
+  configuration throws rather than silently downgrading to hash. The Org-secret workflow now has a
+  concrete seam to drive a priced reading.
+
 ### Added
 - **A dispatchable price for value grounding, closing the gap between the instruments and a number.** Round 219
   adds `eval/bird/value-pricing.ts`, the entry point rounds 215–218 never had. The semantic retriever,

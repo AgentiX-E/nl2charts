@@ -31,12 +31,17 @@
  * threshold in a real dispatch.
  */
 import { mcnemarExact } from '@agentix-e/nl2charts-devkit';
-import type { DatabaseProfile, EmbeddingProvider } from '@agentix-e/nl2charts-ai';
+import {
+  createHashEmbeddingProvider,
+  createHttpEmbeddingProvider,
+  type DatabaseProfile,
+  type EmbeddingProvider,
+} from '@agentix-e/nl2charts-ai';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { buildFusedValueBlock } from './fused-values.js';
 import { goldKeys } from './gold-fields.js';
-import type { ValueMatch } from './values.js';
+import { buildValueIndex, findValues, type ValueMatch } from './values.js';
 
 /** The note pinned into every report so no reader quotes a harness proof as a price. */
 export const PRICING_NOTE = 'PRICING RUN — paired question-level McNemar of lexical values vs fused '
@@ -152,6 +157,20 @@ export function priceArms(cases: readonly PricedCase[]): PricingReport {
   };
 }
 
+/**
+ * The lexical arm the product actually ships — delegated, never reimplemented.
+ *
+ * Rounds 215-219 priced the fused arm against a hand-written stand-in that required the question
+ * to name both the column and the value. The real product (`eval/bird/run.ts`, the `values` arm)
+ * resolves a question token to a stored value with `findValues(buildValueIndex(profile), question)`.
+ * On the real dev split the stand-in missed 228 of the 253 questions the product arm grounds — a
+ * straw man that inflated the fused arm's apparent gain. This function is the single source of the
+ * lexical baseline; `runPricing` must call it so a price can never be taken against a weaker arm.
+ */
+export function shippedLexicalArm(profile: DatabaseProfile, question: string): ValueMatch[] {
+  return findValues(buildValueIndex(profile), question);
+}
+
 /** The cached dev question shape BIRD ships. */
 export interface DevQuestion {
   readonly question_id: number;
@@ -239,14 +258,10 @@ export async function runPricing(
       profile = loadProfile(item.db_id);
       profiles.set(item.db_id, profile);
     }
-    // The lexical arm the product actually ships reads exact value matches from the profile.
-    // Here the same profile vocabulary supplies them: a question word that equals a stored value.
-    const needle = item.question.toLowerCase();
-    const lexical: ValueMatch[] = profile.columns
-      .filter((column) => needle.includes(column.column.toLowerCase()))
-      .flatMap((column) => (column.values ?? [])
-        .filter((value) => needle.includes(value.toLowerCase()))
-        .map((value) => ({ table: column.table, column: column.column, value })));
+    // The baseline is the product's own `values` arm — the same function `run.ts` uses to build
+    // the shipped prompt. Never reimplement it here: a lexical stand-in that is weaker than the
+    // product would inflate the fused arm's apparent gain (see `shippedLexicalArm`).
+    const lexical = shippedLexicalArm(profile, item.question);
     cases.push(await buildPricedCase(item, profile, lexical, provider));
   }
   const report = priceArms(cases);
@@ -264,17 +279,46 @@ export function stdoutLogger(text: string): void {
 }
 
 /**
- * CLI entry. The provider is chosen here (hash by default so the command runs with no key);
- * the Org-secret workflow injects a hosted provider by importing `runPricing` directly. Keeping
- * provider construction out of `runPricing` is what makes that substitution a one-line change.
+ * Choose the embedding provider from the environment — the seam the Org-secret workflow uses.
+ *
+ * With no hosted configuration this is the deterministic hash provider, so the CLI runs with no
+ * key and the reading is a HARNESS PROOF. With a full hosted configuration (base URL + model) it
+ * builds an OpenAI-compatible HTTP provider; the key is read from the environment by the caller
+ * and passed in `env`, never stored here. A *partial* hosted configuration is refused rather than
+ * silently falling back to hash: a dispatch that intended a real provider but lost one variable
+ * must fail loudly, not quietly price a straw man and report it as a real reading.
+ */
+export function providerFromEnv(env: NodeJS.ProcessEnv = process.env): EmbeddingProvider {
+  const baseUrl = env.PRICING_EMBEDDING_BASE_URL;
+  const model = env.PRICING_EMBEDDING_MODEL;
+  const apiKey = env.PRICING_EMBEDDING_API_KEY;
+  const hasBase = baseUrl !== undefined && baseUrl !== '';
+  const hasModel = model !== undefined && model !== '';
+  const hasKey = apiKey !== undefined && apiKey !== '';
+  // No hosted signal at all: the deterministic local provider.
+  if (!hasBase && !hasModel && !hasKey) return createHashEmbeddingProvider();
+  // Any hosted signal means the caller intended a real provider. A partial one is refused, not
+  // downgraded: a dispatch that lost one variable must not quietly price a straw man as real.
+  if (!hasBase || !hasModel) {
+    throw new Error(
+      'PRICING_EMBEDDING_BASE_URL and PRICING_EMBEDDING_MODEL must be set together; '
+      + 'a partial hosted config is refused rather than downgraded to the hash provider',
+    );
+  }
+  return createHttpEmbeddingProvider({ baseUrl, model, apiKey });
+}
+
+/**
+ * CLI entry. The provider is chosen from the environment by `providerFromEnv`: hash by default
+ * so the command runs with no key, hosted when the Org-secret workflow injects the variables.
+ * Keeping provider construction out of `runPricing` is what makes that substitution one line.
  */
 export async function main(
   read: (path: string) => string = fsReader,
   log: (text: string) => void = stdoutLogger,
 ): Promise<void> {
   const limit = Number(process.env.VALUE_PRICING_LIMIT ?? '60');
-  const { createHashEmbeddingProvider } = await import('@agentix-e/nl2charts-ai');
-  await runPricing(read, log, createHashEmbeddingProvider(), limit);
+  await runPricing(read, log, providerFromEnv(), limit);
 }
 
 if (isEntryPoint(process.argv[1])) {
