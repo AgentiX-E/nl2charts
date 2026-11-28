@@ -13,6 +13,9 @@ import {
   runPricing,
   shippedLexicalArm,
   stdoutLogger,
+  enforceCostCeiling,
+  projectedPricingYuan,
+  PRICING_PER_CASE_TOKENS,
   type PricedCase,
 } from '../eval/bird/value-pricing.js';
 
@@ -312,6 +315,33 @@ describe('providerFromEnv (TDD red: the hosted dispatch seam)', () => {
   });
 });
 
+describe('cost ceiling (refuse an over-budget dispatch before spending a token)', () => {
+  it('projects a conservative yuan bound from the per-case token ceiling and the priced model', () => {
+    // Embeddings have no output tokens; the bound is input only. 60 questions at the per-case
+    // ceiling, priced at embedding-3's ¥0.5/million, must be a small deterministic number.
+    const projected = projectedPricingYuan(60, 'embedding-3');
+    expect(projected).toBe((60 * PRICING_PER_CASE_TOKENS * 0.5) / 1_000_000);
+    expect(projected).toBeGreaterThan(0);
+    expect(projectedPricingYuan(60, 'a-model-nobody-priced')).toBeUndefined();
+  });
+
+  it('refuses a hosted run whose projection exceeds the authorised ceiling', () => {
+    expect(() => enforceCostCeiling('embedding-3', 60, 0.0001)).toThrow(/cost|budget|ceiling/i);
+  });
+
+  it('allows a hosted run within the ceiling and skips an unpriced model loudly', () => {
+    expect(() => enforceCostCeiling('embedding-3', 60, 100)).not.toThrow();
+    // An unpriced model cannot be approved silently: printing "no price on file" after the bill is
+    // the exact failure the price table exists to prevent.
+    expect(() => enforceCostCeiling('a-model-nobody-priced', 60, 100)).toThrow(/price/i);
+  });
+
+  it('treats a local hash provider as zero-cost, so no ceiling is required', () => {
+    // `hash:` ids have no row in the price table; the CLI must not block a harness proof on cost.
+    expect(() => enforceCostCeiling('hash:local', 60, undefined)).not.toThrow();
+  });
+});
+
 describe('CLI seams (coverage of the I/O entry without the gitignored cache)', () => {
   it('isEntryPoint recognises only the CLI argv', () => {
     expect(isEntryPoint('/workspace/nl2charts/eval/bird/value-pricing.ts')).toBe(true);
@@ -334,6 +364,20 @@ describe('CLI seams (coverage of the I/O entry without the gitignored cache)', (
     }
   });
 
+  it('main refuses a non-positive or non-numeric cost ceiling before building any case', async () => {
+    const reader = (path: string) => (path.endsWith('dev.json') ? '[]' : '{}');
+    const previous = process.env.VALUE_PRICING_ACCEPT_COST;
+    try {
+      for (const bad of ['-1', 'abc', '0']) {
+        process.env.VALUE_PRICING_ACCEPT_COST = bad;
+        await expect(main(reader, () => {})).rejects.toThrow(/VALUE_PRICING_ACCEPT_COST/);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.VALUE_PRICING_ACCEPT_COST;
+      else process.env.VALUE_PRICING_ACCEPT_COST = previous;
+    }
+  });
+
   it('main runs end to end with injected reader/logger (hash provider, no key)', async () => {
     const logs: string[] = [];
     const profileFile = JSON.stringify(profile);
@@ -349,12 +393,14 @@ describe('CLI seams (coverage of the I/O entry without the gitignored cache)', (
       await main(reader, collect); // exercises the ?? '60' default branch
       process.env.VALUE_PRICING_LIMIT = '2';
       await main(reader, collect); // exercises the explicit-limit branch
+      process.env.VALUE_PRICING_ACCEPT_COST = '';
+      await main(reader, collect); // exercises the empty-ceiling branch
     } finally {
       if (previous === undefined) delete process.env.VALUE_PRICING_LIMIT;
       else process.env.VALUE_PRICING_LIMIT = previous;
+      delete process.env.VALUE_PRICING_ACCEPT_COST;
     }
-    expect(logs).toHaveLength(2);
-    expect((JSON.parse(logs[0] as string) as { questions: number }).questions).toBe(1);
-    expect((JSON.parse(logs[1] as string) as { questions: number }).questions).toBe(1);
+    expect(logs).toHaveLength(3);
+    for (const line of logs) expect((JSON.parse(line) as { questions: number }).questions).toBe(1);
   });
 });

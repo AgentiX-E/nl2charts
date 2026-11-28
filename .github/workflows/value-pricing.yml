@@ -1,0 +1,118 @@
+name: value-pricing
+
+# The first real price for value grounding.
+#
+# r215-r218 built four instruments (semantic value retrieval, pairing buckets, SQL gold, fused
+# grounding) that r219 gave a dispatch exit and r220 gave a correct lexical baseline. Every reading
+# so far has been a HARNESS PROOF: the local hash provider stands in because no key reaches a
+# developer machine. This workflow is the other half of that seam — it injects an hosted embedding
+# provider from the Org secret, runs the same `runPricing` code, and prices the fused arm against the
+# product's real lexical arm with a question-level McNemar. The note on the report still forbids
+# reading it as execution accuracy: it is the grounding-coverage contribution, one input to a
+# promotion decision that also needs the pre-registered execution threshold.
+#
+# **Dispatch-only and cost-capped.** A hosted embedding run spends real tokens under the Org key.
+# `model` must name a row in `eval/price.ts` (embedding-3 is on it) and `accept_cost` is the yuan
+# ceiling the dispatch authorises: `eval/bird/value-pricing.ts` refuses to run past it. A push
+# trigger would re-bill the same questions on every commit for the same number, so there is none.
+#
+# **Org secret, never a literal.** The key is read from `ZHIPU_API_KEY` / `DEEPSEEK_API_KEY` at
+# runtime; no dispatch input carries it and no report prints it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Embedding model (must have a row in eval/price.ts)'
+        required: true
+        default: 'embedding-3'
+        type: string
+      base_url:
+        description: 'OpenAI-compatible embeddings base URL'
+        required: true
+        default: 'https://open.bigmodel.cn/api/paas/v4'
+        type: string
+      secret_name:
+        description: 'Which Org secret holds the key'
+        required: true
+        default: 'ZHIPU_API_KEY'
+        type: choice
+        options:
+          - 'ZHIPU_API_KEY'
+          - 'DEEPSEEK_API_KEY'
+      limit:
+        description: 'Questions to price (blank = the default 60)'
+        required: false
+        default: '60'
+        type: string
+      accept_cost:
+        description: 'Yuan this dispatch may spend (the run refuses above it)'
+        required: false
+        default: '5'
+        type: string
+
+permissions:
+  contents: read
+
+# One slot shared with the other embedding-backed runs: they draw from the same provider quota.
+concurrency:
+  group: bird-eval-DEEPSEEK_API_KEY
+  cancel-in-progress: false
+
+jobs:
+  price:
+    name: price the fused value arm against the product lexical arm
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PRICING_EMBEDDING_BASE_URL: ${{ inputs.base_url }}
+      PRICING_EMBEDDING_MODEL: ${{ inputs.model }}
+      PRICING_EMBEDDING_API_KEY: ${{ inputs.secret_name == 'DEEPSEEK_API_KEY' && secrets.DEEPSEEK_API_KEY || secrets.ZHIPU_API_KEY }}
+      VALUE_PRICING_LIMIT: ${{ inputs.limit }}
+      VALUE_PRICING_ACCEPT_COST: ${{ inputs.accept_cost }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The corpus is downloaded, not bought: the BIRD dev split and its profiles are cached by the
+      # other bird workflows under the same path. A cache miss rebuilds from the pinned source.
+      - name: Cache the BIRD corpus
+        uses: actions/cache@v4
+        with:
+          path: eval/.cache/bird
+          key: bird-corpus-v1-${{ runner.os }}
+      - name: Fetch the dev split (no-op when the cache is warm)
+        run: node eval/bird/fetch.mjs --split dev
+
+      # `main` builds the provider from the three PRICING_EMBEDDING_* variables above; a partial
+      # config throws rather than silently falling back to the hash stand-in. The yuan ceiling is
+      # enforced inside the run, before any embed call, so an over-budget dispatch spends nothing.
+      - name: Price the paired arms
+        run: pnpm bench:bird:price | tee eval/out/value-pricing-report.txt
+
+      - name: Publish the report
+        if: always()
+        run: |
+          echo '### Paired value-grounding pricing' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f eval/out/value-pricing-report.txt ]; then
+            cat eval/out/value-pricing-report.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'no pricing report was produced (see the Price step log)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: value-pricing-${{ inputs.model }}
+          path: eval/out/value-pricing-report.txt
+          if-no-files-found: warn

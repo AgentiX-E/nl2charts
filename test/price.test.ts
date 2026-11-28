@@ -23,6 +23,25 @@ describe('the price table', () => {
     expect(million('glm-4.5v')).toBe(8);
   });
 
+  it('prices embedding-3 at the vector-model rate, so a pricing dispatch can be costed before it is sent', () => {
+    // A dispatch that spends real tokens must be costable before it runs. The vector-model table on
+    // the provider's pricing page lists Embedding-3 at ¥0.5 per million input tokens (¥0.25 batch);
+    // without this row `bench:bill` prints "no price on file" for a bill already incurred — the exact
+    // silence the file's header calls out. Embeddings have no output tokens, so output is zero.
+    expect(PRICES['embedding-3']?.input).toBe(0.5);
+    expect(PRICES['embedding-3']?.output).toBe(0);
+    expect(PRICES['embedding-3']?.source).toMatch(/bigmodel\.cn/);
+    expect(billOf('embedding-3', { promptTokens: 1_000_000, completionTokens: 0 })).toBe(0.5);
+  });
+
+  it('charges an embedding cache hit at the same rate, because the vector endpoint publishes no discount', () => {
+    // `cached` is required on every row: a provider with one price for all prompt tokens states it
+    // twice. Embedding-3 has no prefix-cache tier, so a hit costs the same as a miss. Leaving the
+    // field out would make `billOf` return NaN the moment a hit count was present.
+    expect(PRICES['embedding-3']?.cached).toBe(PRICES['embedding-3']?.input);
+    expect(billOf('embedding-3', { promptTokens: 1_000_000, completionTokens: 0, cachedPromptTokens: 500_000 })).toBe(0.5);
+  });
+
   it('charges reasoning once, because it is already inside the completion count', () => {
     // The bill is the reason the whole cost round exists: 98.3% of the judge's completion tokens are
     // deliberation. If `billOf` charged `reasoningTokens` on top of `completionTokens` it would report

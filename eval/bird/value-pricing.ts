@@ -42,6 +42,7 @@ import { readFileSync } from 'node:fs';
 import { buildFusedValueBlock } from './fused-values.js';
 import { goldKeys } from './gold-fields.js';
 import { buildValueIndex, findValues, type ValueMatch } from './values.js';
+import { billOf } from '../price.js';
 
 /** The note pinned into every report so no reader quotes a harness proof as a price. */
 export const PRICING_NOTE = 'PRICING RUN — paired question-level McNemar of lexical values vs fused '
@@ -279,6 +280,49 @@ export function stdoutLogger(text: string): void {
 }
 
 /**
+ * A conservative input-token ceiling for one priced question.
+ *
+ * Each case embeds a profile's value vocabulary once (`buildSemanticIndex`) and the question once
+ * (`searchSemanticValues`). The vocabulary is capped by the semantic index's own sample limit, so
+ * four thousand tokens sits above every case this repository has rendered offline. The number is a
+ * bound used to *refuse* an over-budget dispatch before it spends anything: an over-estimate
+ * refuses a little early, an under-estimate is the failure mode that costs money.
+ */
+export const PRICING_PER_CASE_TOKENS = 4000;
+
+/** What `questions` cases would cost at the per-case bound, or undefined when the model has no price. */
+export function projectedPricingYuan(questions: number, model: string): number | undefined {
+  const per = billOf(model, { promptTokens: PRICING_PER_CASE_TOKENS, completionTokens: 0 });
+  return per === undefined ? undefined : per * questions;
+}
+
+/**
+ * Refuse a hosted pricing dispatch whose projected cost exceeds the authorised yuan ceiling.
+ *
+ * The local hash provider has no row in the price table and no ceiling; it is a zero-cost harness
+ * proof and must not be blocked. A hosted model *with* a ceiling but *without* a price row is
+ * refused loudly: a dispatch that intended to spend real money cannot be costed, and the whole point
+ * of the price table is that "no price on file" is printed before the bill, not after it.
+ */
+export function enforceCostCeiling(model: string, questions: number, ceiling: number | undefined): void {
+  const projected = projectedPricingYuan(questions, model);
+  if (projected === undefined) {
+    if (ceiling !== undefined) {
+      throw new Error(
+        `no price on file for ${model}; a hosted dispatch must be costed before it spends tokens`,
+      );
+    }
+    return;
+  }
+  if (ceiling !== undefined && projected > ceiling) {
+    throw new Error(
+      `projected pricing cost ${projected.toFixed(4)} yuan for ${String(questions)} questions `
+      + `exceeds the ${String(ceiling)} yuan ceiling; refusing before any embed call`,
+    );
+  }
+}
+
+/**
  * Choose the embedding provider from the environment — the seam the Org-secret workflow uses.
  *
  * With no hosted configuration this is the deterministic hash provider, so the CLI runs with no
@@ -318,7 +362,16 @@ export async function main(
   log: (text: string) => void = stdoutLogger,
 ): Promise<void> {
   const limit = Number(process.env.VALUE_PRICING_LIMIT ?? '60');
-  await runPricing(read, log, providerFromEnv(), limit);
+  const rawCeiling = process.env.VALUE_PRICING_ACCEPT_COST;
+  const ceiling = rawCeiling === undefined || rawCeiling === '' ? undefined : Number(rawCeiling);
+  if (ceiling !== undefined && (!Number.isFinite(ceiling) || ceiling <= 0)) {
+    throw new Error(`VALUE_PRICING_ACCEPT_COST must be a positive number of yuan, got ${rawCeiling}`);
+  }
+  const provider = providerFromEnv();
+  // Enforced before `runPricing` issues a single embed call: an over-budget or unpriceable hosted
+  // dispatch spends nothing. The hash provider has no price row, so a harness proof is never blocked.
+  enforceCostCeiling(provider.model, limit, ceiling);
+  await runPricing(read, log, provider, limit);
 }
 
 if (isEntryPoint(process.argv[1])) {

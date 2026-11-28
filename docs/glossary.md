@@ -1015,6 +1015,14 @@ HTTP provider from the Org-secret environment; with a partial configuration it t
 silently downgrading to hash. The rule prevents a dispatch that lost one variable from quietly
 pricing a straw man and reading it as a real price.
 
+**Cost ceiling** — `enforceCostCeiling`, the guard that makes a hosted pricing dispatch
+costable before it is sent. `projectedPricingYuan` multiplies a conservative per-case input-token
+ceiling (4,000) by the question count and the cited per-million rate in `eval/price.ts`; a hosted
+model with no price row or a projection above `VALUE_PRICING_ACCEPT_COST` is refused before the
+first embed call. The local hash provider has no price and no ceiling, so a zero-cost harness proof
+is never blocked. The number is a projection used to refuse, not the bill — the bill printed after
+the run is the figure a reader quotes.
+
 **Pairing evidence** — The field-level reading that turns a difference between two retrievers into
 something auditable. `pairValueRetrieval` says which `table.column` fields one arm found and the
 other missed; `classifyPair` crosses that pair with the gold fields the question's SQL actually

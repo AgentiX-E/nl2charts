@@ -130,3 +130,36 @@ while silently using a hash stand-in.
 Neither correction changes a published reading: both were made while the tool
 was still a harness proof, before any hosted dispatch. The note on every report
 still says the hash run is not an accuracy claim.
+
+## 7. The first dispatchable price, costed before it is sent
+
+Two things kept the reading behind the key. The injection seam existed, but no workflow
+constructed a hosted provider, and the price list had no row for the vector model — a
+dispatch would have spent real tokens and then printed "no price on file" when asked
+what they cost. Both are now closed.
+
+`.github/workflows/value-pricing.yml` is a dispatch-only job. It reads
+`PRICING_EMBEDDING_API_KEY` from the `ZHIPU_API_KEY` or `DEEPSEEK_API_KEY` Org secret
+at runtime — no dispatch input carries a key and no report prints one — and runs
+`pnpm bench:bird:price` against the same `runPricing` code the harness proof uses.
+The report and its artifact are published with `if: always()`, so a failed pricing
+gate cannot take the per-case evidence down with it. The workflow is a `choice` over
+declared inputs and passes the repository's own seven-rule workflow gate.
+
+Cost is bounded before a token is spent. `eval/price.ts` now carries the vector model
+at the rate the provider publishes — **¥0.5 per million input tokens** for
+`embedding-3`, read off the vector-model table and cited to the provider's pricing
+page. Because embeddings have no output tokens, the row records `output: 0` and
+states the same rate twice in `cached` (the table requires every row to name a cache
+price; a provider with one price charges hits at the miss rate). `projectedPricingYuan`
+multiplies a conservative per-case ceiling of 4,000 input tokens by the question
+count and the listed rate — 60 questions project to **¥0.12**. `main` reads
+`VALUE_PRICING_ACCEPT_COST` and `enforceCostCeiling` refuses the dispatch before the
+first embed call if the projection exceeds the ceiling, or if the hosted model has no
+price row at all. A local hash run has no price and no ceiling: the harness proof is
+never blocked on cost.
+
+The workflow's `accept_cost` default (¥5) is far above the ¥0.12 projection, so a
+normal dispatch proceeds; a caller can lower it to refuse an over-budget run. The
+number still is not execution accuracy: the report's note says so, and promotion to
+`SHIPPED_SQL` still needs a pre-registered threshold met in a real dispatch.

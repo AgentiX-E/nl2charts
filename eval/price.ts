@@ -79,6 +79,12 @@ export const PRICES: Readonly<Record<string, ModelPrice>> = {
   // one base model's thinking mode rather than a bigger model, and the page lists one rate for both.
   'deepseek-chat': { input: 2, output: 8, cached: 0.04, asOf: READ_ON, source: DEEPSEEK },
   'deepseek-reasoner': { input: 2, output: 8, cached: 0.04, asOf: READ_ON, source: DEEPSEEK },
+  // The vector model behind the paired value-pricing dispatch. The provider's vector-model table
+  // (read 2026-11-28) lists Embedding-3 at ¥0.5 per million input tokens and ¥0.25 on the batch API;
+  // there is no output-token charge for an embedding. Without this row `bench:bill` prints "no price
+  // on file" for a dispatch that already spent the tokens, so the pricing workflow could not be
+  // costed before it ran. Batch is not modelled here because the dispatch is synchronous.
+  'embedding-3': { input: 0.5, output: 0, cached: 0.5, asOf: '2026-11-28', source: ZHIPU },
 };
 
 /** The tokens of one call, in the shape every endpoint in this repository reports them. */

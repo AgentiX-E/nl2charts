@@ -6,6 +6,17 @@ cannot be argued with.
 
 ## Unreleased
 
+### Added
+- **A dispatchable, cost-capped price for value grounding.** Round 221 adds
+  `.github/workflows/value-pricing.yml`, a dispatch-only job that injects an hosted
+  `EmbeddingProvider` from the `ZHIPU_API_KEY` / `DEEPSEEK_API_KEY` Org secret and runs
+  `pnpm bench:bird:price` — the first real price after six rounds of harness proof.
+  `eval/price.ts` now lists `embedding-3` at the provider's ¥0.5/million-token vector
+  rate, so a dispatch is costed before it is sent; `enforceCostCeiling` refuses an
+  over-budget or unpriceable hosted run before the first embed call (60 questions
+  project to ¥0.12). The report and artifact publish with `if: always()`. Costs and
+  model rows are cited, not guessed; no product package or `SHIPPED_SQL` changes.
+
 ### Fixed
 - **The value-pricing baseline now uses the product's real lexical arm, not a straw man.** Round 220
   found that `runPricing` constructed its lexical baseline with a hand-written rule requiring the

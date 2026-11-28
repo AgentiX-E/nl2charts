@@ -539,7 +539,11 @@ so the priced arm and the shipped prompt cannot disagree (an earlier hand-writte
 no hosted variables means the deterministic hash provider, a complete base-URL/model set builds the
 HTTP provider, and a partial set throws rather than silently downgrading. The emitted note forbids
 quoting either as execution accuracy, and no product package, default arm or shipped SQL recipe
-changes here. See the [paired value-grounding pricing guide](guide/18-value-pricing.md).
+changes here. The dispatch itself is `.github/workflows/value-pricing.yml`: it reads the key from an
+Org secret, and `enforceCostCeiling` projects the bill from `eval/price.ts`'s cited `embedding-3`
+rate (¥0.5/million input tokens, 4,000 tokens per case ceiling) and refuses an over-budget or
+unpriceable run before a single embed call — so the price is costed before it is bought. See the
+[paired value-grounding pricing guide](guide/18-value-pricing.md).
 
 ## Error model
 
