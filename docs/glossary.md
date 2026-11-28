@@ -991,3 +991,14 @@ offline-testable with the hashing provider, and refuses a query from a different
 a paired, priced candidate, not a shipped accuracy claim: `pairValueRetrieval` reports the fields
 one retriever found and the other missed, which is the input a McNemar test needs before the arm is
 promoted.
+
+**Pairing evidence** — The field-level reading that turns a difference between two retrievers into
+something auditable. `pairValueRetrieval` says which `table.column` fields one arm found and the
+other missed; `classifyPair` crosses that pair with the gold fields the question's SQL actually
+reads, splitting each side into *confirmed* (gold needed it) and *spurious* (gold did not). A gained
+field that gold never needed is a false positive, and a lost field gold never needed is denoising —
+neither belongs in a headline delta. `value-pair-harness.ts` keeps these six buckets, deduplicated
+and stably sorted, and aggregates them with per-question coverage and a divide-by-zero guard. It is
+a harness proof, not a price: the offline semantic arm is a lexical hash stand-in, so a positive
+confirmed gain proves the apparatus runs, not that semantic retrieval beats exact retrieval. A
+verdict needs the shipment gate on a real paired dispatch.

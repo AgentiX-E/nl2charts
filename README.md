@@ -191,6 +191,7 @@ Every push runs the same gates locally and in CI:
 - [Connectors: what is promised per engine](docs/guide/12-connectors.md)
 - [Embeddings: inject any `/v1/embeddings` provider](docs/guide/13-embeddings.md)
 - [Semantic value retrieval: resolve a value that is not spelled verbatim](docs/guide/14-semantic-value-retrieval.md)
+- [Pairing evidence: turn a difference into an auditable reading](docs/guide/15-pairing-evidence.md)
 - [Runbooks: six failures and their drills](docs/runbooks/README.md)
 - [Changelog](CHANGELOG.md)
 - [Production checklist](docs/guide/07-production.md)

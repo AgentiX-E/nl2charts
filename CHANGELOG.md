@@ -7,6 +7,19 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A field-level pairing harness that turns a retriever difference into an auditable reading.** Round 216
+  adds `eval/bird/value-pair-harness.ts`: `classifyPair` crosses r215's `pairValueRetrieval` with the
+  gold `table.column` set a question's SQL reads, splitting gains and losses into confirmed (gold
+  needed) and spurious (gold did not) across six deduplicated, stably sorted buckets;
+  `classifyCase` pairs two arms and gold in one step; `summarizeClassifications` aggregates per-question
+  coverage and confirmed gain with a divide-by-zero guard. This is a harness proof, not a priced
+  reading: the offline semantic arm is a lexical hash stand-in, so a positive confirmed gain proves
+  the apparatus runs, not that semantic retrieval beats exact retrieval — pricing stays with
+  `gate:shipment` on a real paired dispatch. 18 TDD tests (red first) at 100/100/100/100 four-dimension
+  coverage on the new module, 10/10 branches; eval coverage ratchet 148 → 149 files. On a real BIRD
+  240-question smoke run the buckets correctly exposed that a large naive gain was mostly spurious
+  against approximate gold — the reason the harness reports buckets rather than a headline. English
+  docs: new guide/15, architecture pairing section, glossary, README (adds guide 15 index).
 - **Embedding-based semantic value retrieval, the first mechanism on `EmbeddingProvider`.** Round 215
   adds `eval/bird/semantic-values.ts`: it embeds a database's column names and categorical values
   through an injected `EmbeddingProvider` and retrieves by cosine distance, resolving a value the

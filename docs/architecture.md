@@ -483,6 +483,16 @@ built in a different model space. It is a candidate arm, not yet a shipped
 answer path: promotion waits on a paired reading. See the
 [semantic value retrieval guide](guide/14-semantic-value-retrieval.md).
 
+Turning that pair into an auditable reading is the job of
+`eval/bird/value-pair-harness.ts`: it crosses `pairValueRetrieval` with the gold
+`table.column` set a question's SQL reads, splitting gains and losses into the
+fields gold needed (*confirmed*) and those it did not (*spurious*). Coverage is
+per-question over the gold count, with a divide-by-zero guard. The harness is a
+**proof of the pairing apparatus, not a priced reading** — its offline arm uses
+the hash provider, so a positive confirmed gain is a structural result, never an
+accuracy claim. Pricing remains the shipment gate's job on a real paired
+dispatch. See the [pairing evidence guide](guide/15-pairing-evidence.md).
+
 ## Error model
 
 One class, closed code list, data payload:
