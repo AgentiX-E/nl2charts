@@ -167,7 +167,7 @@ Every push runs the same gates locally and in CI:
 | Coverage | ≥95% statements, branches, functions and lines **per package** |
 | Layering | 8 packages, no forbidden dependency edge, `devkit` never a production dependency |
 | Platform | `core`'s browser graph contains no `node:`, driver or `ai` import; declarations leak no driver types (PLT1–PLT7, with 7 mutation tests) |
-| API surface | An export that disappears fails the build (574 symbols snapshotted) |
+| API surface | An export that disappears fails the build (587 symbols snapshotted) |
 | Gate parity | `gate:all` runs every check command the quality job runs, expanded through the scripts |
 | Budgets | gzip size ceilings per package |
 | Benchmark | Oracle must score 100%, empty predictor 0%, or the run fails |

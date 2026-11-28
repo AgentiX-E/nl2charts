@@ -11295,7 +11295,14 @@ Refinement, Alignment. The parts that are mechanisms rather than plumbing:
 - **SQL-Like, a constrained intermediate language.** Generation proceeds as
   reasoning → columns → values → SELECT → SQL-Like → SQL, so the pieces of the query are named
   before the query is written.
-- **Value retrieval over an HNSW index** of cells and column names, to survive misspellings.
+- **Value retrieval over an HNSW index** of cells and column names, to survive misspellings. This is
+  the one module `eval/competitors/intake.json` records as unreachable here: it needs an embedding
+  backend, and this repository previously had none. Round 214 shipped `packages/ai/src/embedding.ts`
+  — a custom-`EmbeddingProvider` injection point beside the existing `LlmProvider`, speaking any
+  OpenAI-compatible `/v1/embeddings` endpoint plus an offline deterministic hashing fallback — so the
+  contract the index needs now exists. The HNSW index itself and a paired accuracy reading are *not*
+  shipped: pricing that retrieval against the 12.56pp BIRD gap still needs dispatch evidence, so the
+  unblock is a capability, not a number.
 - **Error-specific few-shot in refinement**: a failed statement is repaired with examples of that
   class of failure, not with a diagnosis string.
 - **Consistency alignment** in three kinds — agent (column and value representation, including

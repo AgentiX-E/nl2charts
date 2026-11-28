@@ -7,6 +7,19 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **An `EmbeddingProvider` contract, completing the custom-provider guarantee.** Round 214 adds
+  `packages/ai/src/embedding.ts` beside `provider.ts`: callers can now inject a custom
+  `EmbeddingProvider` (with parameters and `dimensions`) against any OpenAI-compatible
+  `/v1/embeddings` endpoint via `createHttpEmbeddingProvider`, or run fully offline via
+  `createHashEmbeddingProvider` (deterministic FNV-1a bag-of-words, L2-normalised). `cosine` and
+  `rankByEmbedding` are the retrieval primitives. This is the concrete unblock for OpenSearch-SQL
+  value retrieval, which `intake.json` records as needing an embedding backend this repository
+  could not reach — a capability, not yet an accuracy reading. The provider rejects three silent
+  wire failures at the boundary: out-of-order batches (reordered by `index`), short batches, and
+  dimension drift inside one batch. A real `http.Server` in the tests exercises the transport, so
+  nothing is stubbed. 39 TDD tests, four-dimension coverage 100/100/100/100 on the new module;
+  no export was removed to pay for it and the `ai` gzip budget was reviewed up with the byte
+  delta recorded in `budgets.json`.
 - **A closed generate → log → score loop for VisCodeBench, at ¥0.** The r212 comparator had no
   producer for its input contract, so the loop could not run locally. `eval/text2vis/
   viscodebench-pilot.ts` now emits a structured chart spec as Python in the upstream marker region,

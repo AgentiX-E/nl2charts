@@ -967,3 +967,18 @@ as a rule — 8.7× extra demands 43.5 points, which is why the thinking-mode ce
 each recorded as two arms' counts and prices plus the cases they disagreed on. Deliberately holds no
 p-value, no interval and no verdict — all three are functions of the counts, and a stored statistic is
 a second source of truth.
+
+**EmbeddingProvider** — The embedding-side twin of `LlmProvider`, defined in
+`packages/ai/src/embedding.ts`. A caller injects one to turn text into vectors: `createHttpEmbeddingProvider`
+speaks any OpenAI-compatible `/v1/embeddings` endpoint (base URL, key, model, dimensions), and
+`createHashEmbeddingProvider` is the offline deterministic FNV-1a bag-of-words fallback that needs
+no key. It exists because the repository could inject a chat provider but had no contract at all for
+embeddings — the exact gap that kept OpenSearch-SQL's cell-and-column-name value index unreproducible.
+A provider must return one vector per input text, in input order; it reorders by the endpoint's `index`
+and refuses a short batch or a dimension mismatch rather than pairing vectors to texts by position.
+
+**Hashing embedding** — A deterministic bag-of-words vector: each token is hashed into one of `dimensions`
+buckets with FNV-1a, the bucket counts are L2-normalised, and no model or network is involved. It is a
+real, reproducible algorithm, not a stub — but it is lexical, not semantic, so shared tokens give a
+higher cosine and nothing more is claimed for it. Its job here is to keep ordering, normalisation and
+ranking testable offline and to give a no-key deployment a working provider.

@@ -1,6 +1,11 @@
 export { createHttpProvider, reasoningTokensOf, turnTemperature, withCallCounter, wireMessages } from './provider.js';
 export { CHAT_CAPABILITIES, REASONING_CAPABILITIES, adaptRequest, capabilitiesOf } from './capability.js';
 export type { AdaptedRequest, ModelCapabilities, ModelFamily, SamplingSupport } from './capability.js';
+export { cosine, createHashEmbeddingProvider, createHttpEmbeddingProvider, parseEmbeddingBody, rankByEmbedding } from './embedding.js';
+export type {
+  EmbeddingPurpose, EmbeddingRequest, EmbeddingResponse, EmbeddingProvider, EmbeddingUsage,
+  HashEmbeddingOptions, HttpEmbeddingOptions, RankedEmbedding,
+} from './embedding.js';
 export { renderEvidence } from './evidence.js';
 export type { CallPurpose, HttpProviderOptions, ImageDialect, LlmImage, LlmMessage, LlmProvider, LlmRequest, LlmResponse, LlmUsage, PurposeUsage, Role } from './provider.js';
 export type { ColumnProfile, DatabaseProfile, EvidenceOptions, ProfileKind } from './evidence.js';

@@ -449,6 +449,30 @@ Rows are `Record<string, CanonicalValue>`. Before a row leaves the runtime:
 `hashRows` is FNV-1a over the canonical JSON with sorted keys, so column order
 does not change identity but row order does.
 
+## Model providers
+
+The product has two model contracts, and both are injection points rather than
+globals: `LlmProvider` turns messages into text (`packages/ai/src/provider.ts`)
+and `EmbeddingProvider` turns text into vectors (`packages/ai/src/embedding.ts`).
+A caller supplies either; nothing registers a vendor by name, so a weak
+(non-reasoning) and a strong (reasoning) model, or a self-hosted and a cloud
+endpoint, reach the same pipeline through the same interface. Capabilities and
+usage travel with the response, so a cost meter can attribute a call to a
+purpose without the caller reimplementing the wire.
+
+Both HTTP factories speak an OpenAI-compatible endpoint — `createHttpProvider`
+for chat, `createHttpEmbeddingProvider` for `/v1/embeddings` — and both have a
+deterministic offline counterpart in the same package (`createReplayProvider`
+for chat, `createHashEmbeddingProvider` for vectors) so the whole stack runs in
+CI without a key. The embedding contract refuses three silent wire failures at
+the boundary: it reorders an out-of-order batch by the endpoint's `index`,
+rejects a short batch rather than pairing fewer vectors to more texts, and
+refuses dimension drift before a cosine can compute a wrong score. These are
+provider responsibilities because the provider is the only layer that sees the
+wire; duplicating them in a caller would price the same call twice and let the
+two copies disagree. See the [embeddings guide](guide/13-embeddings.md) for the
+three ways to obtain a provider.
+
 ## Error model
 
 One class, closed code list, data payload:
