@@ -240,16 +240,19 @@ export function fsReader(path: string): string {
 }
 
 /** The CLI seam: reader, logger and provider are injected — CI has no gitignored cache or key. */
+export const DEFAULT_PROFILE_CACHE = join('eval', '.cache', 'bird', 'profiles');
+
 export async function runPricing(
   read: (path: string) => string,
   log: (text: string) => void,
   provider: EmbeddingProvider,
   limit: number,
+  profileCache: string = DEFAULT_PROFILE_CACHE,
 ): Promise<void> {
   const cache = join('eval', '.cache', 'bird');
   const dev = JSON.parse(read(join(cache, 'dev', 'dev_20240627', 'dev.json'))) as DevQuestion[];
   const loadProfile = (dbId: string): DatabaseProfile => JSON.parse(
-    read(join(cache, 'profiles', `${dbId}.json`)),
+    read(join(profileCache, `${dbId}.json`)),
   ) as DatabaseProfile;
   const profiles = new Map<string, DatabaseProfile>();
   const cases: PricedCase[] = [];
@@ -371,7 +374,8 @@ export async function main(
   // Enforced before `runPricing` issues a single embed call: an over-budget or unpriceable hosted
   // dispatch spends nothing. The hash provider has no price row, so a harness proof is never blocked.
   enforceCostCeiling(provider.model, limit, ceiling);
-  await runPricing(read, log, provider, limit);
+  const profileCache = process.env.BIRD_PROFILE_CACHE ?? DEFAULT_PROFILE_CACHE;
+  await runPricing(read, log, provider, limit, profileCache);
 }
 
 if (isEntryPoint(process.argv[1])) {

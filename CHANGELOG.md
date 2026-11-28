@@ -18,6 +18,13 @@ cannot be argued with.
   model rows are cited, not guessed; no product package or `SHIPPED_SQL` changes.
 
 ### Fixed
+- **The first value-pricing dispatch exposed three data-plumbing defects a local cache hid.** Round 221
+  `fetch.mjs` reads `BIRD_SPLIT`, not `--split`, so the dispatch fetched `minidev` and missed
+  `dev.json`; `runPricing` read a developer-only `eval/.cache/bird/profiles/` path instead of the
+  generated `BIRD_DATA/.profiles/`; and the gitignored `eval/out/` did not exist for `tee`.
+  The workflow now fetches with `BIRD_SPLIT=dev`, generates profiles with a dry run, points the
+  reader at them through `BIRD_PROFILE_CACHE`, creates `eval/out`, and uses `pipefail`.
+  `runPricing` takes an injectable `profileCache` with a backward-compatible default.
 - **The value-pricing baseline now uses the product's real lexical arm, not a straw man.** Round 220
   found that `runPricing` constructed its lexical baseline with a hand-written rule requiring the
   question to name both the column and the value, while the shipped `values` arm uses

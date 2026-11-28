@@ -163,3 +163,27 @@ The workflow's `accept_cost` default (¥5) is far above the ¥0.12 projection, s
 normal dispatch proceeds; a caller can lower it to refuse an over-budget run. The
 number still is not execution accuracy: the report's note says so, and promotion to
 `SHIPPED_SQL` still needs a pre-registered threshold met in a real dispatch.
+
+## 8. What the first real dispatch found
+
+The first dispatch (`46130561111`) failed before a single embedding call — and the failure
+was not the model, the key or the cost gate. It was the data plumbing that six local
+harness proofs had concealed:
+
+- **The split flag did nothing.** `fetch.mjs` reads `BIRD_SPLIT`; passing `--split dev` was
+  ignored, so the job fetched the default `minidev` and `dev/dev_20240627/dev.json` was absent.
+  The workflow now uses `BIRD_SPLIT=dev pnpm bench:bird:fetch`, the same form `bird-dev.yml` uses.
+- **Profiles were never generated.** `runPricing` read `eval/.cache/bird/profiles/` — a directory
+  that existed on a developer machine but not in a clean checkout. Profiles are synthesised by
+  `bench:bird:dry` into `BIRD_DATA/.profiles/`. `runPricing` now takes an injectable
+  `profileCache` (defaulting to the legacy path for compatibility) and `main` reads
+  `BIRD_PROFILE_CACHE`; the workflow generates profiles with a dry run and points the reader at
+  `eval/.cache/bird/dev/dev_20240627/.profiles`.
+- **`eval/out` did not exist.** It is gitignored, so the `tee` target failed on a fresh runner.
+  The step now creates it, and `set -o pipefail` keeps a failed price from being reported as a
+  successful `tee`.
+
+This is the value of a real dispatch: it exercised seams a local cache had papered over. The
+report and artifact were still published (`if: always()`), so the failure carried its own
+evidence rather than a silent red step. No price was read and no direction was claimed from
+the failed run; the workflow was corrected and re-dispatched.

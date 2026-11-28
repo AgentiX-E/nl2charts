@@ -70,6 +70,10 @@ jobs:
       PRICING_EMBEDDING_API_KEY: ${{ inputs.secret_name == 'DEEPSEEK_API_KEY' && secrets.DEEPSEEK_API_KEY || secrets.ZHIPU_API_KEY }}
       VALUE_PRICING_LIMIT: ${{ inputs.limit }}
       VALUE_PRICING_ACCEPT_COST: ${{ inputs.accept_cost }}
+      BIRD_SPLIT: dev
+      # `bench:bird:dry` generates profiles into BIRD_DATA/.profiles; the reader must point there.
+      # The first dispatch failed because value-pricing read a local-only `eval/.cache/bird/profiles`.
+      BIRD_PROFILE_CACHE: eval/.cache/bird/dev/dev_20240627/.profiles
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -88,14 +92,23 @@ jobs:
         with:
           path: eval/.cache/bird
           key: bird-corpus-v1-${{ runner.os }}
+      # fetch.mjs reads BIRD_SPLIT, not --split; passing the flag silently fetched the default
+      # minidev split and the first dispatch failed on a missing dev/dev_20240627/dev.json.
       - name: Fetch the dev split (no-op when the cache is warm)
-        run: node eval/bird/fetch.mjs --split dev
+        run: BIRD_SPLIT=dev pnpm bench:bird:fetch
+      # Profiles are synthesised from the dev databases by the dry run and cached under BIRD_DATA;
+      # value-pricing reads that cache through BIRD_PROFILE_CACHE. No model is called here.
+      - name: Build the dev profiles the pricing reader needs (no model calls)
+        run: BIRD_SPLIT=dev pnpm bench:bird:dry
 
       # `main` builds the provider from the three PRICING_EMBEDDING_* variables above; a partial
       # config throws rather than silently falling back to the hash stand-in. The yuan ceiling is
       # enforced inside the run, before any embed call, so an over-budget dispatch spends nothing.
       - name: Price the paired arms
-        run: pnpm bench:bird:price | tee eval/out/value-pricing-report.txt
+        run: |
+          set -o pipefail
+          mkdir -p eval/out
+          pnpm bench:bird:price | tee eval/out/value-pricing-report.txt
 
       - name: Publish the report
         if: always()

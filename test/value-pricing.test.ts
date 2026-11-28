@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 import { createHashEmbeddingProvider, type DatabaseProfile } from '@agentix-e/nl2charts-ai';
 import { buildValueIndex, findValues, type ValueMatch } from '../eval/bird/values.js';
 import {
@@ -199,6 +200,26 @@ describe('runPricing (CLI seam, injected reader/logger)', () => {
     expect(report.note).toContain('NOT an accuracy claim');
   });
 
+  it('reads profiles from an injected cache directory, so a clean CI layout works', async () => {
+    // The harness proof ran locally because `eval/.cache/bird/profiles/` happened to exist. A clean
+    // checkout has profiles under `BIRD_DATA/.profiles/`, which `bench:bird:dry` generates. The CLI
+    // must let the caller name that directory rather than hardcode the local accident.
+    const seen: string[] = [];
+    await runPricing(
+      (path) => {
+        seen.push(path);
+        return path.endsWith('dev.json') ? JSON.stringify(dev) : JSON.stringify(profile);
+      },
+      () => {},
+      createHashEmbeddingProvider(),
+      10,
+      'eval/.cache/bird/dev/dev_20240627/.profiles',
+    );
+    expect(seen.some((path) => path.includes('.profiles/card_games.json'))).toBe(true);
+    // The legacy location `eval/.cache/bird/profiles/` is not used when a cache dir is injected.
+    expect(seen.some((path) => path === join('eval', '.cache', 'bird', 'profiles', 'card_games.json'))).toBe(false);
+  });
+
   it('honours the limit', async () => {
     const logs: string[] = [];
     await runPricing(
@@ -395,12 +416,15 @@ describe('CLI seams (coverage of the I/O entry without the gitignored cache)', (
       await main(reader, collect); // exercises the explicit-limit branch
       process.env.VALUE_PRICING_ACCEPT_COST = '';
       await main(reader, collect); // exercises the empty-ceiling branch
+      process.env.BIRD_PROFILE_CACHE = 'eval/.cache/bird/dev/dev_20240627/.profiles';
+      await main(reader, collect); // exercises the injected-profile-cache branch
     } finally {
       if (previous === undefined) delete process.env.VALUE_PRICING_LIMIT;
       else process.env.VALUE_PRICING_LIMIT = previous;
       delete process.env.VALUE_PRICING_ACCEPT_COST;
+      delete process.env.BIRD_PROFILE_CACHE;
     }
-    expect(logs).toHaveLength(3);
+    expect(logs).toHaveLength(4);
     for (const line of logs) expect((JSON.parse(line) as { questions: number }).questions).toBe(1);
   });
 });

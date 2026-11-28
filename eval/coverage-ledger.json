@@ -545,10 +545,10 @@
       "branches": 100
     },
     "eval/bird/value-pricing.ts": {
-      "lines": 98.96,
-      "statements": 98.96,
+      "lines": 98.97,
+      "statements": 98.97,
       "functions": 100,
-      "branches": 98.5
+      "branches": 98.57
     },
     "eval/bird/value-probe.ts": {
       "lines": 100,
