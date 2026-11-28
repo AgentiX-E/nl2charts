@@ -226,6 +226,12 @@
       "functions": 100,
       "branches": 100
     },
+    "eval/bird/fused-values.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 96.55
+    },
     "eval/bird/gap.ts": {
       "lines": 98.97,
       "statements": 98.97,

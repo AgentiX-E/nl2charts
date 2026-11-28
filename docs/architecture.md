@@ -483,6 +483,21 @@ built in a different model space. It is a candidate arm, not yet a shipped
 answer path: promotion waits on a paired reading. See the
 [semantic value retrieval guide](guide/14-semantic-value-retrieval.md).
 
+`eval/bird/fused-values.ts` closes the wire between that retriever and the
+generator. `fuseValues` merges the lexical arm's exact hits (`values.ts`) with
+the semantic arm's similarity hits under a single `table · column · value`
+identity: a value found by both is marked lexical, semantic rows are scored and
+capped per column, and column-name hits without a stored value are dropped.
+`renderFusedValues` emits the same heading-free lines the existing `values`
+arm renders, so the product's `PromptOptions.values` seam consumes either arm's
+output byte for byte — no new prompt field and no change to the product
+package. `buildFusedValueBlock` is the async entry point: it builds the index
+from the profile through the injected provider, searches, fuses, and returns the
+block with per-arm counts. This is wiring, not a result: it makes a priced
+paired dispatch possible without rewriting the generator, and does not turn the
+semantic arm on by default. See the
+[fused value grounding guide](guide/17-fused-value-grounding.md).
+
 Turning that pair into an auditable reading is the job of
 `eval/bird/value-pair-harness.ts`: it crosses `pairValueRetrieval` with the gold
 `table.column` set a question's SQL reads, splitting gains and losses into the

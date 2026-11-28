@@ -7,6 +7,22 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **A wire from semantic value retrieval to the prompt seam the generator already reads.** Round 218
+  adds `eval/bird/fused-values.ts`. The semantic retriever built in r215 had only ever been called by
+  tests — nothing turned its hits into a string a SQL prompt could consume, so three rounds of work
+  sat one hop away from the generator. `fuseValues` merges the lexical arm's exact cell matches with
+  the semantic arm's cosine hits under one `table · column · value` identity: a value named verbatim
+  in the question wins provenance, semantic rows are score-ordered and capped per column, and a
+  column-name hit without a stored value is dropped. `renderFusedValues` emits the same heading-free
+  `- t.c stores 'v'` lines as the shipped lexical renderer, so `PromptOptions.values` consumes either
+  arm byte for byte with no change to the product package. `buildFusedValueBlock` is the async entry
+  point: it builds the index through an injected `EmbeddingProvider` (any vendor or user-defined
+  provider), searches, fuses, and returns the block with per-arm counts; provider/model/dimension
+  drift and pre-aborted signals are refused downstream. 18 TDD tests, red first, no mocks — a real
+  hash provider drives the end-to-end cases, and one test asserts the fused block appears verbatim in
+  a real `buildSqlPrompt` output. Four-dimension coverage 100/100/100/96.55; eval ledger 151→152.
+  This is wiring, not a result: it makes a priced paired dispatch possible without rewriting the
+  generator, does not turn the semantic arm on by default, and changes no shipped SQL recipe.
 - **Gold fields read from the reference SQL, closing the first condition for priced pairing.** Round 217
   adds `eval/bird/gold-fields.ts`: `extractGoldFields` resolves both shapes `referencedFields` reports
   into one canonical `table.column` space — qualified `alias.column` pairs are looked up in the profile

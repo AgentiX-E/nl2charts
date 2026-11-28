@@ -193,6 +193,7 @@ Every push runs the same gates locally and in CI:
 - [Semantic value retrieval: resolve a value that is not spelled verbatim](docs/guide/14-semantic-value-retrieval.md)
 - [Pairing evidence: turn a difference into an auditable reading](docs/guide/15-pairing-evidence.md)
 - [Gold fields from the reference SQL](docs/guide/16-gold-fields.md)
+- [Fused value grounding: feed both value arms to one prompt seam](docs/guide/17-fused-value-grounding.md)
 - [Runbooks: six failures and their drills](docs/runbooks/README.md)
 - [Changelog](CHANGELOG.md)
 - [Production checklist](docs/guide/07-production.md)
