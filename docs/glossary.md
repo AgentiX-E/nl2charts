@@ -976,6 +976,9 @@ no key. It exists because the repository could inject a chat provider but had no
 embeddings — the exact gap that kept OpenSearch-SQL's cell-and-column-name value index unreproducible.
 A provider must return one vector per input text, in input order; it reorders by the endpoint's `index`
 and refuses a short batch or a dimension mismatch rather than pairing vectors to texts by position.
+A request above `batchSize` (default 64) is split into endpoint-sized calls, concatenated in input
+order with usage summed — the 64-text ceiling Zhipu embedding-3 enforces with code 1214, which a
+whole-profile value index reaches.
 
 **Hashing embedding** — A deterministic bag-of-words vector: each token is hashed into one of `dimensions`
 buckets with FNV-1a, the bucket counts are L2-normalised, and no model or network is involved. It is a

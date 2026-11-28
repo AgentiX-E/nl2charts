@@ -72,6 +72,12 @@ export interface HttpEmbeddingOptions {
   readonly dimensions?: number;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
+  /**
+   * Maximum texts in one `/embeddings` request. Defaults to 64, the limit Zhipu embedding-3
+   * publishes (code 1214 above it). A whole profile vocabulary is larger than one request, so the
+   * provider chunks rather than making every caller know the endpoint's batch ceiling.
+   */
+  readonly batchSize?: number;
   /** Attempts for a 429 or 5xx; one means no retry. */
   readonly retries?: number;
   readonly retryDelayMs?: number;
@@ -81,6 +87,8 @@ export interface HttpEmbeddingOptions {
 }
 
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+/** Zhipu embedding-3 refuses an input array above 64 (code 1214); the safe default for any OpenAI-compatible endpoint. */
+const DEFAULT_BATCH_SIZE = 64;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_RETRIES = 2;
 const DEFAULT_RETRY_DELAY_MS = 500;
@@ -144,55 +152,78 @@ export function createHttpEmbeddingProvider(options: HttpEmbeddingOptions): Embe
   const random = options.random ?? Math.random;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
+  if (!Number.isInteger(batchSize) || batchSize <= 0) {
+    throw new Error(`embedding: batchSize must be a positive integer, got ${String(batchSize)}`);
+  }
   const path = `${options.baseUrl.replace(/\/+$/, '')}/embeddings`;
+  /** One HTTP request with retries; the caller concatenates the batches. */
+  const embedBatch = async (texts: readonly string[], callOptions?: { signal?: AbortSignal }) => {
+    const body: Record<string, unknown> = { model: options.model, input: texts };
+    if (options.dimensions !== undefined) body.dimensions = options.dimensions;
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (options.apiKey !== undefined) headers.authorization = `Bearer ${options.apiKey}`;
+    let lastStatus = 0;
+    let lastBody = '';
+    for (let attempt = 0; attempt < retries; attempt += 1) {
+      if (attempt > 0) await sleep(delayFor(retryDelayMs, attempt - 1, retryJitter, random));
+      const controller = new AbortController();
+      const onAbort = () => controller.abort();
+      callOptions?.signal?.addEventListener('abort', onAbort, { once: true });
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let response: Response;
+      try {
+        response = await fetchImpl(path, {
+          method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
+        });
+      } catch (error) {
+        clearTimeout(timer);
+        callOptions?.signal?.removeEventListener('abort', onAbort);
+        if (callOptions?.signal?.aborted) throw error;
+        if (attempt === retries - 1) throw error;
+        continue;
+      }
+      clearTimeout(timer);
+      callOptions?.signal?.removeEventListener('abort', onAbort);
+      lastStatus = response.status;
+      lastBody = await response.text();
+      if (response.ok) {
+        const parsed = parseEmbeddingBody(lastBody, texts.length);
+        return parsed;
+      }
+      if (!RETRYABLE.has(response.status) || attempt === retries - 1) break;
+    }
+    throw new Error(`embedding: endpoint returned ${String(lastStatus)}: ${lastBody.slice(0, 200)}`);
+  };
   return {
     id: `http:${options.baseUrl}`,
     model: options.model,
     dimensions: options.dimensions,
     async embed(request, callOptions) {
-      // An already-aborted signal must not spend a request: `addEventListener('abort')` below
-      // fires only on a *future* abort, so without this check a pre-aborted call still goes out.
+      // An already-aborted signal must not spend a request: `addEventListener('abort')` fires only
+      // on a *future* abort, so without this check a pre-aborted call still goes out.
       if (callOptions?.signal?.aborted) throw new Error('embedding: aborted before send');
-      const body: Record<string, unknown> = { model: options.model, input: request.texts };
-      if (options.dimensions !== undefined) body.dimensions = options.dimensions;
-      const headers: Record<string, string> = { 'content-type': 'application/json' };
-      if (options.apiKey !== undefined) headers.authorization = `Bearer ${options.apiKey}`;
-      let lastStatus = 0;
-      let lastBody = '';
-      for (let attempt = 0; attempt < retries; attempt += 1) {
-        if (attempt > 0) await sleep(delayFor(retryDelayMs, attempt - 1, retryJitter, random));
-        const controller = new AbortController();
-        const onAbort = () => controller.abort();
-        callOptions?.signal?.addEventListener('abort', onAbort, { once: true });
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        let response: Response;
-        try {
-          response = await fetchImpl(path, {
-            method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal,
-          });
-        } catch (error) {
-          clearTimeout(timer);
-          callOptions?.signal?.removeEventListener('abort', onAbort);
-          if (callOptions?.signal?.aborted) throw error;
-          if (attempt === retries - 1) throw error;
-          continue;
+      const vectors: (readonly number[])[] = [];
+      let promptTokens = 0;
+      let totalTokens = 0;
+      let sawUsage = false;
+      for (let start = 0; start < request.texts.length; start += batchSize) {
+        if (callOptions?.signal?.aborted) throw new Error('embedding: aborted before send');
+        const batch = request.texts.slice(start, start + batchSize);
+        const parsed = await embedBatch(batch, callOptions);
+        vectors.push(...parsed.vectors);
+        if (parsed.usage !== undefined) {
+          sawUsage = true;
+          promptTokens += parsed.usage.promptTokens;
+          totalTokens += parsed.usage.totalTokens;
         }
-        clearTimeout(timer);
-        callOptions?.signal?.removeEventListener('abort', onAbort);
-        lastStatus = response.status;
-        lastBody = await response.text();
-        if (response.ok) {
-          const parsed = parseEmbeddingBody(lastBody, request.texts.length);
-          return {
-            vectors: parsed.vectors,
-            model: options.model,
-            dimensions: parsed.vectors[0]?.length ?? 0,
-            ...(parsed.usage === undefined ? {} : { usage: parsed.usage }),
-          };
-        }
-        if (!RETRYABLE.has(response.status) || attempt === retries - 1) break;
       }
-      throw new Error(`embedding: endpoint returned ${String(lastStatus)}: ${lastBody.slice(0, 200)}`);
+      return {
+        vectors,
+        model: options.model,
+        dimensions: vectors[0]?.length ?? 0,
+        ...(sawUsage ? { usage: { promptTokens, totalTokens } } : {}),
+      };
     },
   };
 }

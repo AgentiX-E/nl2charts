@@ -192,3 +192,23 @@ This is the value of a real dispatch: it exercised seams a local cache had paper
 report and artifact were still published (`if: always()`), so the failure carried its own
 evidence rather than a silent red step. No price was read and no direction was claimed from
 the failed run; the workflow was corrected and re-dispatched.
+
+## 9. The fourth dispatch found a product bug, not a dispatch bug
+
+`46133336880` finally got past the data plumbing and reached the embedding call. It failed
+there with `embedding: endpoint returned 400: {"code":"1214","message":"input数组最大不得超过64条"}`
+— Zhipu embedding-3 accepts at most 64 texts per request, and `buildSemanticIndex` sends a whole
+profile vocabulary in one call. Unlike the three earlier failures, this one is not in the
+workflow: `createHttpEmbeddingProvider` sent `request.texts` as a single batch, so **every** hosted
+use of a large index would fail against a 64-capped endpoint. A local hash provider never
+exercised the wire, so six harness proofs could not catch it.
+
+`createHttpEmbeddingProvider` now chunks `embed` into `batchSize` requests (default 64), sends each
+through the same retry path, concatenates vectors in input order, and sums the token usage each
+batch reports. A non-positive or fractional `batchSize` is refused at construction. The tests put a
+real HTTP server on a loopback port, send 130 texts, assert three requests of at most 64, and check
+the 130th vector still carries the 130th text's value — no stub of the code under test.
+
+This is why the dispatch was worth running. It found a defect in the shipped embedding provider
+that no amount of local harness proof could: the path from "algorithm is correct" to "works on a
+real endpoint" had one more seam, and only real HTTP crossed it.

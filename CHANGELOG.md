@@ -18,6 +18,13 @@ cannot be argued with.
   model rows are cited, not guessed; no product package or `SHIPPED_SQL` changes.
 
 ### Fixed
+- **The HTTP embedding provider now chunks batches at the endpoint's limit.** Round 221 dispatch
+  `46133336880` reached the first real embedding call and got `400 code 1214: input array must not
+  exceed 64` from Zhipu embedding-3 — `createHttpEmbeddingProvider` sent a whole profile vocabulary
+  as one request. It now splits `embed` into `batchSize` requests (default 64), reuses the retry
+  path per batch, concatenates vectors in input order and sums reported usage; an invalid
+  `batchSize` is refused at construction. Real-HTTP tests cover 130 texts in 3 batches. This is a
+  product fix: any hosted use of a large index was affected, and no hash harness proof could see it.
 - **The first value-pricing dispatch exposed three data-plumbing defects a local cache hid.** Round 221
   `fetch.mjs` reads `BIRD_SPLIT`, not `--split`, so the dispatch fetched `minidev` and missed
   `dev.json`; `runPricing` read a developer-only `eval/.cache/bird/profiles/` path instead of the

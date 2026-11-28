@@ -76,6 +76,51 @@ describe('createHttpEmbeddingProvider', () => {
     expect(endpoint.requests[0]!.body.input).toEqual(['a', 'b']);
   });
 
+  it('splits a large input into endpoint-sized batches and concatenates in request order', async () => {
+    // Zhipu embedding-3 refuses an `input` array over 64 (code 1214). `buildSemanticIndex` sends a
+    // whole profile vocabulary in one call, so the provider — not each caller — must chunk. A real
+    // HTTP server counts the requests, so a provider that still sends one oversized batch fails here.
+    const endpoint = await embeddingEndpoint((request) => {
+      const input = request.body.input as string[];
+      // Encode the text itself, not the in-batch index, so the assertion tracks global order
+      // across batches rather than each batch's local numbering.
+      return { raw: embeddingBody(input.map((text) => [Number(text.slice(1)), 1])) };
+    });
+    const provider = createHttpEmbeddingProvider({ baseUrl: endpoint.url, model: 'emb-1', batchSize: 64 });
+    const texts = Array.from({ length: 130 }, (_, index) => `v${String(index)}`);
+    const reply = await provider.embed({ texts });
+    expect(reply.vectors).toHaveLength(130);
+    expect(reply.vectors[0]).toEqual([0, 1]);
+    expect(reply.vectors[129]).toEqual([129, 1]);
+    expect(endpoint.requests).toHaveLength(3);
+    for (const request of endpoint.requests) {
+      expect((request.body.input as string[]).length).toBeLessThanOrEqual(64);
+    }
+    expect((endpoint.requests[0]!.body.input as string[])[0]).toBe('v0');
+    expect((endpoint.requests[2]!.body.input as string[]).at(-1)).toBe('v129');
+  });
+
+  it('refuses a non-positive or fractional batch size', () => {
+    // A zero batch size would loop forever and a fractional one would send a ragged request; both
+    // are configuration errors, refused at construction rather than hangs at embed time.
+    expect(() => createHttpEmbeddingProvider({ baseUrl: 'http://127.0.0.1:1/v1', model: 'm', batchSize: 0 })).toThrow(/batchSize/);
+    expect(() => createHttpEmbeddingProvider({ baseUrl: 'http://127.0.0.1:1/v1', model: 'm', batchSize: 1.5 })).toThrow(/batchSize/);
+    expect(() => createHttpEmbeddingProvider({ baseUrl: 'http://127.0.0.1:1/v1', model: 'm', batchSize: -2 })).toThrow(/batchSize/);
+  });
+
+  it('defaults the batch size to the endpoint limit when not configured', async () => {
+    const endpoint = await embeddingEndpoint((request) => {
+      const input = request.body.input as string[];
+      return { raw: embeddingBody(input.map((_, index) => [index, 1])) };
+    });
+    const provider = createHttpEmbeddingProvider({ baseUrl: endpoint.url, model: 'emb-1' });
+    await provider.embed({ texts: Array.from({ length: 65 }, (_, index) => `v${String(index)}`) });
+    // 64 is the provider limit: a default of 65 would be refused with code 1214 on the wire.
+    expect(endpoint.requests).toHaveLength(2);
+    expect((endpoint.requests[0]!.body.input as string[]).length).toBe(64);
+    expect((endpoint.requests[1]!.body.input as string[]).length).toBe(1);
+  });
+
   it('BUG GUARD: reorders a batch the endpoint returned out of order', async () => {
     const outOfOrder = JSON.stringify({
       model: 'emb-1',
