@@ -7,6 +7,19 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **Embedding-based semantic value retrieval, the first mechanism on `EmbeddingProvider`.** Round 215
+  adds `eval/bird/semantic-values.ts`: it embeds a database's column names and categorical values
+  through an injected `EmbeddingProvider` and retrieves by cosine distance, resolving a value the
+  question names in words the column does not store — the case both exact-token (`values.ts`) and
+  character-shingle (`askdata.ts`) matching miss. This is the candidate for OpenSearch-SQL's
+  cell-and-column-name index. It is injectable (any hosted provider or the deterministic offline
+  hasher), records provider id/model/dimensions and refuses a query from a different model space or
+  a dimension drift, skips empty vocabularies and stopword-only questions without a call, propagates
+  `AbortSignal`, and keeps a stable ranking with one hit per column by default. `pairValueRetrieval`
+  reports gained/lost fields for a McNemar test before any accuracy delta is quoted. 25 TDD tests at
+  100/100/100/100 four-dimension coverage on the new module; eval coverage ratchet 147 → 148 files,
+  all four dimensions at target. A candidate arm, not a shipped claim: no leaderboard number moved
+  and no model was called, ¥0.
 - **An `EmbeddingProvider` contract, completing the custom-provider guarantee.** Round 214 adds
   `packages/ai/src/embedding.ts` beside `provider.ts`: callers can now inject a custom
   `EmbeddingProvider` (with parameters and `dimensions`) against any OpenAI-compatible

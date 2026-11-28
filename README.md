@@ -189,6 +189,8 @@ Every push runs the same gates locally and in CI:
 - [Give the model definitions, not just schema](docs/guide/10-evidence.md)
 - [Infer semantics from the schema](docs/guide/11-semantics.md)
 - [Connectors: what is promised per engine](docs/guide/12-connectors.md)
+- [Embeddings: inject any `/v1/embeddings` provider](docs/guide/13-embeddings.md)
+- [Semantic value retrieval: resolve a value that is not spelled verbatim](docs/guide/14-semantic-value-retrieval.md)
 - [Runbooks: six failures and their drills](docs/runbooks/README.md)
 - [Changelog](CHANGELOG.md)
 - [Production checklist](docs/guide/07-production.md)

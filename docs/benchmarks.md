@@ -15026,6 +15026,12 @@ them: value retrieval is an HNSW index over cells and column names, which needs 
 this repository currently cannot reach; and its 69.3% was measured on GPT-4o, so a same-endpoint
 comparison has to be re-run on `deepseek-chat` and will not be that number.
 
+The first obstacle is now partially closed. Round 214 shipped the `EmbeddingProvider` contract, and
+round 215 built the first retrieval mechanism on it (`eval/bird/semantic-values.ts`): an injectable,
+offline-testable candidate that embeds cells and column names and ranks by cosine. The index and the
+paired accuracy reading are still outstanding — having a retriever is not the same as having priced
+its contribution to the 12.56pp BIRD gap — so this remains a candidate arm, not a leaderboard claim.
+
 ### The copy is behind because the parts were bought, not the pipeline
 
 The third question is the one whose answer was already in this document, written one section above

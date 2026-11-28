@@ -473,6 +473,16 @@ wire; duplicating them in a caller would price the same call twice and let the
 two copies disagree. See the [embeddings guide](guide/13-embeddings.md) for the
 three ways to obtain a provider.
 
+The first retrieval mechanism built on this contract is semantic value
+retrieval (`eval/bird/semantic-values.ts`): it embeds a database's column names
+and categorical values through the injected provider and retrieves by cosine
+distance, so a question can reach a field whose *meaning* matches even when no
+token or shingle does. It is symmetric with the chat side — no global registry,
+offline-testable with `createHashEmbeddingProvider`, and it refuses a query
+built in a different model space. It is a candidate arm, not yet a shipped
+answer path: promotion waits on a paired reading. See the
+[semantic value retrieval guide](guide/14-semantic-value-retrieval.md).
+
 ## Error model
 
 One class, closed code list, data payload:

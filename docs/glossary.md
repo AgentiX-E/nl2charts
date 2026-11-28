@@ -982,3 +982,12 @@ buckets with FNV-1a, the bucket counts are L2-normalised, and no model or networ
 real, reproducible algorithm, not a stub — but it is lexical, not semantic, so shared tokens give a
 higher cosine and nothing more is claimed for it. Its job here is to keep ordering, normalisation and
 ranking testable offline and to give a no-key deployment a working provider.
+
+**Semantic value retrieval** — Resolving a word in a question to a database column by embedding
+both the question and the column's name and values and ranking by cosine distance, rather than by
+an exact token (`values.ts`) or character-shingle (`askdata.ts`) match. The candidate mechanism in
+`eval/bird/semantic-values.ts` is the first consumer of `EmbeddingProvider`; it is injectable,
+offline-testable with the hashing provider, and refuses a query from a different model space. It is
+a paired, priced candidate, not a shipped accuracy claim: `pairValueRetrieval` reports the fields
+one retriever found and the other missed, which is the input a McNemar test needs before the arm is
+promoted.
