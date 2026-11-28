@@ -182,6 +182,11 @@ harness proofs had concealed:
 - **`eval/out` did not exist.** It is gitignored, so the `tee` target failed on a fresh runner.
   The step now creates it, and `set -o pipefail` keeps a failed price from being reported as a
   successful `tee`.
+- **The default arm chain needs the training archive.** The second dispatch reached the dry run
+  and failed there: the default chain includes retrieval arms (`inline+icl`, `inline+evidence`, ...)
+  that read the 8.5 GB training split. Profiles are synthesised before the arm loop, so the step
+  now runs `BIRD_ARMS=names BIRD_SPLIT=dev pnpm bench:bird:dry` — `names` needs no training and
+  still produces every profile the reader needs.
 
 This is the value of a real dispatch: it exercised seams a local cache had papered over. The
 report and artifact were still published (`if: always()`), so the failure carried its own

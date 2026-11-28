@@ -24,7 +24,9 @@ cannot be argued with.
   generated `BIRD_DATA/.profiles/`; and the gitignored `eval/out/` did not exist for `tee`.
   The workflow now fetches with `BIRD_SPLIT=dev`, generates profiles with a dry run, points the
   reader at them through `BIRD_PROFILE_CACHE`, creates `eval/out`, and uses `pipefail`.
-  `runPricing` takes an injectable `profileCache` with a backward-compatible default.
+  The profile step runs `BIRD_ARMS=names` because the default arm chain needs the 8.5 GB
+  training split that a pricing dispatch does not fetch. `runPricing` takes an injectable
+  `profileCache` with a backward-compatible default.
 - **The value-pricing baseline now uses the product's real lexical arm, not a straw man.** Round 220
   found that `runPricing` constructed its lexical baseline with a hand-written rule requiring the
   question to name both the column and the value, while the shipped `values` arm uses
