@@ -7,6 +7,27 @@ cannot be argued with.
 ## Unreleased
 
 ### Added
+- **Gold fields read from the reference SQL, closing the first condition for priced pairing.** Round 217
+  adds `eval/bird/gold-fields.ts`: `extractGoldFields` resolves both shapes `referencedFields` reports
+  into one canonical `table.column` space — qualified `alias.column` pairs are looked up in the profile
+  to restore canonical spelling (never borrowing a column from another table), and bare quoted
+  identifiers are resolved against the tables the statement reads, so SQL keywords drop out for free
+  and an ambiguous name expands across every owning table. A qualified pair with no profile row (a
+  CTE column) is kept lower-cased rather than dropped or invented. `canonicalColumn` and
+  `resolveBareColumns` are the two primitives; `goldKeys` returns the set `classifyCase` consumes.
+  `eval/bird/gold-pairing.ts` assembles the per-question export: `buildGoldPairRow` cross-references
+  canonical gold, canonicalised retrieval arms and the six-bucket split from r216, keeping the exact
+  and semantic key lists for audit; `renderGoldPairRows` prints the per-question confirmed/spurious
+  split and `toSummary` aggregates with `summarizeClassifications`. On the first 60 cached BIRD dev
+  questions with the offline lexical arms, replacing approximate gold with SQL gold flipped
+  `confirmedGain` from a large positive to **−42** (170 spurious gains, 293 gold fields) — the concrete
+  demonstration that a headline gain against approximate gold was the gap between two approximations.
+  This is a harness proof only: the CLI prints `HARNESS PROOF ONLY`, makes no model call, and is not a
+  priced signal; conditions 2 and 3 (real provider + paired McNemar with a pre-registered threshold)
+  still belong to a priced dispatch. 42 TDD tests (red first) — gold-fields 20 at 100/100/100/100,
+  gold-pairing 22 at 98.33/98.33/100/96.87 four dimensions; eval coverage ratchet 149 → 151 files,
+  `gate:all` green with all 151 files at target. English docs: new guide/16, architecture gold-fields
+  section, glossary, README (adds guide 16 index).
 - **A field-level pairing harness that turns a retriever difference into an auditable reading.** Round 216
   adds `eval/bird/value-pair-harness.ts`: `classifyPair` crosses r215's `pairValueRetrieval` with the
   gold `table.column` set a question's SQL reads, splitting gains and losses into confirmed (gold

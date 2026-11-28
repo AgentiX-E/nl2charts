@@ -493,6 +493,21 @@ the hash provider, so a positive confirmed gain is a structural result, never an
 accuracy claim. Pricing remains the shipment gate's job on a real paired
 dispatch. See the [pairing evidence guide](guide/15-pairing-evidence.md).
 
+The gold side of that pairing is now read from the reference SQL rather than approximated from the
+question text. `eval/bird/gold-fields.ts` resolves both shapes `referencedFields` reports —
+qualified `alias.column` pairs whose alias is already resolved, and bare quoted identifiers that
+still need the profile — into one canonical `table.column` space. Qualified pairs are looked up in
+the profile to restore canonical spelling; bare names are resolved against the tables the statement
+reads, so SQL keywords drop out for free and an ambiguous name expands across every owning table.
+A qualified pair with no profile row (a CTE column) is kept lower-cased rather than dropped or
+invented. `eval/bird/gold-pairing.ts` assembles the per-question export: canonical gold, canonicalised
+retrieval arms, and the six-bucket split from `classifyCase`, with the exact and semantic key lists
+kept for audit. Running it on cached BIRD questions with the offline lexical arms is a **harness
+proof** — it flipped an earlier naive `confirmedGain` from positive to −42 once gold became real,
+which is exactly why approximate gold was not trustworthy. It is deterministic, makes no model call,
+and is not a priced signal; pricing still needs a real paired dispatch through the Org-secret
+workflow. See the [gold fields guide](guide/16-gold-fields.md).
+
 ## Error model
 
 One class, closed code list, data payload:

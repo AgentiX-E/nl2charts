@@ -1002,3 +1002,13 @@ and stably sorted, and aggregates them with per-question coverage and a divide-b
 a harness proof, not a price: the offline semantic arm is a lexical hash stand-in, so a positive
 confirmed gain proves the apparatus runs, not that semantic retrieval beats exact retrieval. A
 verdict needs the shipment gate on a real paired dispatch.
+
+**Gold fields** — The `table.column` set a question's reference SQL actually reads, used as the
+denominator for pairing evidence. `extractGoldFields` reads it from the SQL through `referencedFields`,
+resolving both qualified `alias.column` pairs and bare quoted identifiers against the profile into one
+canonical space. This matters because an approximate gold built from question words can report a
+confident but false gain: on 60 cached BIRD dev questions, switching from approximate gold to SQL gold
+flipped the offline lexical arm's `confirmedGain` from large positive to −42, showing the earlier number
+was the gap between two approximations. Gold from the SQL is a deterministic, offline reading — it is
+not itself a price or a model call; a priced verdict still needs a real paired dispatch. See the
+[gold fields guide](guide/16-gold-fields.md).

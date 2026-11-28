@@ -238,6 +238,18 @@
       "functions": 100,
       "branches": 97.8
     },
+    "eval/bird/gold-fields.ts": {
+      "lines": 100,
+      "statements": 100,
+      "functions": 100,
+      "branches": 100
+    },
+    "eval/bird/gold-pairing.ts": {
+      "lines": 98.33,
+      "statements": 98.33,
+      "functions": 100,
+      "branches": 96.87
+    },
     "eval/bird/information.ts": {
       "lines": 99.19,
       "statements": 99.19,
